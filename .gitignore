@@ -2,7 +2,9 @@
 .vscode/
 cmake-build-debug/
 cmake-build-release/
+bin/
 assets/*/*
 !assets/maps/*
 !assets/img/*
 !assets/shaders/*
+!assets/config/*
