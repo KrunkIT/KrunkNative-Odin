@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:strings"
 
 DEFAULT_MAP_NAMES := [?]string{
 	"burg",
@@ -59,7 +60,7 @@ load_default_map :: proc(index: int) -> ^Map {
 		return g_maps[index]
 	}
 
-	path := fmt.tprintf("%smaps/%s.json", assets_path(), DEFAULT_MAP_NAMES[index])
+	path := strings.concatenate({assets_path(), "maps/", DEFAULT_MAP_NAMES[index], ".json"})
 	defer delete(path)
 
 	map_inst, ok := map_load_from_file(path)
