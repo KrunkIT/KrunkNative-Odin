@@ -21,6 +21,7 @@ CONFIG_GAME_PATH :: "assets/config/game.toml"
 weapon_config_names := [?]string{
 	"awp", "ak47", "pistol", "smg", "revolver", "shotgun",
 	"lmg", "semi", "rpg", "akimbo", "deagle", "alien", "knife",
+	"", "famas",
 }
 
 // Section names map config keys to stable class indices (CLASSES_LIST order).
@@ -32,7 +33,7 @@ class_config_names := [?]string{
 
 weapon_config_index :: proc(name: string) -> int {
 	for n, i in weapon_config_names {
-		if n == name {
+		if len(n) > 0 && n == name {
 			return i
 		}
 	}
@@ -73,6 +74,9 @@ config_load_gameplay :: proc(config_path := CONFIG_GAME_PATH) -> ^Gameplay_Confi
 	config.weapon_storage = make([]Weapon, len(WEAPONS_LIST), allocator)
 	config.weapons = make([]^Weapon, len(WEAPONS_LIST), allocator)
 	for default_weapon, id in WEAPONS_LIST {
+		if default_weapon == nil {
+			continue
+		}
 		config.weapon_storage[id] = config_clone_weapon(default_weapon, allocator)
 		config.weapons[id] = &config.weapon_storage[id]
 	}
@@ -155,7 +159,7 @@ config_apply_toml :: proc(config: ^Gameplay_Config, source: string) -> bool {
 
 		for section_name, section_table in weapons_table.tables {
 			id := weapon_config_index(section_name)
-			if id < 0 {
+			if id < 0 || id >= len(config.weapons) || config.weapons[id] == nil {
 				fmt.eprintf("config: unknown weapon section %q\n", section_name)
 				continue
 			}

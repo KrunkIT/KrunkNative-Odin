@@ -583,17 +583,23 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	}
 
 	reload_mlt: f32 = third_person ? 0.4 : 1.0
+	// The camera already receives local recoil. Applying the same pitch to the
+	// first-person mesh cancels the weapon kick in camera space.
+	mesh_recoil_pitch := player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt
+	if player.render_you && !third_person {
+		mesh_recoil_pitch = 0
+	}
 
 	player_mesh.upper_body_anchor.rotation.x = bob_anim_y * -0.2 + land_bob_ya + reload_anim * (reload_mlt * -2.8) +
 		player.direction.x * (player.render_you && !third_person ? 1.0 : 0.5) +
-		(-math.PI * 0.25 * swap_anim + player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt) +
+		(-math.PI * 0.25 * swap_anim + mesh_recoil_pitch) +
 		(player.weapon.y_rotation != 0 ? player.weapon.y_rotation : 0.0)
 
 	player_mesh.upper_body_anchor.rotation.y = reload_anim * -reload_mlt
 	player_mesh.upper_body_anchor.rotation.z = 0.35 * weapon_rotation
 
 	player_mesh.upper_body_anchor.position.x = 0.0
-	player_mesh.upper_body_anchor.position.z = 0.0
+	player_mesh.upper_body_anchor.position.z = player.render_you && !third_person ? player.recoil_anim_y * 0.08 * recoil_mlt : 0.0
 	player_mesh.upper_body_anchor.position.y = player.recoil_anim_y * (player.weapon.recoil_y_mlt != 0 ? player.weapon.recoil_y_mlt : 0.3) * recoil_y_mlt + (player.render_you && !third_person ? player.height : shared.GAME_CONSTANTS.player_height) - shared.GAME_CONSTANTS.camera_height - shared.GAME_CONSTANTS.leg_height
 
 	if player.loadout_index < 0 || player.loadout_index >= i32(len(player_mesh.arms)) || player_mesh.arms[player.loadout_index] == nil {

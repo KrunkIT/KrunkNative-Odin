@@ -56,7 +56,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	defer delete(composed)
 
 	for weapon_id in class.loadout {
-		if weapon_id >= 0 && weapon_id < i32(len(weapons)) {
+		if weapon_id >= 0 && weapon_id < i32(len(weapons)) && weapons[weapon_id] != nil {
 			append(&composed, weapon_id)
 		}
 	}
@@ -64,7 +64,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	has_secondary := false
 	has_melee := false
 	for weapon_id in composed {
-		if int(weapon_id) < len(weapons) {
+		if weapon_id >= 0 && int(weapon_id) < len(weapons) && weapons[weapon_id] != nil {
 			if weapons[weapon_id].secondary {
 				has_secondary = true
 			}
@@ -76,14 +76,14 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 
 	if class.secondary && !has_secondary {
 		// Pistol is the default sidearm (index 2 in the weapon registry).
-		if 2 < len(weapons) {
+		if 2 < len(weapons) && weapons[2] != nil {
 			append(&composed, 2)
 		}
 	}
 
 	if !has_melee {
 		// Combat Knife is the default melee (index 12 in the weapon registry).
-		if 12 < len(weapons) {
+		if 12 < len(weapons) && weapons[12] != nil {
 			append(&composed, 12)
 		}
 	}
@@ -628,10 +628,6 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		}
 	}
 
-	if !recon {
-		player_update_recoil(player, delta)
-	}
-
 	player.last_position = player.position
 
 	if player.weapon.no_aim && player.aim_val > 0.0 {
@@ -855,7 +851,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		}
 
 		if player.weapon != nil && !move_lock {
-			will_shoot := player.weapon.burst_count != 0 || !player.weapon.no_auto && input.shoot
+			will_shoot := player.burst_count != 0 || !player.weapon.no_auto && input.shoot
 
 			if player.did_shoot && !input.shoot {
 				player.did_shoot = false
@@ -877,6 +873,11 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 				}
 			}
 		}
+	}
+
+	// Advance recoil after firing so a new shot is visible in this frame.
+	if !recon {
+		player_update_recoil(player, delta)
 	}
 
 	if !move_lock && player.wall_jump && !player.on_ground && !player.on_ladder && player.on_wall != 0 && player.game.config.wall_jump > 0.0 {
@@ -1001,10 +1002,6 @@ player_shoot :: proc(player: ^Player) {
 				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
 					continue
 				}
-				if player.game.is_local && object.mesh == nil {
-					continue
-				}
-
 				t, normal, hit := ray_box_hit(shot_origin, shot_dir, object.position, object.scale)
 				if hit && t < nearest_t {
 					nearest_t = t

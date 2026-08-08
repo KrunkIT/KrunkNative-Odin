@@ -119,6 +119,20 @@ test_gameplay_config :: proc() -> bool {
 		return false
 	}
 
+	famas_index := shared.weapon_config_index("famas")
+	commando_index := shared.class_config_index("commando")
+	famas_ok :=
+		famas_index == 14 && commando_index == 12 &&
+		config.weapons[13] == nil && config.weapons[famas_index] != nil &&
+		config.weapons[famas_index].burst && config.weapons[famas_index].no_auto &&
+		config.weapons[famas_index].burst_count == 3 &&
+		len(config.classes[commando_index].loadout) > 0 &&
+		config.classes[commando_index].loadout[0] == i32(famas_index)
+	if !famas_ok {
+		fmt.eprintln("Commando Famas config test failed")
+		return false
+	}
+
 	weapon_default_damage := shared.WEAPONS_LIST[0].damage
 	class_default_name := shared.CLASSES_LIST[0].name
 
@@ -172,6 +186,127 @@ loadout = ["ak47", "deagle", "knife"]
 	}
 
 	fmt.println("Gameplay config tests OK")
+	return true
+}
+
+test_famas_burst :: proc() -> bool {
+	map_inst := shared.Map{death_y = -100}
+	game := shared.Game{}
+	maps := []^shared.Map{&map_inst}
+	shared.game_configure(&game, nil, maps, nil, nil, nil)
+	shared.game_init(&game, 0, 0, true)
+	defer shared.game_destroy(&game)
+
+	player := shared.player_init(&game)
+	shared.game_players_add(&game, player)
+	shared.player_spawn(player, 12)
+	player.swap_timer = 0
+
+	if player.weapon != game.weapons[14] || player.weapon == nil {
+		fmt.eprintln("Commando did not spawn with Famas")
+		return false
+	}
+
+	input := shared.Input{move_dir = -1, shoot = true}
+	shot_seq_before := player.shot_seq
+	ammo_before := player.ammo[player.loadout_index]
+	for _ in 0 ..< 50 {
+		input.delta = 0.01
+		shared.player_proc_input(player, &input, false, false)
+	}
+
+	// Keeping the trigger held after shot three must not begin another burst.
+	three_shots_ok :=
+		player.shot_seq == shot_seq_before + 3 &&
+		player.ammo[player.loadout_index] == ammo_before - 3 &&
+		player.burst_count == 0
+	if !three_shots_ok {
+		fmt.eprintf("Famas burst test failed: shots=%d ammo=%d burst_remaining=%d\n", player.shot_seq - shot_seq_before, player.ammo[player.loadout_index], player.burst_count)
+		return false
+	}
+
+	input.shoot = false
+	input.delta = 0.01
+	shared.player_proc_input(player, &input, false, false)
+	input.shoot = true
+	input.delta = 0.01
+	shared.player_proc_input(player, &input, false, false)
+	if player.shot_seq != shot_seq_before + 4 || player.burst_count != 2 {
+		fmt.eprintln("Famas did not start a new burst after trigger release")
+		return false
+	}
+
+	fmt.println("Famas burst tests OK")
+	return true
+}
+
+test_shot_feedback :: proc() -> bool {
+	wall := shared.Object{
+		active = true,
+		collision_type = .BOX,
+		position = {20, 0, 0},
+		scale = {2, 100, 100},
+	}
+	map_inst := shared.Map{death_y = -100}
+	append(&map_inst.objects, &wall)
+	defer delete(map_inst.objects)
+
+	game := shared.Game{}
+	maps := []^shared.Map{&map_inst}
+	shared.game_configure(&game, nil, maps, nil, nil, nil)
+	shared.game_init(&game, 0, 0, true)
+	defer shared.game_destroy(&game)
+
+	player := shared.player_init(&game)
+	shared.game_players_add(&game, player)
+	shared.player_spawn(player)
+	player.swap_timer = 0
+	player.position = {0, 0, 0}
+	player.direction = {0, -math.PI / 2.0}
+
+	ammo_before := player.ammo[player.loadout_index]
+	shot_seq_before := player.shot_seq
+	input := shared.Input{
+		move_dir = -1,
+		delta = 1.0 / 60.0,
+		x_dir = player.direction.x,
+		y_dir = player.direction.y,
+		shoot = true,
+	}
+	shared.player_proc_input(player, &input, false, false)
+
+	shot_ok :=
+		ammo_before > 0 &&
+		player.ammo[player.loadout_index] == ammo_before - 1 &&
+		player.shot_seq == shot_seq_before + 1
+	recoil_ok := player.recoil_force > 0 && player.recoil_anim > 0 && player.recoil_anim_y > 0
+	impact_ok := len(game.impacts) == 1 && game.impacts[0].normal == shared.Vec3{-1, 0, 0}
+	if !shot_ok || !recoil_ok || !impact_ok {
+		fmt.printf(
+			"Shot feedback test failed: shot=%v recoil=%v impact=%v ammo=%d->%d seq=%d->%d force=%f anim=%f anim_y=%f impacts=%d active=%v model=%v melee=%v no_auto=%v swap=%f reload=%f did_shoot=%v\n",
+			shot_ok,
+			recoil_ok,
+			impact_ok,
+			ammo_before,
+			player.ammo[player.loadout_index],
+			shot_seq_before,
+			player.shot_seq,
+			player.recoil_force,
+			player.recoil_anim,
+			player.recoil_anim_y,
+			len(game.impacts),
+			player.active,
+			game.map_inst.config.model,
+			player.weapon.melee,
+			player.weapon.no_auto,
+			player.swap_timer,
+			player.reloads[player.loadout_index],
+			player.did_shoot,
+		)
+		return false
+	}
+
+	fmt.println("Shot feedback tests OK")
 	return true
 }
 

@@ -192,6 +192,49 @@ picker uses the standard nine-class pool, while every configured class remains a
 | `src/tests/` | Configuration and movement parity tests |
 | `assets/` | Maps, shaders, gameplay configuration, and local runtime assets |
 
+
+## Roadmap
+
+The immediate goal is a functional, playable game state. The roadmap is ordered by dependency;
+later phases are intentionally broad and may change as the project and community develop.
+
+### Phase 1: Playable core
+
+- [ ] Make the main mode work like Krunker Hardpoint.
+- [ ] Complete the four-site objective cycle.
+- [ ] Add round progression after each cycle, with best-of-three match resolution.
+- [ ] Make weapon tracers and bullet impacts on walls reliable.
+- [ ] Add focused tests for objective rotation, scoring, rounds, and projectile impacts.
+
+### Phase 2: Multiplayer foundation
+
+- [ ] Move networking from TCP to UDP using Odin ENet bindings.
+- [ ] Preserve authoritative server behavior while handling packet loss, ordering, and reconnects.
+- [ ] Profile and optimize the simulation and renderer for larger matches and future content.
+- [ ] Replay system for viewing and sharing game sessions.
+
+### Phase 3: Presentation and customization
+
+- [ ] Add basic lighting and improved shaders.
+- [ ] Implement more of the live game's customization, specifically the ingame visual settings.
+- [ ] Keep content data-driven so new customization does not require gameplay-code changes.
+
+### Phase 4: Extensibility
+
+- [ ] **Exploratory:** investigate an in-game developer console using Odin Lua bindings.
+- [ ] Define permissions and build-mode restrictions before exposing scripting in multiplayer.
+- [ ] **Exploratory:** A proper map editor.
+
+### Phase 5: Platform and networking experiments
+
+- [ ] **Exploratory:** evaluate macOS support through Odin's Darwin bindings if community interest justifies the maintenance cost.
+- [ ] **Exploratory:** investigate GGPO-style peer-to-peer support for private sessions after the simulation is deterministic and rollback-friendly.
+- [ ] **Exploratory:** evaluate anti-cheat measures after authoritative networking is stable, starting with server validation, trusted state, and abuse reporting.
+
+### Phase 6: Future content 
+- [ ] Ranked ladder / tournament tooling
+- [ ] Purely dedicated server binaries the community can run well, themselves.
+
 ## Acknowledgements
 
 - [Odin](https://odin-lang.org/) - the language and standard library, including vendor bindings

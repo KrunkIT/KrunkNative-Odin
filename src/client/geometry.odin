@@ -758,6 +758,10 @@ resource_cache_fini :: proc() {
 		gl.DeleteTextures(1, &g_blank_texture)
 		g_blank_texture = 0
 	}
+	if g_impact_texture != 0 {
+		gl.DeleteTextures(1, &g_impact_texture)
+		g_impact_texture = 0
+	}
 
 	if basic_shader_program != 0 {
 		gl.DeleteProgram(basic_shader_program)

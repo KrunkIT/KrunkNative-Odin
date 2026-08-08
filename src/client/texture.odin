@@ -17,6 +17,8 @@ Texture_Manager :: struct {
 	fallback: u32,
 }
 
+g_impact_texture: u32
+
 texture_manager_init :: proc() -> Texture_Manager {
 	tm: Texture_Manager
 	tm.textures = make(map[u32]u32)
@@ -75,7 +77,49 @@ upload_rgba_texture :: proc(pixels: []u8, width, height: i32) -> u32 {
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, &pixels[0])
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 	gl.BindTexture(gl.TEXTURE_2D, 0)
+	g_active_texture = 0
 	return tex_id
+}
+
+impact_texture_get :: proc() -> u32 {
+	if g_impact_texture != 0 {
+		return g_impact_texture
+	}
+
+	size :: 64
+	pixels := make([]u8, size * size * 4)
+	defer delete(pixels)
+
+	for y := 0; y < size; y += 1 {
+		for x := 0; x < size; x += 1 {
+			dx := (f32(x) + 0.5) / (f32(size) * 0.5) - 1.0
+			dy := (f32(y) + 0.5) / (f32(size) * 0.5) - 1.0
+			radius := math.sqrt(dx * dx + dy * dy)
+			angle := math.atan2(dy, dx)
+			edge := 0.88 + 0.05 * math.sin(angle * 7.0) + 0.025 * math.sin(angle * 13.0 + 0.7)
+
+			shade: u8
+			alpha: u8
+			if radius < edge {
+				fade := clamp((edge - radius) / 0.08, 0.0, 1.0)
+				if radius > edge - 0.18 {
+					shade = 82
+				} else {
+					shade = 18
+				}
+				alpha = u8(235.0 * fade)
+			}
+
+			idx := (y * size + x) * 4
+			pixels[idx + 0] = shade
+			pixels[idx + 1] = u8(f32(shade) * 0.9)
+			pixels[idx + 2] = u8(f32(shade) * 0.78)
+			pixels[idx + 3] = alpha
+		}
+	}
+
+	g_impact_texture = upload_rgba_texture(pixels, size, size)
+	return g_impact_texture
 }
 
 // 0: Wall (Sandstone plaster with subtle brick joints)

@@ -615,7 +615,8 @@ client_update_impact_billboard :: proc(marker: ^Impact_Marker, camera: ^Camera) 
 	}
 
 	facing := to_camera / distance
-	marker.mesh.transform.position = marker.position + facing * 0.02
+	depth_offset := clamp(distance * distance * 0.000001, 0.04, 0.5)
+	marker.mesh.transform.position = marker.position + facing * depth_offset
 	marker.mesh.transform.rotation_order = .EXTRINSIC
 	// The shared plane faces +Y, so rotate +Y onto the camera direction.
 	marker.mesh.transform.rotation.x = math.atan2(math.sqrt(facing.x * facing.x + facing.z * facing.z), facing.y)
@@ -630,7 +631,9 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 			continue
 		}
 
-		material.color = shared.Vec4{0.045, 0.04, 0.035, 1.0}
+		material.base.transparent = true
+		material.color = shared.Vec4{1.0, 1.0, 1.0, 1.0}
+		material.texture = impact_texture_get()
 
 		mesh := mesh_init(create_plane_geo(), &material.base)
 		mesh.transform.position = impact.position
