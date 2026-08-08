@@ -106,6 +106,19 @@ test_gameplay_config :: proc() -> bool {
 		return false
 	}
 
+	spray_index := shared.class_config_index("spray_n_pray")
+	lmg_index := shared.weapon_config_index("lmg")
+	spray_loadout_ok :=
+		spray_index >= 0 && lmg_index >= 0 &&
+		len(shared.CLASSES_LIST[spray_index].loadout) > 0 &&
+		shared.CLASSES_LIST[spray_index].loadout[0] == i32(lmg_index) &&
+		len(config.classes[spray_index].loadout) > 0 &&
+		config.classes[spray_index].loadout[0] == i32(lmg_index)
+	if !spray_loadout_ok {
+		fmt.eprintln("Spray N Pray LMG loadout test failed")
+		return false
+	}
+
 	weapon_default_damage := shared.WEAPONS_LIST[0].damage
 	class_default_name := shared.CLASSES_LIST[0].name
 
@@ -272,8 +285,12 @@ test_objective_combat_state :: proc() -> bool {
 	player_one.position = {10, 0, 0}
 	player_one.health = f32(player_one.max_health)
 	health_before_shot := player_one.health
+	shot_seq_before := player_two.shot_seq
+	recoil_before := player_two.recoil_force
 	shared.player_shoot(player_two)
-	if player_one.health >= health_before_shot {
+	if player_one.health >= health_before_shot ||
+	   player_two.shot_seq != shot_seq_before + 1 ||
+	   player_two.recoil_force <= recoil_before {
 		fmt.eprintln("Authoritative player hitscan test failed")
 		return false
 	}
@@ -316,13 +333,15 @@ test_objective_combat_state :: proc() -> bool {
 		max_health = 90,
 		weapon_id = 7,
 		active_ammo = 5,
+		shot_seq = 17,
 		ack_seq = 42,
 	}
 	player_packet_size := shared.packet_serialize_state(buf[:], &player_state)
 	header_payload_size, _ := endian.get_u16(buf[5:7], .Little)
 	wire_ammo, _ := endian.get_u32(buf[80:84], .Little)
-	wire_ack, _ := endian.get_i32(buf[84:88], .Little)
-	if player_packet_size != 88 || header_payload_size != shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE || buf[79] != player_state.weapon_id || wire_ammo != player_state.active_ammo || wire_ack != player_state.ack_seq {
+	wire_shot_seq, _ := endian.get_u32(buf[84:88], .Little)
+	wire_ack, _ := endian.get_i32(buf[88:92], .Little)
+	if player_packet_size != 92 || header_payload_size != shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE || buf[79] != player_state.weapon_id || wire_ammo != player_state.active_ammo || wire_shot_seq != player_state.shot_seq || wire_ack != player_state.ack_seq {
 		fmt.eprintln("Player-state fixed wire layout test failed")
 		return false
 	}
@@ -333,6 +352,23 @@ test_objective_combat_state :: proc() -> bool {
 	}
 	if _, malformed_ok := shared.packet_deserialize_state(buf[:player_packet_size - 4]); malformed_ok {
 		fmt.eprintln("Truncated player-state rejection test failed")
+		return false
+	}
+
+	impact := shared.Bullet_Impact{
+		position = {1.25, -2.5, 3.75},
+		normal = {0, 0, 1},
+	}
+	impact_packet_size := shared.packet_serialize_bullet_impact(buf[:], &impact)
+	decoded_impact, decoded_impact_ok := shared.packet_deserialize_bullet_impact(buf[:impact_packet_size])
+	if !decoded_impact_ok ||
+	   impact_packet_size != shared.PACKET_HEADER_SIZE + shared.PACKET_BULLET_IMPACT_PAYLOAD_SIZE ||
+	   decoded_impact != impact {
+		fmt.eprintln("Bullet-impact packet round-trip test failed")
+		return false
+	}
+	if _, malformed_impact_ok := shared.packet_deserialize_bullet_impact(buf[:impact_packet_size - 1]); malformed_impact_ok {
+		fmt.eprintln("Truncated bullet-impact rejection test failed")
 		return false
 	}
 

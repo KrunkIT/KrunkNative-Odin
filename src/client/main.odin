@@ -381,6 +381,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 	}
 
 	was_active := player.active
+	previous_shot_seq := player.shot_seq
 	if player.class_index != state.class_id {
 		if player.mesh != nil {
 			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
@@ -460,6 +461,16 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 	if !weapon_found {
 		fmt.eprintf("[Net Client] Rejected weapon %d outside player %d loadout\n", state.weapon_id, state.player_id)
 		return
+	}
+	new_shots: u32
+	if was_active && state.active && state.shot_seq > previous_shot_seq {
+		// Cap a pathological jump while still preserving the authoritative
+		// sequence value, so a malformed snapshot cannot create an unbounded loop.
+		new_shots = min(state.shot_seq - previous_shot_seq, u32(16))
+	}
+	player.shot_seq = state.shot_seq
+	for _ in 0 ..< int(new_shots) {
+		shared.player_apply_recoil(player)
 	}
 
 	if state.active && (!was_active || player.mesh == nil) {
@@ -596,6 +607,22 @@ client_update_objective_visuals :: proc(client: ^Client, now: f32) {
 	}
 }
 
+client_update_impact_billboard :: proc(marker: ^Impact_Marker, camera: ^Camera) {
+	to_camera := camera.position - marker.position
+	distance := math.sqrt(to_camera.x * to_camera.x + to_camera.y * to_camera.y + to_camera.z * to_camera.z)
+	if distance <= 0.0001 {
+		return
+	}
+
+	facing := to_camera / distance
+	marker.mesh.transform.position = marker.position + facing * 0.02
+	marker.mesh.transform.rotation_order = .EXTRINSIC
+	// The shared plane faces +Y, so rotate +Y onto the camera direction.
+	marker.mesh.transform.rotation.x = math.atan2(math.sqrt(facing.x * facing.x + facing.z * facing.z), facing.y)
+	marker.mesh.transform.rotation.y = math.atan2(facing.x, facing.z)
+	marker.mesh.transform.rotation.z = 0
+}
+
 client_tick_impacts :: proc(client: ^Client, delta: f32) {
 	for impact in client.game.impacts {
 		material := basic_material_init()
@@ -606,29 +633,21 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 		material.color = shared.Vec4{0.045, 0.04, 0.035, 1.0}
 
 		mesh := mesh_init(create_plane_geo(), &material.base)
-		mesh.transform.position = impact.position + impact.normal * 0.02
-		mesh.transform.scale = shared.Vec3{0.16, 0.01, 0.16}
-
-		// Plane geometry faces +Y. Rotate it onto the hit face normal.
-		if impact.normal.x > 0 {
-			mesh.transform.rotation.z = -math.PI * 0.5
-		} else if impact.normal.x < 0 {
-			mesh.transform.rotation.z = math.PI * 0.5
-		} else if impact.normal.z > 0 {
-			mesh.transform.rotation.x = math.PI * 0.5
-		} else if impact.normal.z < 0 {
-			mesh.transform.rotation.x = -math.PI * 0.5
-		} else if impact.normal.y < 0 {
-			mesh.transform.rotation.x = math.PI
-		}
+		mesh.transform.position = impact.position
+		mesh.transform.scale = shared.Vec3{0.32, 0.01, 0.32}
 
 		scene_add_mesh(client.scene, mesh)
-		append(&client.impact_markers, Impact_Marker{mesh = mesh, lifetime = 8.0})
+		append(&client.impact_markers, Impact_Marker{
+			mesh = mesh,
+			position = impact.position,
+			lifetime = 8.0,
+		})
 	}
 	clear(&client.game.impacts)
 
 	for i := len(client.impact_markers) - 1; i >= 0; i -= 1 {
 		marker := &client.impact_markers[i]
+		client_update_impact_billboard(marker, &client.camera)
 		marker.lifetime -= delta
 
 		if marker.lifetime <= 0 {
@@ -931,6 +950,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		for player in client.game.players {
 			if player.active {
 				player.idle_anim += shared.GAME_CONSTANTS.idle_anim_speed * delta
+				shared.player_update_recoil(player, delta)
 				if player != client.me {
 					shared.player_interpolate(player, delta)
 				}
@@ -941,7 +961,6 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		}
 	}
 	client_update_objective_visuals(client, now)
-	client_tick_impacts(client, delta)
 
 	// Camera and view-model transforms must use the state produced by this
 	// frame's input, otherwise fast mouse movement makes the gun trail and jump.
@@ -965,6 +984,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			player_update_meshes(client.me, false)
 		}
 	}
+	client_tick_impacts(client, delta)
 
 	client_tick_textures(client, now)
 

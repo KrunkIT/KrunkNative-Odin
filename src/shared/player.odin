@@ -108,6 +108,10 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.velocity = Vec3{0, 0, 0}
 	player.crouch_val = 0.0
 	player.aim_val = 0.0
+	player.recoil = {}
+	player.recoil_force = 0.0
+	player.recoil_anim = 0.0
+	player.recoil_anim_y = 0.0
 
 	player.on_ground = true
 	player.on_wall = 0
@@ -541,6 +545,39 @@ player_reload :: proc(player: ^Player) {
 	player.burst_count = 0
 }
 
+player_apply_recoil :: proc(player: ^Player) {
+	if player == nil || player.weapon == nil {
+		return
+	}
+
+	player.recoil_force += player.weapon.recoil
+
+	rand_recoil := (rand.float32() - 0.5) * 2.0 * math.PI
+	player.recoil.x += player.weapon.recoil_r * math.sin(rand_recoil)
+	player.recoil.z += player.weapon.recoil_r * 0.3 * math.cos(rand_recoil)
+}
+
+player_update_recoil :: proc(player: ^Player, delta: f32) {
+	if player == nil || player.weapon == nil {
+		return
+	}
+
+	delta := min(delta, GAME_CONSTANTS.max_delta)
+	if player.recoil_force != 0 {
+		player.recoil_anim += player.recoil_force * delta
+		player.recoil_anim_y += player.recoil_force * (player.weapon.recoil_y != 0 ? player.weapon.recoil_y : 1.0) * (1.0 - player.crouch_val * 0.3) * delta
+		player.recoil_force *= math.pow(player.weapon.recover_f, delta * 1000.0)
+	}
+
+	if player.recoil_anim != 0 {
+		player.recoil_anim *= math.pow(player.weapon.recover, delta * 1000.0)
+	}
+
+	if player.recoil_anim_y != 0 {
+		player.recoil_anim_y *= math.pow(player.weapon.recover_y != 0 ? player.weapon.recover_y : player.weapon.recover, delta * 1000.0)
+	}
+}
+
 player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool) {
 	delta := min(input.delta, GAME_CONSTANTS.max_delta)
 	move_dir := -math.PI / 2.0 + math.PI / 4.0 * f32(input.move_dir)
@@ -592,19 +629,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 	}
 
 	if !recon {
-		if player.recoil_force != 0 {
-			player.recoil_anim += player.recoil_force * delta
-			player.recoil_anim_y += player.recoil_force * (player.weapon.recoil_y != 0 ? player.weapon.recoil_y : 1.0) * (1.0 - player.crouch_val * 0.3) * delta
-			player.recoil_force *= math.pow(player.weapon.recover_f, delta * 1000.0)
-		}
-
-		if player.recoil_anim != 0 {
-			player.recoil_anim *= math.pow(player.weapon.recover, delta * 1000.0)
-		}
-
-		if player.recoil_anim_y != 0 {
-			player.recoil_anim_y *= math.pow(player.weapon.recover_y != 0 ? player.weapon.recover_y : player.weapon.recover, delta * 1000.0)
-		}
+		player_update_recoil(player, delta)
 	}
 
 	player.last_position = player.position
@@ -907,6 +932,7 @@ player_shoot :: proc(player: ^Player) {
 
 	player.did_shoot = true
 	player.did_act = true
+	player.shot_seq += 1
 
 	if player.burst_count != 0 {
 		player.burst_count -= 1
@@ -916,11 +942,7 @@ player_shoot :: proc(player: ^Player) {
 
 	player.reloads[player.loadout_index] = (player.burst_count != 0 && player.weapon.burst ? player.weapon.burst_rate : player.weapon.rate) * player.game.config.fire_rate
 
-	player.recoil_force += player.weapon.recoil
-
-	rand_recoil := (rand.float32() - 0.5) * 2.0 * math.PI
-	player.recoil.x += player.weapon.recoil_r * math.sin(rand_recoil)
-	player.recoil.z += player.weapon.recoil_r * 0.3 * math.cos(rand_recoil)
+	player_apply_recoil(player)
 
 	is_projectile := player.weapon.projectile && (!player.weapon.projectile_disable || player.game.config.bullet_drop)
 	shot_height := player.position.y + player.height - GAME_CONSTANTS.camera_height

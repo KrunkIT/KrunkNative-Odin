@@ -237,6 +237,7 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 		return
 	}
 	player_buf: [shared.PACKET_HEADER_SIZE + shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE]byte
+	impact_buf: [shared.PACKET_HEADER_SIZE + shared.PACKET_BULLET_IMPACT_PAYLOAD_SIZE]byte
 
 	for client in ns.clients {
 		if !client.active {
@@ -292,6 +293,7 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 				max_health = player.max_health,
 				weapon_id = weapon_id,
 				active_ammo = active_ammo,
+				shot_seq = player.shot_seq,
 				ack_seq = player.input_seq,
 			}
 			state_size := shared.packet_serialize_state(player_buf[:], &player_state)
@@ -302,7 +304,20 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 				}
 			}
 		}
+		if !client.active {
+			continue
+		}
+		for &impact in game.impacts {
+			impact_size := shared.packet_serialize_bullet_impact(impact_buf[:], &impact)
+			if impact_size > 0 && !net_server_send(client, impact_buf[:impact_size]) {
+				client.active = false
+				break
+			}
+		}
 	}
+	// Impacts are reliable TCP events. Once every active joined client has had
+	// them queued, retain only new impacts generated before the next snapshot.
+	clear(&game.impacts)
 }
 
 net_server_close :: proc(ns: ^Net_Server) {

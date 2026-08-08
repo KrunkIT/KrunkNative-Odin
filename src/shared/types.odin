@@ -338,6 +338,7 @@ Player :: struct {
 	deaths:                          u32,
 	death_streak:                    u32,
 	score:                           u32,
+	shot_seq:                        u32,
 	input_seq:                       i32,
 	dt:                              f32,
 	send_rate:                       f32,

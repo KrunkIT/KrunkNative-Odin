@@ -139,6 +139,13 @@ net_client_poll :: proc(client: ^Client) {
 					client_apply_match_state(client, &state)
 					nc.match_state_received = true
 				}
+			case .BULLET_IMPACT:
+				if impact, impact_ok := shared.packet_deserialize_bullet_impact(packet); impact_ok {
+					if len(client.game.impacts) >= 256 {
+						ordered_remove(&client.game.impacts, 0)
+					}
+					append(&client.game.impacts, impact)
+				}
 			}
 			nc.recv_len -= packet_size
 			if nc.recv_len > 0 {

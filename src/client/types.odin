@@ -169,6 +169,7 @@ Glyph_Cache_Entry :: struct {
 
 Impact_Marker :: struct {
 	mesh:     ^Mesh,
+	position: shared.Vec3,
 	lifetime: f32,
 }
 

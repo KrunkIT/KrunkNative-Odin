@@ -4,19 +4,48 @@ Krunker.io - except it's awesome. A rewrite of the game, ported to **Odin**. The
 implementation has been fully ported and removed; the entire engine lives in `src/` and is built
 with Odin.
 
+![KrunkNative running Littletown](doc/demo.png)
+
+> [!NOTE]
+> The Odin port is actively developed. The client supports offline play and a localhost TCP
+> multiplayer path; the network address is currently fixed to `127.0.0.1:21015`.
+
+## Requirements
+
+- The [Odin compiler](https://odin-lang.org/) and a working system linker.
+- A GPU and driver with OpenGL 4.5 core support to run the client.
+- The original game assets described below. The dedicated server does not need the model, texture,
+  sound, or font assets.
+
+## Asset setup
+
+The repository includes maps, shaders, configuration, and UI images, but the full runtime asset
+pack is not tracked. Before starting the client, unpack a compatible Krunker `mod.zip` into
+`assets/` so these paths exist:
+
+- `assets/models/`
+- `assets/textures/`
+- `assets/sound/`
+- `assets/css/fonts/font2.ttf`
+
+A 2020-2021 asset pack is recommended. Keep the files already present in `assets/`; see the
+[asset instructions](assets/README.md) for details.
+
 ## Building
 
-The port has one build toolchain: **Odin** (`make` is just a thin wrapper). There are no
-third-party C libraries to fetch or compile — GLFW, OpenGL, and the image/font loaders come from
-Odin's own `vendor/` bindings.
+The port has one build toolchain: **Odin** (`make` is just a thin wrapper). The repository does not
+vendor or build separate C dependencies; GLFW, OpenGL, and the image/font loaders come from Odin's
+own `vendor/` bindings.
 
 ### Linux
 
-Install the Odin compiler: <https://odin-lang.org>
+On Debian or Ubuntu, install GLFW and its `pkg-config` metadata:
 
 ```bash
 sudo apt install pkg-config libglfw3 libglfw3-dev
 ```
+
+Use your distribution's equivalent packages elsewhere.
 
 That's the whole build-time dependency list. The old C-era README listed
 `libwayland-dev`, `libx11-dev`, `libgl1-mesa-dev`, etc. — those are **not needed** by the Odin
@@ -37,37 +66,87 @@ GL/Mesa/X11/Wayland development headers are required.
 Then:
 
 ```bash
-make client   # bin/krunknative_client
-make server   # bin/krunknative_server
-make test     # build + run the simulation parity tests
+make          # build client and server
+make client   # build bin/krunknative_client
+make server   # build bin/krunknative_server
+make check    # type-check client and server
+make test     # build and run the simulation parity tests
 ```
 
 ### Windows
 
-**Nothing to install.** Odin's `vendor:glfw` statically links the shipped `glfw3_mt.lib`
-(no DLL needed), `vendor:stb` uses pre-shipped `.lib` files, and OpenGL is loaded at runtime.
-You only need the Odin compiler and a working Windows linker (MSVC or MinGW-w64).
+No extra libraries are required. Odin's `vendor:glfw` statically links the shipped
+`glfw3_mt.lib` (no DLL needed), `vendor:stb` uses pre-shipped `.lib` files, and OpenGL is loaded at
+runtime. You only need the Odin compiler and a working Windows linker (MSVC or MinGW-w64).
+
+Build from PowerShell or cmd with the bundled helper. The leading `.\` works in both shells:
+
+```bat
+.\build.bat
+.\build.bat client
+.\build.bat server
+.\build.bat tests
+.\build.bat check
+.\build.bat clean
+```
+
+With no target, the script builds both binaries. The other targets build the client or server,
+run the tests, type-check both programs, or remove generated binaries, respectively.
 
 If you ever build the client with `-define:GLFW_SHARED=true`, copy
-`$(odin root)/vendor/glfw/lib/glfw3.dll` next to the exe.
+`vendor/glfw/lib/glfw3.dll` from the directory reported by `odin root` next to the executable.
 
 ## Running
 
-The client looks for the `assets` folder in the same directory in release mode, or in the parent
-directory when run from `bin/` (development mode). See [the assets readme](/assets/README.md) for
-how to add game assets.
+Run the binaries from the repository root so every asset path resolves consistently.
+
+### Offline
 
 ```bash
-./bin/krunknative_client                     # default map rotation
-./bin/krunknative_client --map ss_v3         # select a specific map
-./bin/krunknative_client --class hunter      # spawn as a specific class
-./bin/krunknative_client --fps               # show the FPS meter
-./bin/krunknative_client --help              # list maps and classes
-./bin/krunknative_server                     # dedicated server (no dependencies)
+./bin/krunknative_client --offline
 ```
 
-You can also pick your class in-game on the class-select screen before spawning
-(click a class, then click anywhere else to play).
+On Windows, use `.\bin\krunknative_client.exe --offline`.
+
+### Local multiplayer
+
+Start the server in one terminal, then start one or more clients from other terminals:
+
+```bash
+./bin/krunknative_server
+./bin/krunknative_client
+```
+
+On Windows, use `.\bin\krunknative_server.exe` and `.\bin\krunknative_client.exe`. With no
+`--offline` or `--map` option, the client tries the local server first and falls back to offline
+play when the server is unavailable. Passing `--map` always starts a local custom-map session.
+
+### Client options
+
+| Option | Description |
+| --- | --- |
+| `-m, --map <name>` | Load a specific map, such as `ss_v3`. |
+| `-c, --class <name>` | Preselect a class, such as `hunter`. |
+| `--offline` | Skip the server connection and run the authoritative simulation locally. |
+| `--fps` | Show the FPS meter. |
+| `-h, --help` | List every available map and class. |
+
+You can also choose a class on the spawn screen before entering the game.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| `W`, `A`, `S`, `D` | Move |
+| Mouse | Look |
+| Left mouse button | Fire |
+| Right mouse button | Aim or scope |
+| `Space` | Jump |
+| Left `Shift` | Crouch or slide |
+| `R` | Reload |
+| `E` / `Q` | Switch to the secondary / melee weapon |
+| `Esc` | Release the mouse cursor |
+| `F11` | Toggle fullscreen |
 
 ## Runtime dependencies (Linux)
 
@@ -79,28 +158,43 @@ You can also pick your class in-game on the class-select screen before spawning
 
 ## Gameplay configuration
 
-Weapons and classes are data-driven from `assets/config/game.toml` — named sections with partial
-overrides over the built-in defaults:
-
-The same file also controls the native server's competitive experiment: fixed tick rate, match
-timer, objective rotation/scoring, regeneration delay, respawn delay, and score limit. The default
-server runs at 64 Hz. The standard rotation is intentionally limited to `sandstorm`,
-`undergrowth`, `industry`, and `evacuation`; all other bundled maps remain directly loadable with
-`--map` or by custom server configuration. The normal class picker similarly uses the standard
-nine-class pool while every class remains addressable with `--class` for custom play.
+Weapons, classes, and match rules are data-driven from
+[`assets/config/game.toml`](assets/config/game.toml). Named sections apply partial overrides over
+the built-in defaults:
 
 ```toml
+[game]
+tick_rate = 64
+score_limit = 250
+
 [weapons.ak47]
 name = "Assault Rifle"
-model = "mods/weapons/model/ak47.obj"
-damage = 35.0
+src = "weapon_2"
+damage = 23.0
 
 [classes.trooper]
-loadout = ["ak47", "deagle", "knife"]
+loadout = ["awp"]
 ```
+
+The same file controls the match timer, objective rotation and scoring, regeneration, respawning,
+and player limit. The standard map rotation is `sandstorm`, `undergrowth`, `industry`, and
+`evacuation`; all other bundled maps remain available for local play through `--map`. The class
+picker uses the standard nine-class pool, while every configured class remains addressable through
+`--class` for custom play.
+
+## Project layout
+
+| Path | Contents |
+| --- | --- |
+| `src/client/` | OpenGL client, UI, audio, input, and client networking |
+| `src/server/` | Dedicated authoritative server and TCP networking |
+| `src/shared/` | Simulation, maps, configuration, types, and network protocol |
+| `src/tests/` | Configuration and movement parity tests |
+| `assets/` | Maps, shaders, gameplay configuration, and local runtime assets |
 
 ## Acknowledgements
 
-- Odin - the language and stdlib (with vendor bindings for GLFW, OpenGL, and STB)
+- [Odin](https://odin-lang.org/) - the language and standard library, including vendor bindings
+  for GLFW, OpenGL, and STB
 - KrunkNative C version - the original gameplay logic this port mirrors 1:1
-- See [doc/dependencies.md](doc/dependencies.md) for how the Odin port replaced the C dependencies
+- See [the dependency notes](doc/dependencies.md) for how the Odin port replaced the C dependencies

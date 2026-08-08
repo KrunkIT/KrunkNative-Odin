@@ -4,8 +4,9 @@ import "core:encoding/endian"
 
 PACKET_MAGIC :: 0x4B52554E // 'KRUN'
 PACKET_HEADER_SIZE :: 7
-PROTOCOL_VERSION :: 4
-PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 81
+PROTOCOL_VERSION :: 5
+PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 85
+PACKET_BULLET_IMPACT_PAYLOAD_SIZE :: 24
 MAX_PLAYERS_PER_MATCH :: 32
 // The server broadcasts one snapshot per N simulation ticks.
 SNAPSHOT_RATE_DIVISOR :: 2
@@ -69,6 +70,7 @@ Packet_Type :: enum u8 {
 	PING         = 5,
 	CHAT         = 6,
 	MATCH_STATE  = 7,
+	BULLET_IMPACT = 8,
 }
 
 Packet_Header :: struct {
@@ -139,6 +141,7 @@ Packet_Player_State :: struct {
 	max_health: i32,
 	weapon_id: u8,
 	active_ammo: u32,
+	shot_seq:   u32,
 	ack_seq:   i32,
 }
 
@@ -345,6 +348,8 @@ packet_serialize_state :: proc(buf: []byte, state: ^Packet_Player_State) -> int 
 	offset += 1
 	endian.put_u32(buf[offset:offset + 4], .Little, state.active_ammo)
 	offset += 4
+	endian.put_u32(buf[offset:offset + 4], .Little, state.shot_seq)
+	offset += 4
 	endian.put_i32(buf[offset:offset + 4], .Little, state.ack_seq)
 	offset += 4
 
@@ -420,9 +425,54 @@ packet_deserialize_state :: proc(buf: []byte) -> (state: Packet_Player_State, ok
 	offset += 1
 	state.active_ammo, _ = endian.get_u32(buf[offset:offset + 4], .Little)
 	offset += 4
+	state.shot_seq, _ = endian.get_u32(buf[offset:offset + 4], .Little)
+	offset += 4
 	state.ack_seq, _ = endian.get_i32(buf[offset:offset + 4], .Little)
 
 	return state, true
+}
+
+packet_serialize_bullet_impact :: proc(buf: []byte, impact: ^Bullet_Impact) -> int {
+	payload_size := PACKET_BULLET_IMPACT_PAYLOAD_SIZE
+	if impact == nil || len(buf) < PACKET_HEADER_SIZE + payload_size {
+		return 0
+	}
+
+	endian.put_u32(buf[0:4], .Little, PACKET_MAGIC)
+	buf[4] = u8(Packet_Type.BULLET_IMPACT)
+	endian.put_u16(buf[5:7], .Little, u16(payload_size))
+
+	offset := PACKET_HEADER_SIZE
+	endian.put_f32(buf[offset:offset + 4], .Little, impact.position.x)
+	endian.put_f32(buf[offset + 4:offset + 8], .Little, impact.position.y)
+	endian.put_f32(buf[offset + 8:offset + 12], .Little, impact.position.z)
+	offset += 12
+	endian.put_f32(buf[offset:offset + 4], .Little, impact.normal.x)
+	endian.put_f32(buf[offset + 4:offset + 8], .Little, impact.normal.y)
+	endian.put_f32(buf[offset + 8:offset + 12], .Little, impact.normal.z)
+
+	return PACKET_HEADER_SIZE + payload_size
+}
+
+packet_deserialize_bullet_impact :: proc(buf: []byte) -> (impact: Bullet_Impact, ok: bool) {
+	header, header_ok := packet_deserialize_header(buf)
+	if !header_ok ||
+	   header.packet_type != .BULLET_IMPACT ||
+	   header.payload_len != u16(PACKET_BULLET_IMPACT_PAYLOAD_SIZE) ||
+	   len(buf) != PACKET_HEADER_SIZE + PACKET_BULLET_IMPACT_PAYLOAD_SIZE {
+		return {}, false
+	}
+
+	offset := PACKET_HEADER_SIZE
+	impact.position.x, _ = endian.get_f32(buf[offset:offset + 4], .Little)
+	impact.position.y, _ = endian.get_f32(buf[offset + 4:offset + 8], .Little)
+	impact.position.z, _ = endian.get_f32(buf[offset + 8:offset + 12], .Little)
+	offset += 12
+	impact.normal.x, _ = endian.get_f32(buf[offset:offset + 4], .Little)
+	impact.normal.y, _ = endian.get_f32(buf[offset + 4:offset + 8], .Little)
+	impact.normal.z, _ = endian.get_f32(buf[offset + 8:offset + 12], .Little)
+
+	return impact, true
 }
 
 packet_deserialize_header :: proc(buf: []byte) -> (header: Packet_Header, ok: bool) {
