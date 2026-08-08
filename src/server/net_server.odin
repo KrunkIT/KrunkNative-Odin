@@ -167,7 +167,14 @@ net_server_poll :: proc(ns: ^Net_Server, game: ^shared.Game) {
 						}
 					case .PLAYER_INPUT:
 						if input, input_ok := shared.packet_deserialize_input(packet); input_ok && client.player != nil && client.player.active {
+							pending_swap := client.pending_input.swap
 							client.pending_input = input
+
+							if input.swap == 0 && pending_swap != 0 {
+								client.pending_input.swap = pending_swap
+							}
+
+							client.player.input_seq = input.seq
 							client.has_pending_input = true
 						}
 					case .DISCONNECT:
