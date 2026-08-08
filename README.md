@@ -1,8 +1,8 @@
 # KrunkNative (Odin)
 
-Krunker.io - except it's awesome. A rewrite of the game, ported to **Odin**. The original native-C
-implementation has been fully ported and removed; the entire engine lives in `src/` and is built
-with Odin.
+A Krunker.io Fantasy - A rewrite of the game to target direct binaries. Initially ported into a native-C
+implementation, but has been fully ported and removed for the sake of simplicity and ease of development. The entire engine lives in `src/` and is now built
+with Odin! 
 
 ![KrunkNative running Littletown](doc/demo.png)
 
