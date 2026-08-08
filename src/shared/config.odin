@@ -8,6 +8,7 @@ import "core:strings"
 Gameplay_Config :: struct {
 	weapons:        []^Weapon,
 	classes:        []Class_Config,
+	game:           Game_Config,
 	arena:          mem.Dynamic_Arena,
 	weapon_storage: []Weapon,
 	weapons_dir:    string,
@@ -65,6 +66,7 @@ class_config_name_count :: proc() -> int {
 // until config_destroy_gameplay is called.
 config_load_gameplay :: proc(config_path := CONFIG_GAME_PATH) -> ^Gameplay_Config {
 	config := new(Gameplay_Config)
+	config.game = DEFAULT_GAME_CONFIG
 	mem.dynamic_arena_init(&config.arena)
 	allocator := mem.dynamic_arena_allocator(&config.arena)
 
@@ -131,6 +133,20 @@ config_apply_toml :: proc(config: ^Gameplay_Config, source: string) -> bool {
 	defer toml_destroy(root)
 
 	allocator := mem.dynamic_arena_allocator(&config.arena)
+
+	if game_table, has := root.tables["game"]; has {
+		config_apply_i32(game_table, "tick_rate", "game", 0, &config.game.tick_rate)
+		config_apply_i32(game_table, "max_players", "game", 0, &config.game.max_players)
+		config_apply_i32(game_table, "game_time", "game", 0, &config.game.game_time)
+		config_apply_f32(game_table, "warmup_time", "game", 0, &config.game.warmup_time)
+		config_apply_i32(game_table, "auto_respawn", "game", 0, &config.game.auto_respawn)
+		config_apply_i32(game_table, "score_limit", "game", 0, &config.game.score_limit)
+		config_apply_bool(game_table, "health_regen", "game", 0, &config.game.health_regen)
+		config_apply_f32(game_table, "objective_rotation_time", "game", 0, &config.game.objective_rotation_time)
+		config_apply_f32(game_table, "objective_score_rate", "game", 0, &config.game.objective_score_rate)
+		config_apply_f32(game_table, "regen_delay", "game", 0, &config.game.regen_delay)
+		config_apply_f32(game_table, "respawn_delay", "game", 0, &config.game.respawn_delay)
+	}
 
 	if weapons_table, has := root.tables["weapons"]; has {
 		if dir, ok := toml_get_string(weapons_table, "weapons-dir"); ok {

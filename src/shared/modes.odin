@@ -9,6 +9,10 @@ DEFAULT_GAME_MODE_CONFIG := Game_Mode_Config {
 ffa_mode_init :: proc() -> ^Game_Mode {
 	mode := new(Game_Mode)
 	mode.config = DEFAULT_GAME_MODE_CONFIG
+	// The initial public ruleset is objective-focused. Keep the existing mode ID
+	// for compatibility while the richer data-driven mode registry is built.
+	mode.config.teams = true
+	mode.objective = true
 	return mode
 }
 

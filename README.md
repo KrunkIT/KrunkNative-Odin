@@ -82,6 +82,13 @@ You can also pick your class in-game on the class-select screen before spawning
 Weapons and classes are data-driven from `assets/config/game.toml` — named sections with partial
 overrides over the built-in defaults:
 
+The same file also controls the native server's competitive experiment: fixed tick rate, match
+timer, objective rotation/scoring, regeneration delay, respawn delay, and score limit. The default
+server runs at 64 Hz. The standard rotation is intentionally limited to `sandstorm`,
+`undergrowth`, `industry`, and `evacuation`; all other bundled maps remain directly loadable with
+`--map` or by custom server configuration. The normal class picker similarly uses the standard
+nine-class pool while every class remains addressable with `--class` for custom play.
+
 ```toml
 [weapons.ak47]
 name = "Assault Rifle"

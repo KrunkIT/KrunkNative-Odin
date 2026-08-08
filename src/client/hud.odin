@@ -23,7 +23,7 @@ class_picker_layout :: proc(client: ^Client) -> Class_Picker_Layout {
 	button_height := 48.0 * scale
 	gap := 12.0 * scale
 
-	class_count := shared.class_config_name_count()
+	class_count := shared.class_rotation_count()
 	rows := (class_count + int(columns) - 1) / int(columns)
 
 	total_width := f32(columns) * button_width + f32(columns - 1) * gap
@@ -65,7 +65,7 @@ class_picker_back_rect :: proc(client: ^Client) -> (x, y, width, height: f32) {
 	width = 140.0 * scale
 	height = 44.0 * scale
 	x = (client.ui.width - width) * 0.5
-	y = client.ui.height * 0.2 + f32((shared.class_config_name_count() + int(client.ui.width < 1050 ? 2 : 3) - 1) / int(client.ui.width < 1050 ? 2 : 3)) * (48.0 * scale + 12.0 * scale) + 30.0 * scale
+	y = client.ui.height * 0.2 + f32((shared.class_rotation_count() + int(client.ui.width < 1050 ? 2 : 3) - 1) / int(client.ui.width < 1050 ? 2 : 3)) * (48.0 * scale + 12.0 * scale) + 30.0 * scale
 	return
 }
 
@@ -126,20 +126,21 @@ render_class_picker :: proc(client: ^Client, menu_scale: f32) {
 	normal_color := shared.Vec4{0.0, 0.0, 0.0, 0.55}
 	text_color := shared.Vec4{1.0, 1.0, 1.0, 0.95}
 
-	class_count := shared.class_config_name_count()
+	class_count := shared.class_rotation_count()
 
 	for i in 0 ..< class_count {
 		x, y, w, h := class_button_rect(layout, i)
+		class_id := shared.class_rotation_id(i)
 
-		if i32(i) == client.selected_class {
+		if class_id == client.selected_class {
 			ui_round_rect(client.ui, selected_color, x, y, w, h, 8.0 * menu_scale)
 		} else {
 			ui_round_rect(client.ui, normal_color, x, y, w, h, 8.0 * menu_scale)
 		}
 
-		name := shared.class_config_name(i)
-		if i < len(client.game.classes) {
-			name = client.game.classes[i].name
+		name := shared.class_config_name(int(class_id))
+		if class_id >= 0 && class_id < i32(len(client.game.classes)) {
+			name = client.game.classes[class_id].name
 		}
 		text_size := 20.0 * menu_scale
 		text_width := ui_measure_text(client.ui, name, text_size)

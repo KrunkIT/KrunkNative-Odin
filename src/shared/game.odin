@@ -7,6 +7,119 @@ game_clear_players :: proc(game: ^Game) {
 	game.player_count = 0
 }
 
+game_is_authority :: proc(game: ^Game) -> bool {
+	return game != nil && (game.is_local || game.server != nil)
+}
+
+game_init_match :: proc(game: ^Game) {
+	delete(game.objective_indices)
+	game.match = {}
+	game.match.phase = game.config.warmup_time > 0 ? .WARMUP : .LIVE
+	game.match.phase_remaining = max(0.0, game.config.warmup_time)
+	game.match.time_remaining = max(0.0, f32(game.config.game_time) * 60.0)
+	game.match.objective.active_object_index = -1
+	game.match.objective.active_zone = -1
+
+	if game.map_inst == nil {
+		return
+	}
+
+	for object, index in game.map_inst.objects {
+		if object.score_zone || object.objective {
+			append(&game.objective_indices, i32(index))
+		}
+	}
+
+	if len(game.objective_indices) > 0 {
+		game.match.objective.active_zone = 0
+		game.match.objective.active_object_index = game.objective_indices[0]
+		game.match.objective.rotation_remaining = max(1.0, game.config.objective_rotation_time)
+	}
+}
+
+game_rotate_objective :: proc(game: ^Game) {
+	if len(game.objective_indices) == 0 {
+		return
+	}
+
+	next := (game.match.objective.active_zone + 1) % i32(len(game.objective_indices))
+	game.match.objective.active_zone = next
+	game.match.objective.active_object_index = game.objective_indices[next]
+	game.match.objective.owner_team = 0
+	game.match.objective.contested = false
+	game.match.objective.score_accumulator = 0
+	game.match.objective.rotation_remaining = max(1.0, game.config.objective_rotation_time)
+}
+
+game_update_objective :: proc(game: ^Game, delta: f32) {
+	state := &game.match.objective
+	if game.match.phase != .LIVE || state.active_object_index < 0 || state.active_object_index >= i32(len(game.map_inst.objects)) {
+		return
+	}
+
+	state.rotation_remaining = max(0.0, state.rotation_remaining - delta)
+	if state.rotation_remaining == 0 {
+		game_rotate_objective(game)
+		state = &game.match.objective
+	}
+
+	zone := game.map_inst.objects[state.active_object_index]
+	occupants: [3]i32
+	for player in game.players {
+		if player.active && player.team > 0 && player.team < len(occupants) && player_collides(player, zone, 0.0) {
+			occupants[player.team] += 1
+		}
+	}
+
+	state.contested = occupants[1] > 0 && occupants[2] > 0
+	if state.contested || occupants[1] == 0 && occupants[2] == 0 {
+		state.owner_team = 0
+		state.score_accumulator = 0
+		return
+	}
+
+	state.owner_team = occupants[1] > 0 ? 1 : 2
+	state.score_accumulator += delta * max(0.0, game.config.objective_score_rate)
+	points := u32(state.score_accumulator)
+	if points == 0 {
+		return
+	}
+
+	state.score_accumulator -= f32(points)
+	game.match.team_scores[state.owner_team] += points
+	for player in game.players {
+		if player.active && player.team == state.owner_team && player_collides(player, zone, 0.0) {
+			player.score += points
+		}
+	}
+
+	if game.config.score_limit > 0 && game.match.team_scores[state.owner_team] >= u32(game.config.score_limit) {
+		game.match.phase = .ENDED
+		game.move_lock = true
+	}
+}
+
+game_update_match :: proc(game: ^Game, delta: f32) {
+	if game.match.phase == .ENDED {
+		return
+	}
+
+	if game.match.phase == .WARMUP {
+		game.match.phase_remaining = max(0.0, game.match.phase_remaining - delta)
+		if game.match.phase_remaining == 0 {
+			game.match.phase = .LIVE
+		}
+		return
+	}
+
+	game.match.time_remaining = max(0.0, game.match.time_remaining - delta)
+	game_update_objective(game, delta)
+	if game.match.time_remaining == 0 {
+		game.match.phase = .ENDED
+		game.move_lock = true
+	}
+}
+
 game_configure :: proc(game: ^Game, config: ^Game_Config, maps: []^Map, modes: []i32, weapons: []^Weapon, classes: []Class_Config) {
 	if game.maps_list_owned {
 		delete(game.maps_list)
@@ -55,6 +168,7 @@ game_init :: proc(game: ^Game, map_index, mode_index: i32, is_local: bool) {
 	}
 
 	map_to_load := map_index if map_index >= 0 && map_index < i32(game.map_count) else rand_map_index(game.map_count)
+	game.current_map_index = map_to_load
 	if game.maps_list[map_to_load] == nil && game.maps_list_owned {
 		game.maps_list[map_to_load] = load_default_map(ROTATION_MAPS[map_to_load])
 	}
@@ -89,6 +203,8 @@ game_init :: proc(game: ^Game, map_index, mode_index: i32, is_local: bool) {
 	}
 
 	game.ready = true
+	game.move_lock = false
+	game_init_match(game)
 }
 
 rand_map_index :: proc(map_count: i32) -> i32 {
@@ -101,6 +217,8 @@ game_tick :: proc(game: ^Game, now, delta: f32) {
 	}
 
 	if game.is_local || game.server != nil {
+		game.now = now
+		game_update_match(game, delta)
 		if game.end_timer == 0 && game.nuke_timer != 0 {
 			game.nuke_timer = max(0.0, game.nuke_timer - delta)
 
@@ -135,6 +253,12 @@ game_tick :: proc(game: ^Game, now, delta: f32) {
 	}
 
 	for player in game.players {
+		if game_is_authority(game) && !player.active && player.respawn_timer > 0 {
+			player.respawn_timer = max(0.0, player.respawn_timer - delta)
+			if player.respawn_timer == 0 && game.config.auto_respawn != 0 && game.match.phase == .LIVE {
+				player_spawn(player, player.class_index)
+			}
+		}
 		player_update(player, delta * game.config.delta_mlt)
 
 		if player.position.y <= game.map_inst.death_y {
@@ -148,6 +272,16 @@ game_players_add :: proc(game: ^Game, player: ^Player) {
 	game.player_count = i32(len(game.players))
 }
 
+game_players_remove :: proc(game: ^Game, player: ^Player) {
+	for other, i in game.players {
+		if other == player {
+			unordered_remove(&game.players, i)
+			game.player_count = i32(len(game.players))
+			return
+		}
+	}
+}
+
 game_destroy :: proc(game: ^Game) {
 	for player in game.players {
 		player_destroy(player)
@@ -155,6 +289,7 @@ game_destroy :: proc(game: ^Game) {
 
 	game_clear_players(game)
 	delete(game.impacts)
+	delete(game.objective_indices)
 
 	if game.mode != nil {
 		mode_fini(game.mode)

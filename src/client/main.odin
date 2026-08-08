@@ -33,9 +33,16 @@ Client :: struct {
 	last_swap_key:     u8,
 	last_mouse_button: bool,
 	in_game:           bool,
+	spawn_pending:     bool,
+	spawn_retry_timer: f32,
 	selected_class:    i32,
 	class_picker_open: bool,
 	freecam_enabled:   bool,
+	map_loaded:        bool,
+	net:               Net_Client_State,
+	net_input_seq:     i32,
+	snapshot_send_rate: f32,
+	predicted_inputs:  [dynamic]shared.Input,
 
 	game: shared.Game,
 	me:   ^shared.Player,
@@ -48,11 +55,14 @@ Client :: struct {
 
 g_client: ^Client
 
+MAX_PREDICTED_INPUTS :: 256
+
 Client_Options :: struct {
 	map_name: string,
 	class_name: string,
 	show_help: bool,
 	show_fps:  bool,
+	offline:   bool,
 }
 
 print_client_help :: proc() {
@@ -65,6 +75,7 @@ print_client_help :: proc() {
 	fmt.println("  -m, --map <name>      Load a map by name (for example: burg)")
 	fmt.println("  -c, --class <name>    Spawn as the given class (for example: hunter)")
 	fmt.println("      --fps             Show an FPS meter")
+	fmt.println("      --offline         Run the local authoritative simulation")
 	fmt.println()
 	fmt.println("Available maps:")
 
@@ -121,6 +132,8 @@ parse_client_options :: proc() -> (options: Client_Options, ok: bool) {
 			options.show_help = true
 		case "--fps", "--show-fps":
 			options.show_fps = true
+		case "--offline":
+			options.offline = true
 		case "-m", "--map":
 			if i + 1 >= len(os.args) {
 				fmt.eprintf("Missing map name after %s.\n\n", arg)
@@ -208,6 +221,269 @@ client_load_map :: proc(client: ^Client) {
 	}
 }
 
+client_find_player :: proc(client: ^Client, uid: i32) -> ^shared.Player {
+	for player in client.game.players {
+		if player.uid == uid {
+			return player
+		}
+	}
+	return nil
+}
+
+client_clear_players :: proc(client: ^Client) {
+	for player in client.game.players {
+		if player.mesh != nil {
+			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+			player_meshes_fini(player)
+		}
+		shared.player_destroy(player)
+	}
+	clear(&client.game.players)
+	client.game.player_count = 0
+	client.me = nil
+	client.in_game = false
+	client.spawn_pending = false
+	clear(&client.predicted_inputs)
+}
+
+client_discard_acked_inputs :: proc(client: ^Client, ack_seq: i32) {
+	for len(client.predicted_inputs) > 0 && client.predicted_inputs[0].seq <= ack_seq {
+		ordered_remove(&client.predicted_inputs, 0)
+	}
+}
+
+client_apply_movement_state :: proc(player: ^shared.Player, state: ^shared.Packet_Player_State) {
+	player.on_ground = state.on_ground
+	player.on_ladder = state.on_ladder
+	player.on_ramp = state.on_ramp
+	player.on_terrain = state.on_terrain
+	player.terrain_slipping = state.terrain_slipping
+	player.did_jump = state.did_jump
+	player.did_wall_jump = state.did_wall_jump
+	player.can_slide = state.can_slide
+	player.on_wall = state.on_wall
+	player.crouch_val = state.crouch_val
+	player.aim_val = state.aim_val
+	player.slide_timer = state.slide_timer
+	player.jump_timer = state.jump_timer
+	shared.player_update_height(player)
+
+	if !state.on_ramp && player.ramp_fix != nil {
+		free(player.ramp_fix)
+		player.ramp_fix = nil
+	}
+}
+
+client_reconcile_local_player :: proc(client: ^Client, player: ^shared.Player, state: ^shared.Packet_Player_State, was_active: bool) {
+	client_discard_acked_inputs(client, state.ack_seq)
+	player.interpolate = false
+	player.position = state.position
+	player.velocity = state.velocity
+	client_apply_movement_state(player, state)
+
+	if !was_active {
+		player.direction = {state.x_dir, state.y_dir}
+	}
+
+	// Reapply inputs the server had not processed when it produced this
+	// snapshot. `recon=true` runs deterministic movement/collision code while
+	// suppressing duplicate shots, reloads, and recoil effects.
+	for &input in client.predicted_inputs {
+		shared.player_proc_input(player, &input, true, client.game.move_lock)
+	}
+}
+
+client_apply_match_state :: proc(client: ^Client, state: ^shared.Packet_Match_State) {
+	if (!client.map_loaded || state.map_index != client.game.current_map_index) && state.map_index >= 0 && state.map_index < client.game.map_count {
+		if client.map_loaded {
+			client_unload_map(client)
+		}
+		client_clear_players(client)
+		if !client.game.ready || state.map_index != client.game.current_map_index {
+			shared.game_init(&client.game, state.map_index, 0, false)
+		}
+		client_load_current_map(client)
+		fmt.printf("[Net Client] Loaded authoritative server map slot %d\n", state.map_index)
+	}
+	shared.packet_apply_match_state(&client.game, state)
+	client.snapshot_send_rate = state.send_rate > 0 ? state.send_rate : 32
+	client_reconcile_players(client, state)
+}
+
+// client_reconcile_players drops remote players the server no longer tracks.
+// The server removes a player from its sim the moment the client disconnects,
+// so the roster in MATCH_STATE is the source of truth; without this a departed
+// player would stay frozen in the world forever.
+client_reconcile_players :: proc(client: ^Client, state: ^shared.Packet_Match_State) {
+	for i := len(client.game.players) - 1; i >= 0; i -= 1 {
+		player := client.game.players[i]
+		if player.is_you || player == client.me {
+			continue
+		}
+		found := false
+		for j in 0 ..< state.player_count {
+			if state.player_ids[j] == u32(player.uid) {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		if player.mesh != nil {
+			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+			player_meshes_fini(player)
+		}
+		shared.player_destroy(player)
+		unordered_remove(&client.game.players, i)
+	}
+	client.game.player_count = i32(len(client.game.players))
+}
+
+client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_State) {
+	if state.class_id < 0 || state.class_id >= i32(len(client.game.classes)) || state.player_id == 0 || state.team < 0 || state.team > 2 {
+		fmt.eprintf("[Net Client] Rejected invalid player state id=%d class=%d team=%d\n", state.player_id, state.class_id, state.team)
+		return
+	}
+	if state.health < 0 || state.health > f32(state.max_health) || state.max_health <= 0 || state.max_health > 10000 {
+		fmt.eprintf("[Net Client] Rejected invalid health state for player %d\n", state.player_id)
+		return
+	}
+	if state.crouch_val < 0 || state.crouch_val > 1 || state.aim_val < 0 || state.aim_val > 1 || state.slide_timer < 0 || state.jump_timer < 0 {
+		fmt.eprintf("[Net Client] Rejected invalid movement state for player %d\n", state.player_id)
+		return
+	}
+
+	// The server reports its snapshot cadence in MATCH_STATE. Until the first
+	// one arrives (or if it is missing) fall back to the default 32 Hz rate.
+	send_rate := client.snapshot_send_rate
+	if send_rate <= 0 {
+		send_rate = 32
+	}
+
+	player := client_find_player(client, i32(state.player_id))
+	if state.is_you && client.me != nil && client.me.uid != i32(state.player_id) {
+		fmt.eprintf("[Net Client] Rejected duplicate local ownership for player %d (local is %d)\n", state.player_id, client.me.uid)
+		return
+	}
+	if !state.is_you && client.me != nil && client.me.uid == i32(state.player_id) {
+		fmt.eprintf("[Net Client] Rejected ownership loss for local player %d\n", state.player_id)
+		return
+	}
+	if player == nil {
+		player = shared.player_init(&client.game)
+		player.uid = i32(state.player_id)
+		player.team = state.team
+		shared.game_players_add(&client.game, player)
+		shared.player_spawn(player, state.class_id)
+		player.swap_timer = 0
+		player.active = false
+	}
+
+	was_active := player.active
+	if player.class_index != state.class_id {
+		if player.mesh != nil {
+			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+			player_meshes_fini(player)
+		}
+		shared.player_spawn(player, state.class_id)
+		player.swap_timer = 0
+		was_active = false
+	}
+
+	player.team = state.team
+	player.active = state.active
+	if state.is_you {
+		if state.active {
+			client_reconcile_local_player(client, player, state, was_active)
+		} else {
+			clear(&client.predicted_inputs)
+			player.interpolate = false
+			player.position = state.position
+			player.velocity = state.velocity
+			client_apply_movement_state(player, state)
+		}
+	} else if was_active {
+		// Interpolate from the previously displayed position toward the fresh
+		// authoritative one. Between snapshots the client lerps, so a moving
+		// player no longer steps/jerks and never desyncs visually.
+		player.interpolate = true
+		player.dt = 0
+		player.send_rate = send_rate
+		player.interp_pos_start = player.position
+		player.interp_pos_end = state.position
+		player.interp_dir_start = player.direction
+		player.interp_dir_end = {state.x_dir, state.y_dir}
+		player.velocity = state.velocity
+		client_apply_movement_state(player, state)
+	} else {
+		// Fresh spawn or re-appearance: snap, then interpolate from here.
+		player.position = state.position
+		player.direction = {state.x_dir, state.y_dir}
+		player.interpolate = true
+		player.dt = 0
+		player.send_rate = send_rate
+		player.interp_pos_start = player.position
+		player.interp_pos_end = state.position
+		player.interp_dir_start = player.direction
+		player.interp_dir_end = player.direction
+		player.velocity = state.velocity
+		client_apply_movement_state(player, state)
+	}
+	player.health = state.health
+	player.max_health = state.max_health
+	player.input_seq = state.ack_seq
+	ownership_changed := player.mesh != nil && player.render_you != state.is_you
+	if ownership_changed {
+		scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+		player_meshes_fini(player)
+		was_active = false
+	}
+	player.is_you = state.is_you
+	player.render_you = state.is_you
+	weapon_found := false
+	for weapon_id, loadout_index in player.loadout {
+		if weapon_id == i32(state.weapon_id) {
+			weapon_found = true
+			weapon := client.game.weapons[weapon_id]
+			if state.active_ammo > weapon.ammo {
+				fmt.eprintf("[Net Client] Rejected invalid ammo %d for player %d weapon %d\n", state.active_ammo, state.player_id, state.weapon_id)
+				return
+			}
+			if player.loadout_index != i32(loadout_index) {
+				shared.player_swap_weapon(player, i32(loadout_index), true, true, true)
+			}
+			player.ammo[loadout_index] = state.active_ammo
+			break
+		}
+	}
+	if !weapon_found {
+		fmt.eprintf("[Net Client] Rejected weapon %d outside player %d loadout\n", state.weapon_id, state.player_id)
+		return
+	}
+
+	if state.active && (!was_active || player.mesh == nil) {
+		if player.mesh == nil {
+			player_generate_meshes(player, state.is_you)
+		}
+		scene_add_player_mesh(state.is_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+	} else if !state.active && was_active && player.mesh != nil {
+		scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+	}
+
+	if state.is_you {
+		client.me = player
+		if state.active {
+			client.in_game = true
+			client.spawn_pending = false
+			client.spawn_retry_timer = 0
+		}
+	}
+	if player.mesh != nil && player.active {
+		player_update_meshes(player, false)
+	}
+}
+
 set_window_icon :: proc(client: ^Client) {
 	icon_path := shared.concat(shared.assets_path(), "img/icon.png")
 	defer delete(icon_path)
@@ -232,7 +508,7 @@ set_window_icon :: proc(client: ^Client) {
 }
 
 client_unload_map :: proc(client: ^Client) {
-	if client.game.map_inst == nil {
+	if client.game.map_inst == nil || !client.map_loaded {
 		return
 	}
 
@@ -247,6 +523,7 @@ client_unload_map :: proc(client: ^Client) {
 
 	resource_trim_texture_cache()
 	resource_trim_geometry_cache()
+	client.map_loaded = false
 }
 
 client_load_current_map :: proc(client: ^Client) {
@@ -256,6 +533,7 @@ client_load_current_map :: proc(client: ^Client) {
 
 	shared.map_load_meshes(client.game.map_inst, prefab_init_cb)
 	client_load_map(client)
+	client.map_loaded = true
 
 	renderable := 0
 	for object in client.game.map_inst.objects {
@@ -278,6 +556,43 @@ client_tick_textures :: proc(client: ^Client, now: f32) {
 
 	for object in client.game.map_inst.objects {
 		client_animate_object_texture(object, now)
+	}
+}
+
+client_update_objective_visuals :: proc(client: ^Client, now: f32) {
+	if client.game.map_inst == nil {
+		return
+	}
+
+	active := client.game.match.objective.active_object_index
+	for object, index in client.game.map_inst.objects {
+		if (!object.score_zone && !object.objective) || object.mesh == nil {
+			continue
+		}
+
+		mesh := cast(^Mesh)object.mesh
+		material := cast(^Basic_Material)mesh.material
+		is_active := i32(index) == active
+		mesh.visible = is_active
+		if !is_active {
+			continue
+		}
+
+		pulse := 0.08 * (1.0 + math.sin(now * 4.0))
+		state := &client.game.match.objective
+		if state.contested {
+			material.color = shared.Vec4{1.0, 0.7, 0.1, 0.32 + pulse}
+			material.emissive = shared.Vec4{0.3, 0.16, 0.0, 1.0}
+		} else if state.owner_team == 1 {
+			material.color = shared.Vec4{0.15, 0.45, 1.0, 0.30 + pulse}
+			material.emissive = shared.Vec4{0.0, 0.12, 0.35, 1.0}
+		} else if state.owner_team == 2 {
+			material.color = shared.Vec4{1.0, 0.2, 0.2, 0.30 + pulse}
+			material.emissive = shared.Vec4{0.35, 0.02, 0.02, 1.0}
+		} else {
+			material.color = shared.Vec4{0.75, 0.8, 0.85, 0.20 + pulse}
+			material.emissive = shared.Vec4{0.08, 0.08, 0.08, 1.0}
+		}
 	}
 }
 
@@ -367,13 +682,15 @@ client_update_freecam :: proc(client: ^Client, mouse_delta: shared.Vec2, delta: 
 }
 
 client_enter_game :: proc(client: ^Client) {
-	if !client.game.ready || client.in_game {
+	if !client.game.ready || client.in_game || client.spawn_pending {
+		return
+	}
+	if client.net.connected && !client.net.match_state_received {
 		return
 	}
 
-	client.in_game = true
-
 	if client.game.is_local {
+		client.in_game = true
 		if client.me == nil {
 			client.me = shared.player_init(&client.game)
 
@@ -390,20 +707,34 @@ client_enter_game :: proc(client: ^Client) {
 		player_generate_meshes(client.me, true)
 		shared.player_swap_weapon(client.me, 0, true, false, false)
 		scene_add_player_mesh(client.fps_scene, cast(^Player_Mesh)client.me.mesh, int(client.me.loadout_size))
+	} else if client.net.connected {
+		client.spawn_pending = true
+		client.spawn_retry_timer = 0.5
+		net_client_send_spawn(&client.net, client.selected_class)
 	}
 }
 
 client_tick :: proc(client: ^Client, now, delta: f32) {
+	if client.net.connected {
+		net_client_poll(client)
+	}
 	if !client.game.ready {
 		return
 	}
 
 	client_update_fps(client, delta)
+	if client.spawn_pending && client.net.connected {
+		client.spawn_retry_timer = max(0.0, client.spawn_retry_timer - delta)
+		if client.spawn_retry_timer == 0 {
+			net_client_send_spawn(&client.net, client.selected_class)
+			client.spawn_retry_timer = 0.5
+		}
+	}
 
 	debug_key := glfw.GetKey(client.window, glfw.KEY_GRAVE_ACCENT) == glfw.PRESS
 	freecam_key := glfw.GetKey(client.window, glfw.KEY_RIGHT_BRACKET) == glfw.PRESS
 
-	if debug_key && !client.last_debug_key {
+	if debug_key && !client.last_debug_key && !client.net.connected {
 		client_unload_map(client)
 
 		if client.me != nil {
@@ -463,10 +794,10 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			// Class picker screen: clicking a class selects it, clicking BACK
 			// returns to the spawn screen.
 			layout := class_picker_layout(client)
-			for i in 0 ..< shared.class_config_name_count() {
+			for i in 0 ..< shared.class_rotation_count() {
 				bx, by, bw, bh := class_button_rect(layout, i)
 				if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
-					client.selected_class = i32(i)
+					client.selected_class = shared.class_rotation_id(i)
 					clicked_ui = true
 					break
 				}
@@ -570,9 +901,20 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			client_update_freecam(client, mouse_delta, delta)
 		}
 
-		shared.player_queue_input(client.me, &input)
+		input.seq = client.net_input_seq
+		client.net_input_seq += 1
+		if client.net.connected {
+			append(&client.predicted_inputs, input)
+			if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS {
+				ordered_remove(&client.predicted_inputs, 0)
+			}
+			shared.player_proc_input(client.me, &input, true, client.game.move_lock)
+			net_client_send_input(&client.net, &input)
+		} else {
+			shared.player_queue_input(client.me, &input)
+		}
 
-	} else {
+	} else if !client.spawn_pending {
 		// Freecam is only valid while the player is spawned.
 		client.freecam_enabled = false
 	}
@@ -581,7 +923,24 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	client.mouse_state.last_pos.y = f32(y)
 	client.last_noclip_key = noclip_key
 
-	shared.game_tick(&client.game, now, delta)
+	if !client.net.connected {
+		shared.game_tick(&client.game, now, delta)
+	} else {
+		// The local player is predicted above. Remote players remain one snapshot
+		// behind and interpolate between authoritative samples.
+		for player in client.game.players {
+			if player.active {
+				player.idle_anim += shared.GAME_CONSTANTS.idle_anim_speed * delta
+				if player != client.me {
+					shared.player_interpolate(player, delta)
+				}
+				if player.mesh != nil {
+					player_update_meshes(player, false)
+				}
+			}
+		}
+	}
+	client_update_objective_visuals(client, now)
 	client_tick_impacts(client, delta)
 
 	// Camera and view-model transforms must use the state produced by this
@@ -602,7 +961,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		client.camera.rotation.y = client.me.direction.y
 		client.camera.zoom = 1.0 + (client.me.weapon.zoom - 1.0) * client.me.aim_val
 
-		if client.me.mesh != nil {
+		if client.me.mesh != nil && !client.net.connected {
 			player_update_meshes(client.me, false)
 		}
 	}
@@ -701,6 +1060,11 @@ main :: proc() {
 	if len(options.class_name) > 0 {
 		client.selected_class = i32(shared.class_config_index(options.class_name))
 	}
+	// Explicit map selection is a local/custom-map workflow unless a future
+	// server handshake advertises that exact content.
+	if !options.offline && len(options.map_name) == 0 {
+		client.net, _ = net_client_connect("127.0.0.1", 21015)
+	}
 
 	if len(options.map_name) > 0 {
 		g_map_name = options.map_name
@@ -714,15 +1078,17 @@ main :: proc() {
 		}
 
 		maps := []^shared.Map{selected_map}
-		shared.game_configure(&client.game, nil, maps, nil, gameplay_config.weapons, gameplay_config.classes)
-		shared.game_init(&client.game, 0, -1, true)
+		shared.game_configure(&client.game, &gameplay_config.game, maps, nil, gameplay_config.weapons, gameplay_config.classes)
+		shared.game_init(&client.game, 0, -1, !client.net.connected)
 	} else {
 		shared.load_default_maps()
-		shared.game_configure(&client.game, nil, nil, nil, gameplay_config.weapons, gameplay_config.classes)
-		shared.game_init(&client.game, -1, -1, true)
+		shared.game_configure(&client.game, &gameplay_config.game, nil, nil, gameplay_config.weapons, gameplay_config.classes)
+		shared.game_init(&client.game, client.net.connected ? 0 : -1, -1, !client.net.connected)
 	}
 
-	client_load_current_map(client)
+	if client.game.ready && !client.net.connected {
+		client_load_current_map(client)
+	}
 
 	print_startup_info(client)
 	free_all(context.temp_allocator)
@@ -742,6 +1108,7 @@ main :: proc() {
 	}
 
 	client_unload_map(client)
+	net_client_disconnect(&client.net)
 	client_clear_impacts(client)
 	if client.me != nil && client.me.mesh != nil {
 		scene_remove_player_mesh(client.fps_scene, cast(^Player_Mesh)client.me.mesh, int(client.me.loadout_size))
@@ -760,6 +1127,7 @@ main :: proc() {
 	overlay_fini()
 	ui_fini(client.ui)
 	resource_cache_fini()
+	delete(client.predicted_inputs)
 }
 
 prefab_init_cb :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_data: json.Value) -> rawptr {

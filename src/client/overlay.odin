@@ -82,7 +82,7 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		}
 
 		health_str := fmt.tprintf("%.f", client.me.health)
-		max_health_str := fmt.tprintf("| %d", class.health)
+		max_health_str := fmt.tprintf("| %d", client.me.max_health)
 
 		health_size := 20.0 * client.ui.scale
 		health_str_width := ui_measure_text(client.ui, health_str, health_size)
@@ -126,7 +126,7 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 			delete(icon_path)
 		}
 
-		if ammo_icon != 0 && client.me != nil && client.me.weapon != nil {
+		if ammo_icon != 0 && client.me != nil && client.me.weapon != nil && client.me.loadout_index >= 0 && client.me.loadout_index < i32(len(client.me.ammo)) {
 			ammo := client.me.ammo[client.me.loadout_index]
 			ammo_str := fmt.tprintf("%d", ammo)
 
@@ -172,13 +172,43 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		}
 
 		if timer_icon != 0 {
-			timer := "04:00"
+			remaining := max(0, int(client.game.match.time_remaining + 0.999))
+			timer := fmt.tprintf("%02d:%02d", remaining / 60, remaining % 60)
 			timer_width := ui_measure_text(client.ui, timer, 32.0 * client.ui.scale)
 
 			ui_round_rect(client.ui, background_color, anchor.x, anchor.y, timer_width + 88.0 * client.ui.scale, 76.0 * client.ui.scale, 10.0 * client.ui.scale)
 			ui_draw_image(client.ui, timer_icon, anchor.x + 10.0 * client.ui.scale, anchor.y + (76.0 - 45.0) * 0.5 * client.ui.scale, 45.0 * client.ui.scale, 45.0 * client.ui.scale)
 			ui_fill_text(client.ui, white, timer, anchor.x + 68.0 * client.ui.scale, anchor.y + (76.0 - 18.0) * client.ui.scale, 32.0 * client.ui.scale)
 		}
+	}
+
+	// top-center objective scoreboard
+	if client.game.match.objective.active_zone >= 0 {
+		state := &client.game.match.objective
+		zone_name := fmt.tprintf("POINT %c", rune('A' + state.active_zone))
+		status := "NEUTRAL"
+		status_color := shared.Vec4{0.85, 0.88, 0.9, 1.0}
+		if state.contested {
+			status = "CONTESTED"
+			status_color = shared.Vec4{1.0, 0.72, 0.15, 1.0}
+		} else if state.owner_team == 1 {
+			status = client.game.config.team1_name
+			status_color = shared.Vec4{0.25, 0.55, 1.0, 1.0}
+		} else if state.owner_team == 2 {
+			status = client.game.config.team2_name
+			status_color = shared.Vec4{1.0, 0.3, 0.3, 1.0}
+		}
+
+		score := fmt.tprintf("%d   %s   %d", client.game.match.team_scores[1], zone_name, client.game.match.team_scores[2])
+		rotation := fmt.tprintf("%s  |  rotates in %.0fs", status, state.rotation_remaining)
+		text_size := 24.0 * client.ui.scale
+		sub_size := 15.0 * client.ui.scale
+		width := max(ui_measure_text(client.ui, score, text_size), ui_measure_text(client.ui, rotation, sub_size)) + 50.0 * client.ui.scale
+		x := (client.ui.width - width) * 0.5
+		y := 20.0 * client.ui.scale
+		ui_round_rect(client.ui, background_color, x, y, width, 72.0 * client.ui.scale, 8.0 * client.ui.scale)
+		ui_fill_text(client.ui, white, score, x + (width - ui_measure_text(client.ui, score, text_size)) * 0.5, y + 31.0 * client.ui.scale, text_size)
+		ui_fill_text(client.ui, status_color, rotation, x + (width - ui_measure_text(client.ui, rotation, sub_size)) * 0.5, y + 57.0 * client.ui.scale, sub_size)
 	}
 }
 

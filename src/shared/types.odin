@@ -337,6 +337,7 @@ Player :: struct {
 	kills:                           u32,
 	deaths:                          u32,
 	death_streak:                    u32,
+	score:                           u32,
 	input_seq:                       i32,
 	dt:                              f32,
 	send_rate:                       f32,
@@ -346,6 +347,8 @@ Player :: struct {
 	interp_dir_end:                  Vec2,
 	health:                          f32,
 	max_health:                      i32,
+	last_damage_time:                f32,
+	respawn_timer:                   f32,
 	team:                            i32,
 	class_index:                     i32,
 	scale:                           f32,
@@ -398,6 +401,7 @@ Player :: struct {
 }
 
 Game_Config :: struct {
+	tick_rate:          i32,
 	max_players:        i32,
 	min_players:        i32,
 	game_time:          i32,
@@ -434,6 +438,10 @@ Game_Config :: struct {
 	health_mlt:         f32,
 	fire_rate:          f32,
 	reload_speed:       f32,
+	objective_rotation_time: f32,
+	objective_score_rate:    f32,
+	regen_delay:             f32,
+	respawn_delay:           f32,
 	maps:               []i32,
 	modes:              []i32,
 }
@@ -490,6 +498,29 @@ Free_For_All :: struct {
 	using mode: Game_Mode,
 }
 
+Match_Phase :: enum u8 {
+	WARMUP,
+	LIVE,
+	ENDED,
+}
+
+Objective_State :: struct {
+	active_object_index: i32,
+	active_zone:         i32,
+	owner_team:          i32,
+	contested:           bool,
+	rotation_remaining:  f32,
+	score_accumulator:   f32,
+}
+
+Match_State :: struct {
+	phase:          Match_Phase,
+	phase_remaining: f32,
+	time_remaining: f32,
+	team_scores:    [3]u32,
+	objective:      Objective_State,
+}
+
 Game :: struct {
 	config:       Game_Config,
 	map_inst:     ^Map,
@@ -501,9 +532,13 @@ Game :: struct {
 	map_count:    i32,
 	modes_list:   []i32,
 	mode_count:   i32,
+	current_map_index: i32,
 	player_count: i32,
 	players:      [dynamic]^Player,
 	impacts:      [dynamic]Bullet_Impact,
+	objective_indices: [dynamic]i32,
+	match:        Match_State,
+	now:          f32,
 	move_lock:    bool,
 	is_local:     bool,
 	ready:        bool,
@@ -515,13 +550,14 @@ Game :: struct {
 }
 
 DEFAULT_GAME_CONFIG :: Game_Config {
+	tick_rate       = 64,
 	max_players     = 2,
 	min_players     = 0,
 	game_time       = 4,
 	warmup_time     = 0.0,
-	auto_respawn    = 0,
+	auto_respawn    = 1,
 	lives           = 0,
-	score_limit     = 0,
+	score_limit     = 250,
 	gravity_mlt     = 1.0,
 	jump_mlt        = 1.0,
 	delta_mlt       = 1.0,
@@ -551,4 +587,8 @@ DEFAULT_GAME_CONFIG :: Game_Config {
 	health_mlt      = 1.0,
 	fire_rate       = 1.0,
 	reload_speed    = 1.0,
+	objective_rotation_time = 60.0,
+	objective_score_rate    = 1.0,
+	regen_delay             = 5.0,
+	respawn_delay           = 3.0,
 }

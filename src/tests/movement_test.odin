@@ -270,7 +270,16 @@ project_root :: proc() -> string {
 }
 
 main :: proc() {
+	if !test_net_send_queue() {
+		os.exit(1)
+	}
+	if !test_snapshot_interpolation() {
+		os.exit(1)
+	}
 	if !test_gameplay_config() {
+		os.exit(1)
+	}
+	if !test_objective_combat_state() {
 		os.exit(1)
 	}
 	fmt.println()

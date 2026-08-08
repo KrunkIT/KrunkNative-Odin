@@ -18,6 +18,18 @@ player_update_height :: proc(player: ^Player) {
 player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.active = true
 	player.class_index = class_index
+	player.respawn_timer = 0
+	player.last_damage_time = -1000
+
+	if player.team == 0 && player.game != nil && player.game.mode != nil && player.game.mode.config.teams {
+		team_counts: [3]i32
+		for other in player.game.players {
+			if other != player && other.team > 0 && other.team < len(team_counts) {
+				team_counts[other.team] += 1
+			}
+		}
+		player.team = team_counts[1] <= team_counts[2] ? 1 : 2
+	}
 
 	// Resolve stats from the configured classes when available (the game's list
 	// is built from game.toml by the client/server), falling back to defaults.
@@ -76,6 +88,11 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 		}
 	}
 
+	delete(player.loadout)
+	delete(player.ammo)
+	delete(player.reloads)
+	clear(&player.input_queue)
+
 	player.loadout_size = i32(len(composed))
 	player.loadout = make([]i32, player.loadout_size)
 	player.ammo = make([]u32, player.loadout_size)
@@ -117,7 +134,31 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player_swap_weapon(player, 0, true, false, false)
 
 	if player.game != nil && player.game.map_inst != nil && len(player.game.map_inst.spawns) > 0 {
+		eligible: [dynamic]^Spawn
+		defer delete(eligible)
+		for spawn in player.game.map_inst.spawns {
+			if player.team != 0 && spawn.team != 0 && spawn.team != player.team {
+				continue
+			}
+			occupied := false
+			for other in player.game.players {
+				if other != player && other.active {
+					dx := other.position.x - spawn.position.x
+					dz := other.position.z - spawn.position.z
+					if dx * dx + dz * dz < 100.0 {
+						occupied = true
+						break
+					}
+				}
+			}
+			if !occupied {
+				append(&eligible, spawn)
+			}
+		}
 		spawn := player.game.map_inst.spawns[rand.int_max(len(player.game.map_inst.spawns))]
+		if len(eligible) > 0 {
+			spawn = eligible[rand.int_max(len(eligible))]
+		}
 
 		player.position = spawn.position
 		player.direction.x = 0.0
@@ -131,6 +172,46 @@ player_kill :: proc(player: ^Player, killer: ^Player, kill_info: ^Player_Kill_In
 	}
 
 	player.active = false
+	player.health = 0
+	player.velocity = {}
+	player.deaths += 1
+	player.death_streak += 1
+	clear(&player.input_queue)
+	if player.game != nil {
+		player.respawn_timer = max(0.0, player.game.config.respawn_delay)
+	}
+
+	if killer != nil && killer != player {
+		killer.kills += 1
+		killer.death_streak = 0
+		if !skip_rewards && killer.game != nil && killer.game.config.kill_rewards {
+			killer.score += 100
+		}
+	}
+}
+
+player_apply_damage :: proc(victim, attacker: ^Player, amount: f32, weapon_id: i32, headshot: bool) -> bool {
+	if victim == nil || !victim.active || victim.god_mode || amount <= 0 {
+		return false
+	}
+	if attacker != nil && attacker != victim && victim.team != 0 && victim.team == attacker.team && !victim.game.mode.config.dmg_team {
+		return false
+	}
+
+	final_damage := amount
+	if attacker != nil && attacker.team == 1 {
+		final_damage *= victim.game.config.team1_damage
+	} else if attacker != nil && attacker.team == 2 {
+		final_damage *= victim.game.config.team2_damage
+	}
+
+	victim.health = max(0.0, victim.health - final_damage)
+	victim.last_damage_time = victim.game.now
+	if victim.health == 0 {
+		info := Player_Kill_Info{weapon_id = weapon_id}
+		player_kill(victim, attacker, &info, false)
+	}
+	return true
 }
 
 player_queue_input :: proc(player: ^Player, input: ^Input) {
@@ -891,9 +972,11 @@ player_shoot :: proc(player: ^Player) {
 
 			nearest_t: f32 = 2.0
 			nearest_normal := Vec3{}
+			nearest_player: ^Player
+			headshot := false
 
 			for object in player.game.map_inst.objects {
-				if !object.active || object.collision_type == .NONE {
+				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
 					continue
 				}
 				if player.game.is_local && object.mesh == nil {
@@ -905,6 +988,50 @@ player_shoot :: proc(player: ^Player) {
 					nearest_t = t
 					nearest_normal = normal
 				}
+			}
+
+			for target in player.game.players {
+				if target == player || !target.active || target.team != 0 && target.team == player.team && !player.game.mode.config.dmg_team {
+					continue
+				}
+
+				body_height := max(0.1, target.height * 0.72)
+				body_origin := Vec3{target.position.x, target.position.y, target.position.z}
+				body_scale := Vec3{target.scale * 2.0, body_height, target.scale * 2.0}
+				body_t, _, body_hit := ray_box_hit(shot_origin, shot_dir, body_origin, body_scale)
+
+				head_height := max(0.1, target.height - body_height)
+				head_origin := Vec3{target.position.x, target.position.y + body_height, target.position.z}
+				head_scale := Vec3{target.scale * 1.6, head_height, target.scale * 1.6}
+				head_t, _, head_hit := ray_box_hit(shot_origin, shot_dir, head_origin, head_scale)
+
+				hit_t := body_t
+				is_head := false
+				if head_hit && (!body_hit || head_t <= body_t) {
+					hit_t = head_t
+					is_head = true
+				} else if !body_hit {
+					continue
+				}
+
+				if hit_t < nearest_t {
+					nearest_t = hit_t
+					nearest_player = target
+					headshot = is_head
+				}
+			}
+
+			if nearest_player != nil {
+				distance := range * nearest_t
+				damage := player.weapon.damage
+				if player.weapon.range > player.weapon.drop_start && distance > player.weapon.drop_start {
+					drop_progress := clamp((distance - player.weapon.drop_start) / (player.weapon.range - player.weapon.drop_start), 0.0, 1.0)
+					damage = max(0.0, damage - player.weapon.damage_drop * drop_progress)
+				}
+				if headshot {
+					damage *= player.weapon.headshot_mlt
+				}
+				player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], headshot)
 			}
 
 			if nearest_t <= 1.0 {
@@ -928,6 +1055,11 @@ player_update :: proc(player: ^Player, delta: f32) {
 		return
 	}
 
+	if game_is_authority(player.game) && player.game.config.health_regen && !player.game.mode.config.no_regen && player.health < f32(player.max_health) && player.game.now - player.last_damage_time >= player.game.config.regen_delay {
+		class := &player.game.classes[player.class_index]
+		player.health = min(f32(player.max_health), player.health + f32(player.max_health) * class.regen * delta)
+	}
+
 	if len(player.input_queue) > 0 {
 		for i in 0 ..< len(player.input_queue) {
 			player_proc_input(player, &player.input_queue[i], false, player.game.move_lock)
@@ -945,19 +1077,33 @@ player_update :: proc(player: ^Player, delta: f32) {
 	}
 
 	if player.interpolate {
-		player.dt += delta
+		player_interpolate(player, delta)
+	}
+}
 
-		progress := min(1.6, player.dt * player.send_rate / GAME_CONSTANTS.interpolation) / player.game.config.delta_mlt
+player_interpolate :: proc(player: ^Player, delta: f32) {
+	if !player.interpolate {
+		return
+	}
 
-		player.last_position = player.position
+	player.dt += delta
 
-		player.position.x = player.interp_pos_start.x + (player.interp_pos_end.x - player.interp_pos_start.x) * progress
-		player.position.y = player.interp_pos_start.y + (player.interp_pos_end.y - player.interp_pos_start.y) * progress
-		player.position.z = player.interp_pos_start.z + (player.interp_pos_end.z - player.interp_pos_start.z) * progress
+	progress := clamp(
+		player.dt * player.send_rate / GAME_CONSTANTS.interpolation / player.game.config.delta_mlt,
+		0.0,
+		1.0,
+	)
 
-		if player.on_ground {
-			player_step(player, math.sqrt((player.last_position.x - player.position.x) * (player.last_position.x - player.position.x) + (player.last_position.z - player.position.z) * (player.last_position.z - player.position.z)))
-		}
+	player.last_position = player.position
+
+	player.position.x = player.interp_pos_start.x + (player.interp_pos_end.x - player.interp_pos_start.x) * progress
+	player.position.y = player.interp_pos_start.y + (player.interp_pos_end.y - player.interp_pos_start.y) * progress
+	player.position.z = player.interp_pos_start.z + (player.interp_pos_end.z - player.interp_pos_start.z) * progress
+	player.direction.x = player.interp_dir_start.x + (player.interp_dir_end.x - player.interp_dir_start.x) * progress
+	player.direction.y = player.interp_dir_start.y + normalize_angle(player.interp_dir_end.y - player.interp_dir_start.y) * progress
+
+	if player.on_ground {
+		player_step(player, math.sqrt((player.last_position.x - player.position.x) * (player.last_position.x - player.position.x) + (player.last_position.z - player.position.z) * (player.last_position.z - player.position.z)))
 	}
 }
 

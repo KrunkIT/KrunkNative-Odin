@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 
 DEFAULT_MAP_NAMES := [?]string{
@@ -24,7 +25,9 @@ DEFAULT_MAP_NAMES := [?]string{
 	"evacuation",
 }
 
-ROTATION_MAPS := [?]int{0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14}
+// Standard rotation intentionally stays smaller than the complete map registry.
+// Excluded maps remain available through --map and custom server configuration.
+ROTATION_MAPS := [?]int{2, 4, 12, 14}
 ROTATION_MODES := [?]i32{0}
 
 DEFAULT_MAP_CONFIG := Map_Config {
@@ -247,6 +250,12 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 		obj.scale = scale
 
 		obj.prefab = Prefab(prefab_id)
+		if team_val, has_team := raw_obj["tm"]; has_team {
+			obj.team = u32(max(0, i32(get_json_f32(team_val))))
+		}
+		if score_val, has_score := raw_obj["score"]; has_score {
+			obj.score_points = u32(max(0, i32(get_json_f32(score_val))))
+		}
 
 		if t_val, has_t := raw_obj["t"]; has_t {
 			obj.texture = u32(get_json_f32(t_val))
@@ -357,6 +366,8 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 			obj.premium = true
 		case i32(Prefab.SCORE_ZONE):
 			obj.score_zone = true
+		case i32(Prefab.TEAM_ZONE):
+			obj.team_zone = true
 		case i32(Prefab.TELEPORTER):
 			obj.teleporter = true
 		case i32(Prefab.CHECK_POINT):
@@ -446,6 +457,9 @@ get_json_f32 :: proc(val: json.Value) -> f32 {
 		return f32(v)
 	case json.Integer:
 		return f32(v)
+	case json.String:
+		value, ok := strconv.parse_f32(v)
+		return value if ok else 0.0
 	}
 
 	return 0.0

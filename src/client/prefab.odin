@@ -373,6 +373,25 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 		return mesh
 	}
 
+	if prefab_id == int(shared.Prefab.SCORE_ZONE) || prefab_id == int(shared.Prefab.OBJECTIVE) {
+		texture_release(texture_id)
+		geometry := create_plane_geo()
+		if geometry == nil {
+			return nil
+		}
+
+		material := basic_material_init()
+		mesh := mesh_init(geometry, &material.base)
+		mesh.transform.position = object.position
+		mesh.transform.position.y += 0.08
+		mesh.transform.scale = shared.Vec3{object.scale.x, 0.01, object.scale.z}
+		material.base.transparent = true
+		material.color = shared.Vec4{0.4, 0.45, 0.5, 0.16}
+		material.emissive = shared.Vec4{0.05, 0.05, 0.05, 1.0}
+		material.face_scale = shared.Vec3{object.scale.x, object.scale.z, 1.0}
+		return mesh
+	}
+
 	// Non-renderable gameplay markers and unsupported prefabs should not become
 	// visible wireframe collision boxes in production rendering.
 	texture_release(texture_id)

@@ -517,10 +517,11 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	step_y := player.render_you && !third_person ? abs(step_anim_rotate * 0.5) * anim_mlt_lean : abs(step_anim * 3.5)
 	step_yaw := player.render_you ? (third_person ? -step_anim * 0.5 : 0.0) : -step_anim * 2.0
 
-	if player.is_you || player.uid == -1 {
-		player_mesh.anchor.position = player.position
-		player_mesh.anchor.position.y += step_y
-	}
+	// Every entity's root follows its authoritative position. Previously this
+	// was restricted to the local/preview player, leaving network peers moving
+	// and rotating at the world origin despite receiving correct snapshots.
+	player_mesh.anchor.position = player.position
+	player_mesh.anchor.position.y += step_y
 
 	if player.game.map_inst.config.model != .SPRITE {
 		player_mesh.anchor.rotation.y = player.direction.y + step_yaw

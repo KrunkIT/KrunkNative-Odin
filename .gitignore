@@ -8,3 +8,8 @@ assets/*/*
 !assets/img/*
 !assets/shaders/*
 !assets/config/*
+S2C_SERVER_PROTOCOL_REFERENCE.md
+WEBSOCKET_DEOBFUSCATION.md
+NATIVE_CLIENT_PROTOCOL_REFERENCE.md
+KrunkNative-Windows.zip
+KrunkNative-Windows/

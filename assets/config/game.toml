@@ -8,6 +8,19 @@
 # (model/texture/sound) are resolved relative to the assets directory; set a
 # section-scoped directory with `weapons-dir` / `classes-dir` if desired.
 
+[game]
+tick_rate = 64
+max_players = 8
+game_time = 4
+warmup_time = 0.0
+auto_respawn = 1
+score_limit = 250
+health_regen = true
+objective_rotation_time = 60.0
+objective_score_rate = 1.0
+regen_delay = 5.0
+respawn_delay = 3.0
+
 [weapons]
 # weapons-dir = "mods/weapons/"
 
