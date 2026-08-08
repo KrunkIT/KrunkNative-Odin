@@ -45,13 +45,7 @@ On Debian or Ubuntu, install GLFW and its `pkg-config` metadata:
 sudo apt install pkg-config libglfw3 libglfw3-dev
 ```
 
-Use your distribution's equivalent packages elsewhere.
-
-That's the whole build-time dependency list. The old C-era README listed
-`libwayland-dev`, `libx11-dev`, `libgl1-mesa-dev`, etc. — those are **not needed** by the Odin
-port. They existed only to compile GLFW and GLAD from source; Odin's `vendor:glfw` binds the
-pre-built system `libglfw.so.3` instead, and OpenGL entry points are loaded at **runtime**, so no
-GL/Mesa/X11/Wayland development headers are required.
+Use your distribution's equivalent packages elsewhere. That's the whole build-time dependency list. 
 
 > **Fresh Odin installs only:** Odin ships the STB image/truetype libraries as source, and on
 > Linux their prebuilt archives are generated locally. If `odin build` panics with
