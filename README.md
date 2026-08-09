@@ -13,7 +13,8 @@ with Odin!
 ## Requirements
 
 - The [Odin compiler](https://odin-lang.org/) and a working system linker.
-- A GPU and driver with OpenGL 4.5 core support to run the client.
+- A GPU and driver with OpenGL 4.5 core support to run the client. See the
+  [GPU compatibility notes](doc/supported-gpus.md) for example hardware families and driver guidance.
 - The original game assets described below. The dedicated server does not need the model, texture,
   sound, or font assets.
 
@@ -83,6 +84,16 @@ Build from PowerShell or cmd with the bundled helper. The leading `.\` works in 
 .\build.bat check
 .\build.bat clean
 ```
+
+To build the client and server and package them with the minimum curated runtime assets, run:
+
+```powershell
+.\package-windows.ps1
+```
+
+The packager uses `KrunkNative-Windows.zip` as its asset seed, then adds the current binaries,
+configuration, and Famas assets. Use `-SkipBuild` to package existing binaries or `-AssetArchive`
+to provide another curated runtime archive.
 
 With no target, the script builds both binaries. The other targets build the client or server,
 run the tests, type-check both programs, or remove generated binaries, respectively.
