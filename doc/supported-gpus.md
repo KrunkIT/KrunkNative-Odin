@@ -8,7 +8,7 @@ hardware list.
 
 With a current vendor or Mesa driver, these families generally expose OpenGL 4.5 or newer:
 
-- **NVIDIA:** GeForce GTX 600 series and newer, including GTX 900, GTX 10, RTX 20, RTX 30, and RTX 40 series.
+- **NVIDIA:** GeForce GTX 600 series and newer, including GTX 900, GTX 10, RTX 20, RTX 30, RTX 40, and RTX 50 series.
 - **AMD:** Radeon HD 7000 series and newer GCN-based cards, plus Radeon RX 400/500, RX 5000, RX 6000, and RX 7000 series.
 - **Intel:** Broadwell (5th-generation Core) and newer integrated graphics, including Iris, Iris Xe, and Arc.
 - **AMD integrated graphics:** Ryzen APUs with Vega or newer Radeon graphics.
