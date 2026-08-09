@@ -10,6 +10,23 @@ import glfw "vendor:glfw"
 import stbi "vendor:stb/image"
 import shared "../shared"
 
+Display_Mode :: enum {
+	Windowed,
+	Borderless,
+	Fullscreen,
+}
+
+Display_Resolution :: struct {
+	width, height: i32,
+}
+
+DISPLAY_RESOLUTIONS := [?]Display_Resolution{
+	{1280, 720},
+	{1600, 900},
+	{1920, 1080},
+	{2560, 1440},
+}
+
 Client :: struct {
 	window: glfw.WindowHandle,
 	camera: Camera,
@@ -30,6 +47,7 @@ Client :: struct {
 	last_debug_key:    bool,
 	last_freecam_key:  bool,
 	last_fullscreen_key: bool,
+	last_escape_key:   bool,
 	last_swap_key:     u8,
 	last_mouse_button: bool,
 	in_game:           bool,
@@ -37,6 +55,10 @@ Client :: struct {
 	spawn_retry_timer: f32,
 	selected_class:    i32,
 	class_picker_open: bool,
+	settings_open:     bool,
+	display_mode:      Display_Mode,
+	resolution_index:  i32,
+	sensitivity:       f32,
 	freecam_enabled:   bool,
 	map_loaded:        bool,
 	net:               Net_Client_State,
@@ -56,6 +78,53 @@ Client :: struct {
 g_client: ^Client
 
 MAX_PREDICTED_INPUTS :: 256
+
+client_remember_windowed_rect :: proc(client: ^Client) {
+	if client.display_mode != .Windowed || glfw.GetWindowMonitor(client.window) != nil {
+		return
+	}
+
+	client.windowed_rect.x, client.windowed_rect.y = glfw.GetWindowPos(client.window)
+	client.windowed_rect.width, client.windowed_rect.height = glfw.GetWindowSize(client.window)
+}
+
+client_apply_display_settings :: proc(client: ^Client) {
+	monitor := glfw.GetPrimaryMonitor()
+	if monitor == nil {
+		return
+	}
+
+	mode := glfw.GetVideoMode(monitor)
+	monitor_x, monitor_y := glfw.GetMonitorPos(monitor)
+	resolution := DISPLAY_RESOLUTIONS[client.resolution_index]
+
+	switch client.display_mode {
+	case .Windowed:
+		glfw.SetWindowAttrib(client.window, glfw.DECORATED, 1)
+		x := monitor_x + (mode.width - resolution.width) / 2
+		y := monitor_y + (mode.height - resolution.height) / 2
+		glfw.SetWindowMonitor(client.window, nil, x, y, resolution.width, resolution.height, 0)
+		client.windowed_rect = {x, y, resolution.width, resolution.height}
+	case .Borderless:
+		glfw.SetWindowMonitor(client.window, nil, monitor_x, monitor_y, mode.width, mode.height, 0)
+		glfw.SetWindowAttrib(client.window, glfw.DECORATED, 0)
+		glfw.SetWindowPos(client.window, monitor_x, monitor_y)
+		glfw.SetWindowSize(client.window, mode.width, mode.height)
+	case .Fullscreen:
+		glfw.SetWindowAttrib(client.window, glfw.DECORATED, 1)
+		glfw.SetWindowMonitor(client.window, monitor, 0, 0, resolution.width, resolution.height, mode.refresh_rate)
+	}
+}
+
+client_set_display_mode :: proc(client: ^Client, display_mode: Display_Mode) {
+	if client.display_mode == display_mode {
+		return
+	}
+
+	client_remember_windowed_rect(client)
+	client.display_mode = display_mode
+	client_apply_display_settings(client)
+}
 
 Client_Options :: struct {
 	map_name: string,
@@ -671,8 +740,8 @@ client_clear_impacts :: proc(client: ^Client) {
 }
 
 client_update_freecam :: proc(client: ^Client, mouse_delta: shared.Vec2, delta: f32) {
-	client.camera.rotation.x -= mouse_delta.y * shared.GAME_CONSTANTS.mouse_sensitivity / client.camera.zoom
-	client.camera.rotation.y -= mouse_delta.x * shared.GAME_CONSTANTS.mouse_sensitivity / client.camera.zoom
+	client.camera.rotation.x -= mouse_delta.y * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
+	client.camera.rotation.y -= mouse_delta.x * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
 	client.camera.rotation.x = max(-math.PI * 0.5, min(math.PI * 0.5, client.camera.rotation.x))
 	client.camera.rotation.y = math.mod(client.camera.rotation.y, 2.0 * math.PI)
 
@@ -783,22 +852,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	fullscreen_key := glfw.GetKey(client.window, glfw.KEY_F11) == glfw.PRESS
 
 	if fullscreen_key && !client.last_fullscreen_key {
-		fullscreen := glfw.GetWindowMonitor(client.window) != nil
-
-		if fullscreen {
-			glfw.SetWindowMonitor(client.window, nil,
-				client.windowed_rect.x, client.windowed_rect.y,
-				client.windowed_rect.width, client.windowed_rect.height, 0,
-			)
-		} else {
-			client.windowed_rect.x, client.windowed_rect.y = glfw.GetWindowPos(client.window)
-			client.windowed_rect.width, client.windowed_rect.height = glfw.GetWindowSize(client.window)
-
-			monitor := glfw.GetPrimaryMonitor()
-			mode := glfw.GetVideoMode(monitor)
-
-			glfw.SetWindowMonitor(client.window, monitor, 0, 0, mode.width, mode.height, mode.refresh_rate)
-		}
+		client_set_display_mode(client, client.display_mode == .Windowed ? .Fullscreen : .Windowed)
 	}
 
 	client.last_fullscreen_key = fullscreen_key
@@ -806,13 +860,18 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 	left_down := glfw.GetMouseButton(client.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
 
-	if client.mouse_state.locked && glfw.GetKey(client.window, glfw.KEY_ESCAPE) == glfw.PRESS {
+	escape_key := glfw.GetKey(client.window, glfw.KEY_ESCAPE) == glfw.PRESS
+	if !client.mouse_state.locked && escape_key && !client.last_escape_key && client.settings_open {
+		client.settings_open = false
+	} else if client.mouse_state.locked && escape_key {
 		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 		client.mouse_state.locked = false
 	} else if !client.mouse_state.locked && left_down && !client.last_mouse_button {
 		clicked_ui := false
 
-		if client.class_picker_open {
+		if client.settings_open {
+			clicked_ui = settings_handle_click(client, f32(x), f32(y))
+		} else if client.class_picker_open {
 			// Class picker screen: clicking a class selects it, clicking BACK
 			// returns to the spawn screen.
 			layout := class_picker_layout(client)
@@ -833,12 +892,18 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 				}
 			}
 		} else {
-			// Spawn screen: clicking PICK YOUR CLASS opens the picker; clicking
-			// anywhere else starts the game.
+			// Spawn screen buttons open their respective menus; clicking anywhere
+			// else starts or resumes the game.
 			bx, by, bw, bh := pick_your_class_button_rect(client)
 			if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
 				client.class_picker_open = true
 				clicked_ui = true
+			} else {
+				bx, by, bw, bh = settings_button_rect(client)
+				if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
+					client.settings_open = true
+					clicked_ui = true
+				}
 			}
 		}
 
@@ -851,6 +916,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	}
 
 	client.last_mouse_button = left_down
+	client.last_escape_key = escape_key
 
 	if client.mouse_state.locked && (client.me == nil || !client.me.active) {
 		client_enter_game(client)
@@ -882,8 +948,8 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 				client.me.noclip = !client.me.noclip
 			}
 
-			input.x_dir -= mouse_delta.y * shared.GAME_CONSTANTS.mouse_sensitivity / client.camera.zoom
-			input.y_dir -= mouse_delta.x * shared.GAME_CONSTANTS.mouse_sensitivity / client.camera.zoom
+			input.x_dir -= mouse_delta.y * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
+			input.y_dir -= mouse_delta.x * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
 
 			input.jump = glfw.GetKey(client.window, glfw.KEY_SPACE) == glfw.PRESS
 			input.crouch = glfw.GetKey(client.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS
@@ -1036,6 +1102,9 @@ main :: proc() {
 	defer free(client)
 	g_client = client
 	client.show_fps = options.show_fps
+	client.display_mode = .Windowed
+	client.resolution_index = 0
+	client.sensitivity = 1.0
 
 	client.camera.zoom = 1.0
 	client.camera.fov = math.PI / 2.0
@@ -1052,6 +1121,8 @@ main :: proc() {
 		return
 	}
 	defer glfw.DestroyWindow(client.window)
+	client.windowed_rect.x, client.windowed_rect.y = glfw.GetWindowPos(client.window)
+	client.windowed_rect.width, client.windowed_rect.height = glfw.GetWindowSize(client.window)
 
 	set_window_icon(client)
 
