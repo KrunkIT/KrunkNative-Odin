@@ -174,9 +174,16 @@ Impact_Marker :: struct {
 }
 
 Tracer_Marker :: struct {
-	mesh:           ^Mesh,
-	lifetime:       f32,
-	total_lifetime: f32,
+	mesh:            ^Mesh,
+	direction:       shared.Vec3,
+	start_position:  shared.Vec3,
+	travel_distance: f32,
+	distance:        f32,
+	segment_length:  f32,
+	speed:           f32,
+	lifetime:        f32,
+	total_lifetime:  f32,
+	fade_lifetime:   f32,
 }
 
 // Asset caches (keyed by path)

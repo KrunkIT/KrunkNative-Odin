@@ -710,6 +710,14 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 		return
 	}
 
+	// A tracer is a short dash that travels along the shot path. Keep the
+	// segment readable at close range while allowing it to reach long-range
+	// impacts without appearing as a static line across the whole map.
+	segment_length := min(0.7, visible_length)
+	speed: f32 = 110.0
+	travel_time := visible_length / speed
+	fade_time: f32 = 0.06
+
 	material := basic_material_init()
 	if material == nil {
 		return
@@ -718,8 +726,9 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 	material.color = shared.Vec4{1.0, 0.72, 0.12, 0.95}
 
 	mesh := mesh_init(create_cube_geo(), &material.base)
-	mesh.transform.position = impact.origin + direction * start_offset
-	mesh.transform.scale = shared.Vec3{0.055, visible_length, 0.055}
+	start_position := impact.origin + direction * start_offset
+	mesh.transform.position = start_position
+	mesh.transform.scale = shared.Vec3{0.055, segment_length, 0.055}
 	mesh.transform.rotation_order = .EXTRINSIC
 	mesh.transform.rotation.x = math.atan2(math.sqrt(direction.x * direction.x + direction.z * direction.z), direction.y)
 	mesh.transform.rotation.y = math.atan2(direction.x, direction.z)
@@ -735,8 +744,15 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 	scene_add_mesh(client.scene, mesh)
 	append(&client.tracer_markers, Tracer_Marker{
 		mesh = mesh,
-		lifetime = 0.12,
-		total_lifetime = 0.12,
+		direction = direction,
+		start_position = start_position,
+		travel_distance = visible_length,
+		distance = 0,
+		segment_length = segment_length,
+		speed = speed,
+		lifetime = travel_time + fade_time,
+		total_lifetime = travel_time + fade_time,
+		fade_lifetime = fade_time,
 	})
 }
 
@@ -784,8 +800,15 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 	for i := len(client.tracer_markers) - 1; i >= 0; i -= 1 {
 		tracer := &client.tracer_markers[i]
 		tracer.lifetime -= delta
+		tracer.distance = min(tracer.travel_distance, tracer.distance + tracer.speed * delta)
+		tail_distance := min(tracer.distance, max(0, tracer.travel_distance - tracer.segment_length))
+		tracer.mesh.transform.position = tracer.start_position + tracer.direction * tail_distance
 		material := cast(^Basic_Material)tracer.mesh.material
-		material.color.w = clamp(tracer.lifetime / tracer.total_lifetime, 0.0, 1.0)
+		if tracer.distance >= tracer.travel_distance {
+			material.color.w = clamp(tracer.lifetime / tracer.fade_lifetime, 0.0, 1.0)
+		} else {
+			material.color.w = 0.95
+		}
 
 		if tracer.lifetime <= 0 {
 			scene_remove_mesh(client.scene, tracer.mesh)
