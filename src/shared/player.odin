@@ -598,7 +598,10 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		swap_equipment := input.swap == 3
 
 		swap_to: i32 = -1
-		weapons := g_weapons()
+		// Resolve swap targets from the active data-driven registry. Custom
+		// weapon flags must affect secondary/melee selection as they do in the
+		// native configured loadout.
+		weapons := player.game.weapons if player.game != nil && len(player.game.weapons) > 0 else g_weapons()
 
 		for i in 0 ..< player.loadout_size {
 			weapon := player.loadout[i]
@@ -1053,18 +1056,20 @@ player_shoot :: proc(player: ^Player) {
 				player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], headshot)
 			}
 
-			if nearest_t <= 1.0 {
-				impact := Bullet_Impact{
-					position = shot_origin + shot_dir * nearest_t,
-					normal   = nearest_normal,
-				}
-
-				// Bound pending events if a headless consumer is not draining them.
-				if len(player.game.impacts) >= 256 {
-					ordered_remove(&player.game.impacts, 0)
-				}
-				append(&player.game.impacts, impact)
+			trace_hit := nearest_t <= 1.0
+			impact := Bullet_Impact{
+				origin   = shot_origin,
+				position = shot_origin + shot_dir * (trace_hit ? nearest_t : 1.0),
+				normal   = nearest_normal,
+				hit      = trace_hit,
 			}
+
+			// Every hitscan shot emits a bounded event. Clients use the full path
+			// for tracers and only render an impact decal when hit is true.
+			if len(player.game.impacts) >= 256 {
+				ordered_remove(&player.game.impacts, 0)
+			}
+			append(&player.game.impacts, impact)
 		}
 	}
 }

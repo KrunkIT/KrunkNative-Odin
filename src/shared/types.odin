@@ -453,8 +453,10 @@ Player_Kill_Info :: struct {
 }
 
 Bullet_Impact :: struct {
+	origin:   Vec3,
 	position: Vec3,
 	normal:   Vec3,
+	hit:      bool,
 }
 
 Vote_Kick :: struct {

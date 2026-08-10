@@ -4,9 +4,9 @@ import "core:encoding/endian"
 
 PACKET_MAGIC :: 0x4B52554E // 'KRUN'
 PACKET_HEADER_SIZE :: 7
-PROTOCOL_VERSION :: 5
+PROTOCOL_VERSION :: 6
 PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 85
-PACKET_BULLET_IMPACT_PAYLOAD_SIZE :: 24
+PACKET_BULLET_IMPACT_PAYLOAD_SIZE :: 37
 MAX_PLAYERS_PER_MATCH :: 32
 // The server broadcasts one snapshot per N simulation ticks.
 SNAPSHOT_RATE_DIVISOR :: 2
@@ -443,6 +443,10 @@ packet_serialize_bullet_impact :: proc(buf: []byte, impact: ^Bullet_Impact) -> i
 	endian.put_u16(buf[5:7], .Little, u16(payload_size))
 
 	offset := PACKET_HEADER_SIZE
+	endian.put_f32(buf[offset:offset + 4], .Little, impact.origin.x)
+	endian.put_f32(buf[offset + 4:offset + 8], .Little, impact.origin.y)
+	endian.put_f32(buf[offset + 8:offset + 12], .Little, impact.origin.z)
+	offset += 12
 	endian.put_f32(buf[offset:offset + 4], .Little, impact.position.x)
 	endian.put_f32(buf[offset + 4:offset + 8], .Little, impact.position.y)
 	endian.put_f32(buf[offset + 8:offset + 12], .Little, impact.position.z)
@@ -450,6 +454,8 @@ packet_serialize_bullet_impact :: proc(buf: []byte, impact: ^Bullet_Impact) -> i
 	endian.put_f32(buf[offset:offset + 4], .Little, impact.normal.x)
 	endian.put_f32(buf[offset + 4:offset + 8], .Little, impact.normal.y)
 	endian.put_f32(buf[offset + 8:offset + 12], .Little, impact.normal.z)
+	offset += 12
+	buf[offset] = impact.hit ? 1 : 0
 
 	return PACKET_HEADER_SIZE + payload_size
 }
@@ -464,6 +470,10 @@ packet_deserialize_bullet_impact :: proc(buf: []byte) -> (impact: Bullet_Impact,
 	}
 
 	offset := PACKET_HEADER_SIZE
+	impact.origin.x, _ = endian.get_f32(buf[offset:offset + 4], .Little)
+	impact.origin.y, _ = endian.get_f32(buf[offset + 4:offset + 8], .Little)
+	impact.origin.z, _ = endian.get_f32(buf[offset + 8:offset + 12], .Little)
+	offset += 12
 	impact.position.x, _ = endian.get_f32(buf[offset:offset + 4], .Little)
 	impact.position.y, _ = endian.get_f32(buf[offset + 4:offset + 8], .Little)
 	impact.position.z, _ = endian.get_f32(buf[offset + 8:offset + 12], .Little)
@@ -471,6 +481,8 @@ packet_deserialize_bullet_impact :: proc(buf: []byte) -> (impact: Bullet_Impact,
 	impact.normal.x, _ = endian.get_f32(buf[offset:offset + 4], .Little)
 	impact.normal.y, _ = endian.get_f32(buf[offset + 4:offset + 8], .Little)
 	impact.normal.z, _ = endian.get_f32(buf[offset + 8:offset + 12], .Little)
+	offset += 12
+	impact.hit = buf[offset] != 0
 
 	return impact, true
 }

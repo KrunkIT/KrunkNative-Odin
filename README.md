@@ -9,6 +9,9 @@ with Odin!
 > [!NOTE]
 > The Odin port is actively developed. The client supports offline play and a localhost TCP
 > multiplayer path; the network address is currently fixed to `127.0.0.1:21015`.
+>
+> The native protocol is project-owned and intentionally targets only this native client and
+> dedicated server.
 
 ## Requirements
 
@@ -65,7 +68,7 @@ make          # build client and server
 make client   # build bin/krunknative_client
 make server   # build bin/krunknative_server
 make check    # type-check client and server
-make test     # build and run the simulation parity tests
+make test     # build and run the deterministic simulation tests
 ```
 
 ### Windows
@@ -187,14 +190,28 @@ and player limit. The standard map rotation is `sandstorm`, `undergrowth`, `indu
 picker uses the standard nine-class pool, while every configured class remains addressable through
 `--class` for custom play.
 
+## Testing
+
+The headless test executable exercises the authoritative server path and the client prediction
+path against the same fixed-timestep simulation. It covers map collision, gravity, floor and wall
+blocking, jump replay, remote interpolation, packet validation, loadouts, weapon timing, damage,
+respawning, objective scoring, and all recorded movement scenarios.
+
+```bat
+.\build.bat tests
+```
+
+The client renderer still requires a GPU and a window; presentation-only behavior should be
+verified separately from the deterministic headless suite.
+
 ## Project layout
 
 | Path | Contents |
 | --- | --- |
 | `src/client/` | OpenGL client, UI, audio, input, and client networking |
 | `src/server/` | Dedicated authoritative server and TCP networking |
-| `src/shared/` | Simulation, maps, configuration, types, and network protocol |
-| `src/tests/` | Configuration and movement parity tests |
+| `src/shared/` | Simulation, maps, configuration, types, and native network protocol |
+| `src/tests/` | Server-authority, client-prediction, physics, configuration, and movement tests |
 | `assets/` | Maps, shaders, gameplay configuration, and local runtime assets |
 
 
@@ -211,7 +228,7 @@ later phases are intentionally broad and may change as the project and community
       match resolution when enabled.
 - [ ] Lock the competitive class pool and match each class's health, speed, regeneration,
       wall-jump ability, hitbox, restrictions, and primary/secondary/melee loadout.
-- [ ] Match the browser simulation tick order, fixed timestep, movement constants, and speed
+- [ ] Match the native simulation tick order, fixed timestep, movement constants, and speed
       caps for ground movement, air strafing, crouching, sliding, jumping, ladders, ramps,
       wall jumps, bunnyhopping, and jump buffering.
 - [ ] Implement the SRM movement state and mechanics: ground/wall frame counters, ramp
@@ -226,7 +243,7 @@ later phases are intentionally broad and may change as the project and community
       objective volumes, spawn points, and per-round object reset behavior.
 - [ ] Make the simulation deterministic with a fixed timestep, seeded RNG, and explicit update
       order; add replay-vector tests comparing position, velocity, health, ammo, kills, and
-      objective state against browser behavior.
+      objective state between the authoritative server and predicted client.
 - [ ] Add focused edge-case tests for ramps, wall jumps, contested objectives, simultaneous
       kills, reload interruption, projectile/wall impacts, and round transitions.
 

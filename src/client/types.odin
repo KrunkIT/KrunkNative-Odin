@@ -173,6 +173,12 @@ Impact_Marker :: struct {
 	lifetime: f32,
 }
 
+Tracer_Marker :: struct {
+	mesh:           ^Mesh,
+	lifetime:       f32,
+	total_lifetime: f32,
+}
+
 // Asset caches (keyed by path)
 g_geometry_cache: map[string]^Geometry
 g_texture_cache:  map[string]^Texture_Cache_Entry

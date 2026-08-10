@@ -189,6 +189,39 @@ loadout = ["ak47", "deagle", "knife"]
 	return true
 }
 
+test_configured_weapon_switch :: proc() -> bool {
+	config := shared.config_load_gameplay("")
+	defer shared.config_destroy_gameplay(config)
+
+	// The AWP is a primary in the built-in registry. Marking it as a
+	// configured secondary catches code that consults the wrong registry.
+	config.weapons[0].secondary = true
+	config.classes[0].loadout = []i32{1, 0}
+	config.classes[0].secondary = true
+
+	map_inst := shared.Map{death_y = -100}
+	game := shared.Game{}
+	maps := []^shared.Map{&map_inst}
+	shared.game_configure(&game, &config.game, maps, nil, config.weapons, config.classes)
+	shared.game_init(&game, 0, 0, true)
+	defer shared.game_destroy(&game)
+
+	player := shared.player_init(&game)
+	shared.game_players_add(&game, player)
+	shared.player_spawn(player, 0)
+	player.swap_timer = 0
+	input := shared.Input{delta = 1.0 / 64.0, move_dir = -1, swap = 1}
+	shared.player_proc_input(player, &input, false, false)
+
+	if player.loadout_index != 1 || player.weapon != game.weapons[0] {
+		fmt.eprintln("Configured weapon switch test failed")
+		return false
+	}
+
+	fmt.println("Configured weapon switch test OK")
+	return true
+}
+
 test_famas_burst :: proc() -> bool {
 	map_inst := shared.Map{death_y = -100}
 	game := shared.Game{}
@@ -280,7 +313,11 @@ test_shot_feedback :: proc() -> bool {
 		player.ammo[player.loadout_index] == ammo_before - 1 &&
 		player.shot_seq == shot_seq_before + 1
 	recoil_ok := player.recoil_force > 0 && player.recoil_anim > 0 && player.recoil_anim_y > 0
-	impact_ok := len(game.impacts) == 1 && game.impacts[0].normal == shared.Vec3{-1, 0, 0}
+	impact_ok :=
+		len(game.impacts) == 1 &&
+		game.impacts[0].hit &&
+		game.impacts[0].origin.x == player.position.x &&
+		game.impacts[0].normal == shared.Vec3{-1, 0, 0}
 	if !shot_ok || !recoil_ok || !impact_ok {
 		fmt.printf(
 			"Shot feedback test failed: shot=%v recoil=%v impact=%v ammo=%d->%d seq=%d->%d force=%f anim=%f anim_y=%f impacts=%d active=%v model=%v melee=%v no_auto=%v swap=%f reload=%f did_shoot=%v\n",
@@ -303,6 +340,19 @@ test_shot_feedback :: proc() -> bool {
 			player.reloads[player.loadout_index],
 			player.did_shoot,
 		)
+		return false
+	}
+
+	clear(&game.impacts)
+	player.direction.y = math.PI / 2.0
+	shared.player_shoot(player)
+	miss_distance: f32
+	if len(game.impacts) == 1 {
+		trace_delta := game.impacts[0].position - game.impacts[0].origin
+		miss_distance = math.sqrt(trace_delta.x * trace_delta.x + trace_delta.y * trace_delta.y + trace_delta.z * trace_delta.z)
+	}
+	if len(game.impacts) != 1 || game.impacts[0].hit || miss_distance < player.weapon.range * 0.99 {
+		fmt.eprintln("Missed-shot tracer event test failed")
 		return false
 	}
 
@@ -491,8 +541,10 @@ test_objective_combat_state :: proc() -> bool {
 	}
 
 	impact := shared.Bullet_Impact{
+		origin = {-4.0, 1.5, 2.0},
 		position = {1.25, -2.5, 3.75},
 		normal = {0, 0, 1},
+		hit = true,
 	}
 	impact_packet_size := shared.packet_serialize_bullet_impact(buf[:], &impact)
 	decoded_impact, decoded_impact_ok := shared.packet_deserialize_bullet_impact(buf[:impact_packet_size])

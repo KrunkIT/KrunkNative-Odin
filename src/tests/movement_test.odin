@@ -279,6 +279,15 @@ main :: proc() {
 	if !test_gameplay_config() {
 		os.exit(1)
 	}
+	if !test_configured_weapon_switch() {
+		os.exit(1)
+	}
+	if !test_server_physics() {
+		os.exit(1)
+	}
+	if !test_client_physics() {
+		os.exit(1)
+	}
 	if !test_famas_burst() {
 		os.exit(1)
 	}

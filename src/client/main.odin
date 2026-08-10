@@ -69,6 +69,7 @@ Client :: struct {
 	game: shared.Game,
 	me:   ^shared.Player,
 	impact_markers: [dynamic]Impact_Marker,
+	tracer_markers: [dynamic]Tracer_Marker,
 	show_fps:       bool,
 	fps_value:      u32,
 	fps_frames:     u32,
@@ -693,8 +694,59 @@ client_update_impact_billboard :: proc(marker: ^Impact_Marker, camera: ^Camera) 
 	marker.mesh.transform.rotation.z = 0
 }
 
+client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
+	direction := impact.position - impact.origin
+	length := math.sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+	if length <= 0.01 {
+		return
+	}
+	direction /= length
+
+	// Move the visible start away from the eye/camera so a local tracer does
+	// not fill the first-person view. The cube's local +Y axis runs from 0..1.
+	start_offset := min(1.25, length * 0.2)
+	visible_length := length - start_offset
+	if visible_length <= 0.01 {
+		return
+	}
+
+	material := basic_material_init()
+	if material == nil {
+		return
+	}
+	material.base.transparent = true
+	material.color = shared.Vec4{1.0, 0.72, 0.12, 0.95}
+
+	mesh := mesh_init(create_cube_geo(), &material.base)
+	mesh.transform.position = impact.origin + direction * start_offset
+	mesh.transform.scale = shared.Vec3{0.055, visible_length, 0.055}
+	mesh.transform.rotation_order = .EXTRINSIC
+	mesh.transform.rotation.x = math.atan2(math.sqrt(direction.x * direction.x + direction.z * direction.z), direction.y)
+	mesh.transform.rotation.y = math.atan2(direction.x, direction.z)
+	mesh.transform.rotation.z = 0
+
+	if len(client.tracer_markers) >= 256 {
+		oldest := client.tracer_markers[0]
+		scene_remove_mesh(client.scene, oldest.mesh)
+		mesh_fini(oldest.mesh)
+		ordered_remove(&client.tracer_markers, 0)
+	}
+
+	scene_add_mesh(client.scene, mesh)
+	append(&client.tracer_markers, Tracer_Marker{
+		mesh = mesh,
+		lifetime = 0.12,
+		total_lifetime = 0.12,
+	})
+}
+
 client_tick_impacts :: proc(client: ^Client, delta: f32) {
-	for impact in client.game.impacts {
+	for &impact in client.game.impacts {
+		client_add_tracer(client, &impact)
+		if !impact.hit {
+			continue
+		}
+
 		material := basic_material_init()
 		if material == nil {
 			continue
@@ -728,6 +780,19 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 			unordered_remove(&client.impact_markers, i)
 		}
 	}
+
+	for i := len(client.tracer_markers) - 1; i >= 0; i -= 1 {
+		tracer := &client.tracer_markers[i]
+		tracer.lifetime -= delta
+		material := cast(^Basic_Material)tracer.mesh.material
+		material.color.w = clamp(tracer.lifetime / tracer.total_lifetime, 0.0, 1.0)
+
+		if tracer.lifetime <= 0 {
+			scene_remove_mesh(client.scene, tracer.mesh)
+			mesh_fini(tracer.mesh)
+			unordered_remove(&client.tracer_markers, i)
+		}
+	}
 }
 
 client_clear_impacts :: proc(client: ^Client) {
@@ -736,6 +801,11 @@ client_clear_impacts :: proc(client: ^Client) {
 		mesh_fini(marker.mesh)
 	}
 	delete(client.impact_markers)
+	for tracer in client.tracer_markers {
+		scene_remove_mesh(client.scene, tracer.mesh)
+		mesh_fini(tracer.mesh)
+	}
+	delete(client.tracer_markers)
 	clear(&client.game.impacts)
 }
 
