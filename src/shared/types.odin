@@ -396,7 +396,6 @@ Player :: struct {
 	melee_swing_side:                i32,
 	melee_anim_timer:                f32,
 	melee_anim_duration:             f32,
-	spawn_protect_timer:             f32,
 	loadout:                         []i32,
 	ammo:                            []u32,
 	reloads:                         []f32,

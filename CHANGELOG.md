@@ -8,12 +8,10 @@ round of performance work.
 
 ### Added
 
-- **Melee** — hitscan damage with a 1.5× backstab bonus, plus a shoulder-pivot
+- **Melee** — flat 50 damage matching the original, plus a shoulder-pivot
   swing that sweeps left↔right each attack with the knife gripped in the hand.
 - **Bullet tracers** — instant full-length beams that fade in ~80 ms, plus wall
   impact decals.
-- **Spawn protection** — 1.5 s of invulnerability after spawning, dropped the
-  moment you fire or attack.
 - **Hardpoint round progression** — round resolution, score resets, and overtime
   sudden-death when the timer runs out on a tie.
 

@@ -465,9 +465,6 @@ test_objective_combat_state :: proc() -> bool {
 
 	// Exercise the real hitscan path. The active objective volume sits between
 	// the players and must not behave like an invisible bullet-blocking wall.
-	// Clear spawn protection — the test is exercising hitscan geometry, not
-	// protection mechanics (those are covered separately below).
-	player_one.spawn_protect_timer = 0.0
 	player_two.position = {-10, 0, 0}
 	player_two.direction = {0, -1.5707963}
 	player_one.position = {10, 0, 0}
@@ -482,17 +479,6 @@ test_objective_combat_state :: proc() -> bool {
 		fmt.eprintln("Authoritative player hitscan test failed")
 		return false
 	}
-
-	// Verify spawn protection blocks damage from other players
-	shared.player_spawn(player_one)
-	player_one.position = {10, 0, 0}
-	health_protected := player_one.health
-	shared.player_shoot(player_two)
-	if player_one.health != health_protected {
-		fmt.eprintln("Spawn protection test failed")
-		return false
-	}
-	player_one.spawn_protect_timer = 0.0
 
 	state := shared.packet_match_state_from_game(&game)
 	buf: [128]byte

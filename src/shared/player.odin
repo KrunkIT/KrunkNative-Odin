@@ -133,7 +133,6 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.slide_timer = 0.0
 	player.jump_timer = 0.0
 	player.reload_timer = 0.0
-	player.spawn_protect_timer = 1.5
 
 	player_update_height(player)
 	player_swap_weapon(player, 0, true, false, false)
@@ -199,9 +198,6 @@ player_kill :: proc(player: ^Player, killer: ^Player, kill_info: ^Player_Kill_In
 
 player_apply_damage :: proc(victim, attacker: ^Player, amount: f32, weapon_id: i32, headshot: bool) -> bool {
 	if victim == nil || !victim.active || victim.god_mode || amount <= 0 {
-		return false
-	}
-	if attacker != nil && attacker != victim && victim.spawn_protect_timer > 0.0 {
 		return false
 	}
 	if attacker != nil && attacker != victim && victim.team != 0 && victim.team == attacker.team && !victim.game.mode.config.dmg_team {
@@ -926,7 +922,6 @@ player_melee :: proc(player: ^Player) {
 	player.reloads[player.loadout_index] = player.weapon.rate * player.game.config.fire_rate
 	player.did_shoot = true
 	player.did_act = true
-	player.spawn_protect_timer = 0.0
 
 	// Melee swing animation state: alternate sweep direction, restart the timer.
 	player.melee_swing_side = player.melee_swing_side <= 0 ? 1 : -1
@@ -950,7 +945,6 @@ player_melee :: proc(player: ^Player) {
 		nearest_t: f32 = 2.0
 		nearest_normal := Vec3{}
 		nearest_player: ^Player
-		backstab := false
 
 		if player.game != nil && player.game.map_inst != nil {
 			for object in player.game.map_inst.objects {
@@ -990,9 +984,6 @@ player_melee :: proc(player: ^Player) {
 					if hit_t < nearest_t {
 						nearest_t = hit_t
 						nearest_player = target
-
-						angle_diff := abs(normalize_angle(player.direction.y - target.direction.y))
-						backstab = angle_diff < math.PI * 0.35
 					}
 				}
 			}
@@ -1000,10 +991,7 @@ player_melee :: proc(player: ^Player) {
 
 		if nearest_player != nil {
 			damage := player.weapon.damage > 0 ? player.weapon.damage : 50.0
-			if backstab {
-				damage *= 1.5
-			}
-			player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], backstab)
+			player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], false)
 		}
 
 		trace_hit := nearest_t <= 1.0
@@ -1031,7 +1019,6 @@ player_shoot :: proc(player: ^Player) {
 	player.did_shoot = true
 	player.did_act = true
 	player.shot_seq += 1
-	player.spawn_protect_timer = 0.0
 
 	if player.burst_count != 0 {
 		player.burst_count -= 1
@@ -1172,10 +1159,6 @@ player_shoot :: proc(player: ^Player) {
 player_update :: proc(player: ^Player, delta: f32) {
 	if !player.active {
 		return
-	}
-
-	if player.spawn_protect_timer > 0.0 {
-		player.spawn_protect_timer = max(0.0, player.spawn_protect_timer - delta)
 	}
 
 	if player.melee_anim_timer > 0.0 {
