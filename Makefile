@@ -1,6 +1,12 @@
 ODIN ?= odin
 BIN_DIR := bin
 
+# Build optimization profile for client/server. Valid: none (default, fastest
+# compile), minimal (light optimization), speed (full optimization).
+#   make client PROFILE=minimal
+#   make PROFILE=speed
+PROFILE ?= none
+
 UNAME_S := $(shell uname -s)
 
 .PHONY: all client server test check clean dist-windows
@@ -20,13 +26,14 @@ endif
 
 client:
 	mkdir -p $(BIN_DIR)
-	$(ODIN) build src/client -out:$(BIN_DIR)/krunknative_client -o:none
+	$(ODIN) build src/client -out:$(BIN_DIR)/krunknative_client -o:$(PROFILE)
 
 server:
 	mkdir -p $(BIN_DIR)
-	$(ODIN) build src/server -out:$(BIN_DIR)/krunknative_server -o:none
+	$(ODIN) build src/server -out:$(BIN_DIR)/krunknative_server -o:$(PROFILE)
 
 test:
+	# Tests are correctness checks; always compile fast with -o:none.
 	mkdir -p $(BIN_DIR)
 	$(ODIN) build src/tests -out:$(BIN_DIR)/krunknative_tests -o:none
 	./$(BIN_DIR)/krunknative_tests
