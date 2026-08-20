@@ -2,7 +2,54 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "core:math/linalg"
 import shared "../shared"
+
+// transform_local_matrix composes the same local TRS matrix that
+// mesh_update_transform_matrix builds for a node with no parent. Used to
+// re-parent the melee blade onto the right arm's shoulder pivot.
+transform_local_matrix :: proc(position, rotation, scale: shared.Vec3, order: Rotation_Order) -> shared.Mat4 {
+	scale_matrix := linalg.matrix4_scale_f32(scale)
+	rotate_x_matrix := linalg.matrix4_rotate_f32(rotation.x, shared.Vec3{1, 0, 0})
+	rotate_y_matrix := linalg.matrix4_rotate_f32(rotation.y, shared.Vec3{0, 1, 0})
+	rotate_z_matrix := linalg.matrix4_rotate_f32(rotation.z, shared.Vec3{0, 0, 1})
+	translate_matrix := linalg.matrix4_translate_f32(position)
+
+	tmp := scale_matrix
+	if order == .INTRINSIC {
+		tmp = rotate_x_matrix * (rotate_y_matrix * (rotate_z_matrix * tmp))
+	} else {
+		tmp = rotate_z_matrix * (rotate_y_matrix * (rotate_x_matrix * tmp))
+	}
+	return translate_matrix * tmp
+}
+
+// matrix_to_transform_xyz extracts position + XYZ-extrinsic Euler
+// (R = Rz·Ry·Rx) from a rigid 4x4 matrix.
+matrix_to_transform_xyz :: proc(m: shared.Mat4) -> (position: shared.Vec3, rotation: shared.Vec3) {
+	position = shared.Vec3{m[0, 3], m[1, 3], m[2, 3]}
+	rotation = shared.Vec3{
+		math.atan2(m[2, 1], m[2, 2]),
+		math.asin(clamp(-m[2, 0], -1.0, 1.0)),
+		math.atan2(m[1, 0], m[0, 0]),
+	}
+	return
+}
+
+// melee_0.obj spans X ∈ [-1.09, 2.27]: handle at negative X, blade tip at
+// positive X, origin at the blade/handle junction. This shifts the geometry
+// along its own +X (blade) axis so the fist grips the handle instead of the
+// handle butt poking out behind the hand.
+MELEE_GRIP_SHIFT :: 0.15
+
+// Base orientation of the knife (Euler XYZ, intrinsic). Each knob moves the
+// blade a different way — tweak these to fix how the knife sits in the hand:
+//   MELEE_ROT_Z: roll — spins the blade edge (blade pointing up/side/down).
+//   MELEE_ROT_X: pitch — tips the blade forward/back (raise/lower the point).
+//   MELEE_ROT_Y: yaw — swings the blade left/right (first-person only).
+MELEE_ROT_X :: -math.PI / 3.5
+MELEE_ROT_Y :: 0.3 
+MELEE_ROT_Z :: math.PI * 1
 
 Color_Cube_Segment :: struct {
 	color:  i32,
@@ -130,6 +177,9 @@ generate_arm :: proc(x, y: f32, weapon: ^shared.Weapon, is_left, third_person, l
 	arm.anchor.rotation.x = -arm_angles[1] + math.atan2(weapon.offset.y + hold.y - y, -(weapon.offset.z - hold.z))
 	arm.anchor.rotation.y = math.atan2(x - (weapon.offset.x * left_handed_mlt - hold.x) * (is_left && weapon.akimbo ? -1.0 : 1.0), -(weapon.offset.z - hold.z))
 	arm.anchor.rotation_order = .EXTRINSIC
+
+	arm.base_pos = arm.anchor.position
+	arm.base_rot = arm.anchor.rotation
 
 	return arm
 }
@@ -347,15 +397,27 @@ player_generate_meshes :: proc(player: ^shared.Player, render_you: bool) {
 					melee := mesh_init(melee_geo, &melee_mat.base)
 
 					melee_mat.texture = melee_texture
-					melee.transform.parent = &arms.anchor
 
-					melee.transform.position.x = render_you ? 0.9 : 1.7
-					melee.transform.position.y = render_you ? -0.95 : -0.4
-					melee.transform.position.z = render_you ? 0.72 : 1.2
+					// Parent the blade to the right arm's shoulder pivot so it follows
+					// arm swings (matches Krunker, where the knife is a child of
+					// armMeshes[1]). Recompute its local transform so it keeps the
+					// same world-space pose it had under the arms root.
+					world_pos := shared.Vec3{render_you ? 0.9 : 1.7, render_you ? -0.95 : -0.4, render_you ? 0.72 : 1.2}
+					world_rot := shared.Vec3{MELEE_ROT_X, render_you ? MELEE_ROT_Y : math.PI * 0.5, MELEE_ROT_Z}
 
-					melee.transform.rotation.x = -math.PI / 3.5
-					melee.transform.rotation.y = render_you ? 0.3 : math.PI * 0.5
-					melee.transform.rotation.z = math.PI * -0.9
+					shoulder := arms.right.anchor
+					shoulder_mat := transform_local_matrix(shoulder.position, shoulder.rotation, shoulder.scale, shoulder.rotation_order)
+					world_mat := transform_local_matrix(world_pos, world_rot, shared.Vec3{1, 1, 1}, .INTRINSIC)
+					local_mat := linalg.matrix4_inverse_f32(shoulder_mat) * world_mat
+
+					// Shift the geometry along its own blade axis so the handle sits
+					// in the fist (see MELEE_GRIP_SHIFT).
+					local_mat = local_mat * linalg.matrix4_translate_f32(shared.Vec3{MELEE_GRIP_SHIFT, 0, 0})
+
+					melee.transform.parent = &arms.right.anchor
+					melee.transform.position, melee.transform.rotation = matrix_to_transform_xyz(local_mat)
+					melee.transform.rotation_order = .EXTRINSIC
+					melee.transform.scale = shared.Vec3{1, 1, 1}
 
 					arms.weapon_right = melee
 				} else {
@@ -606,7 +668,8 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		return
 	}
 
-	arm_anchor := &player_mesh.arms[player.loadout_index].anchor
+	arms := player_mesh.arms[player.loadout_index]
+	arm_anchor := &arms.anchor
 
 	arm_anchor.rotation.x = -math.cos(player.idle_anim) * bob_crouch_mlt * 0.01 * idle_anim +
 		player.weapon.rotation_offset * anim_mlt_lean + player.weapon.rotation_offset_aim * (1.0 - anim_mlt_lean) -
@@ -636,6 +699,41 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 
 	arm_anchor.position.z = weapon_offset.z - (weapon_offset.z - player.weapon.origin.z) * aim_val +
 		player.bob_anim.z * anim_mlt + player.recoil_anim * player.weapon.recoil_z * recoil_z_mlt
+
+	// Melee swing — the right arm pivots at its shoulder (back of the arm) and
+	// sweeps side-to-side, alternating direction each swing. The blade is parented
+	// to that shoulder pivot, so it follows the sweep and adds its own full-spin
+	// twirl (Krunker's knife flip). The left arm stays planted.
+	if arms.right != nil {
+		arms.right.anchor.position = arms.right.base_pos
+		arms.right.anchor.rotation = arms.right.base_rot
+	}
+	if arms.left != nil {
+		arms.left.anchor.position = arms.left.base_pos
+		arms.left.anchor.rotation = arms.left.base_rot
+	}
+	if player.weapon != nil && player.weapon.melee && player.melee_anim_timer > 0.0 {
+		melee_dur := max(0.001, player.melee_anim_duration)
+		// t: 0→1 over the swing. amp peaks at t=0.4 (slash out) and eases back.
+		t := clamp(1.0 - (player.melee_anim_timer / melee_dur), 0.0, 1.0)
+		side := f32(player.melee_swing_side != 0 ? player.melee_swing_side : 1)
+
+		out := clamp(t / 0.4, 0.0, 1.0)
+		out_ease := out * out * (3.0 - 2.0 * out)
+		back := clamp((t - 0.4) / 0.6, 0.0, 1.0)
+		back_ease := back * back * (3.0 - 2.0 * back)
+		amp := out_ease * (1.0 - back_ease)
+
+		// Pivot at the shoulder: yaw sweeps the arm — and the rigidly-held knife
+		// — through a semi-circular arc (knife base traces r·cosθ, r·sinθ around
+		// the shoulder). No translation and no blade spin: the knife is fixed to
+		// the hand and simply follows the arm.
+		if arms.right != nil {
+			arms.right.anchor.rotation.y += side * 0.9 * amp
+			arms.right.anchor.rotation.z += side * 0.3 * amp
+		}
+	}
+
 
 	if !player.render_you || third_person {
 		crouch_distance := shared.GAME_CONSTANTS.crouch_distance * player.crouch_val

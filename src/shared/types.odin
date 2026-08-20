@@ -389,6 +389,14 @@ Player :: struct {
 	recoil_force:                    f32,
 	recoil_anim:                     f32,
 	recoil_anim_y:                   f32,
+	// Melee swing animation state. melee_anim_timer counts down from
+	// melee_anim_duration on each swing; melee_swing_side alternates +1/-1 so
+	// consecutive swings sweep left-to-right then right-to-left. Cosmetic only —
+	// never part of the simulation.
+	melee_swing_side:                i32,
+	melee_anim_timer:                f32,
+	melee_anim_duration:             f32,
+	spawn_protect_timer:             f32,
 	loadout:                         []i32,
 	ammo:                            []u32,
 	reloads:                         []f32,
@@ -517,11 +525,15 @@ Objective_State :: struct {
 }
 
 Match_State :: struct {
-	phase:          Match_Phase,
+	phase:           Match_Phase,
 	phase_remaining: f32,
-	time_remaining: f32,
-	team_scores:    [3]u32,
-	objective:      Objective_State,
+	time_remaining:  f32,
+	team_scores:     [3]u32,
+	objective:       Objective_State,
+	round_current:   u32,
+	round_wins:      [3]u32,
+	rounds_to_win:   u32,
+	overtime:        bool,
 }
 
 Game :: struct {

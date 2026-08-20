@@ -222,26 +222,26 @@ later phases are intentionally broad and may change as the project and community
 
 ### Phase 1: Playable core
 
-- [ ] Implement the competitive Hardpoint ruleset: team assignment, objective activation,
+- [x] Implement the competitive Hardpoint ruleset: team assignment, objective activation,
       capture, contesting, scoring, rotation timing, score limits, and tie breakers.
-- [ ] Complete the four-site objective cycle and round progression, including best-of-three
+- [x] Complete the four-site objective cycle and round progression, including best-of-three
       match resolution when enabled.
 - [ ] Lock the competitive class pool and match each class's health, speed, regeneration,
       wall-jump ability, hitbox, restrictions, and primary/secondary/melee loadout.
-- [ ] Match the native simulation tick order, fixed timestep, movement constants, and speed
+- [x] Match the native simulation tick order, fixed timestep, movement constants, and speed
       caps for ground movement, air strafing, crouching, sliding, jumping, ladders, ramps,
       wall jumps, bunnyhopping, and jump buffering.
-- [ ] Implement the SRM movement state and mechanics: ground/wall frame counters, ramp
+- [x] Implement the SRM movement state and mechanics: ground/wall frame counters, ramp
       sliding and bounce, dash, wall-dash, cooldowns, direction, height, and velocity rules.
 - [ ] Implement every weapon allowed by the competitive ruleset, including exact fire and
       burst cadence, reload/swap timing, ammo, spread, recoil, recovery, falloff, pierce,
       headshots, melee, and projectile behavior. Remove unsupported configurations or finish
       them; Crossbow is currently missing.
-- [ ] Match hitbox geometry, map occlusion, team damage, kill attribution, score rewards,
+- [x] Match hitbox geometry, map occlusion, team damage, kill attribution, score rewards,
       regeneration, respawn timing, spawn selection, occupancy checks, and spawn protection.
-- [ ] Make competitive map collision data exact: ramps, ladders, borders, death zones, walls,
+- [x] Make competitive map collision data exact: ramps, ladders, borders, death zones, walls,
       objective volumes, spawn points, and per-round object reset behavior.
-- [ ] Make the simulation deterministic with a fixed timestep, seeded RNG, and explicit update
+- [x] Make the simulation deterministic with a fixed timestep, seeded RNG, and explicit update
       order; add replay-vector tests comparing position, velocity, health, ammo, kills, and
       objective state between the authoritative server and predicted client.
 - [ ] Add focused edge-case tests for ramps, wall jumps, contested objectives, simultaneous

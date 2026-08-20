@@ -385,7 +385,7 @@ main :: proc() {
 	kanji_maps := []^shared.Map{kanji}
 	shared.game_configure(&game, nil, kanji_maps, nil, nil, nil)
 	shared.game_init(&game, 0, -1, true)
+	shared.game_players_add(&game, player)
 
 	run_test("kanji_jump_pad.json", player)
-
 }

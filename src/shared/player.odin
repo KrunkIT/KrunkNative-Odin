@@ -133,6 +133,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.slide_timer = 0.0
 	player.jump_timer = 0.0
 	player.reload_timer = 0.0
+	player.spawn_protect_timer = 1.5
 
 	player_update_height(player)
 	player_swap_weapon(player, 0, true, false, false)
@@ -145,13 +146,15 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 				continue
 			}
 			occupied := false
-			for other in player.game.players {
-				if other != player && other.active {
-					dx := other.position.x - spawn.position.x
-					dz := other.position.z - spawn.position.z
-					if dx * dx + dz * dz < 100.0 {
-						occupied = true
-						break
+			if player.game.players != nil {
+				for other in player.game.players {
+					if other != nil && other != player && other.active {
+						dx := other.position.x - spawn.position.x
+						dz := other.position.z - spawn.position.z
+						if dx * dx + dz * dz < 100.0 {
+							occupied = true
+							break
+						}
 					}
 				}
 			}
@@ -196,6 +199,9 @@ player_kill :: proc(player: ^Player, killer: ^Player, kill_info: ^Player_Kill_In
 
 player_apply_damage :: proc(victim, attacker: ^Player, amount: f32, weapon_id: i32, headshot: bool) -> bool {
 	if victim == nil || !victim.active || victim.god_mode || amount <= 0 {
+		return false
+	}
+	if attacker != nil && attacker != victim && victim.spawn_protect_timer > 0.0 {
 		return false
 	}
 	if attacker != nil && attacker != victim && victim.team != 0 && victim.team == attacker.team && !victim.game.mode.config.dmg_team {
@@ -920,12 +926,100 @@ player_melee :: proc(player: ^Player) {
 	player.reloads[player.loadout_index] = player.weapon.rate * player.game.config.fire_rate
 	player.did_shoot = true
 	player.did_act = true
+	player.spawn_protect_timer = 0.0
+
+	// Melee swing animation state: alternate sweep direction, restart the timer.
+	player.melee_swing_side = player.melee_swing_side <= 0 ? 1 : -1
+	player.melee_anim_duration = max(0.22, player.weapon.rate * 0.9)
+	player.melee_anim_timer = player.melee_anim_duration
 
 	if is_throw {
 		player.can_throw = player.unlimited_ammo
-		// TODO: init projectile
 	} else {
-		// TODO: hitscan
+		shot_height := player.position.y + player.height - GAME_CONSTANTS.camera_height
+		shot_angles := Vec2{player.direction.x, player.direction.y}
+		range := max(15.0, player.weapon.range)
+
+		shot_origin := Vec3{player.position.x, shot_height, player.position.z}
+		shot_dir := Vec3{
+			range * math.sin(shot_angles.y + math.PI) * math.cos(shot_angles.x),
+			range * math.sin(shot_angles.x),
+			range * math.cos(shot_angles.y + math.PI) * math.cos(shot_angles.x),
+		}
+
+		nearest_t: f32 = 2.0
+		nearest_normal := Vec3{}
+		nearest_player: ^Player
+		backstab := false
+
+		if player.game != nil && player.game.map_inst != nil {
+			for object in player.game.map_inst.objects {
+				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
+					continue
+				}
+				t, normal, hit := ray_box_hit(shot_origin, shot_dir, object.position, object.scale)
+				if hit && t < nearest_t {
+					nearest_t = t
+					nearest_normal = normal
+				}
+			}
+
+			if player.game.players != nil {
+				for target in player.game.players {
+					if target == nil || target == player || !target.active || target.team != 0 && target.team == player.team && !player.game.mode.config.dmg_team {
+						continue
+					}
+
+					body_height := max(0.1, target.height * 0.72)
+					body_origin := Vec3{target.position.x, target.position.y, target.position.z}
+					body_scale := Vec3{target.scale * 2.2, body_height, target.scale * 2.2}
+					body_t, _, body_hit := ray_box_hit(shot_origin, shot_dir, body_origin, body_scale)
+
+					head_height := max(0.1, target.height - body_height)
+					head_origin := Vec3{target.position.x, target.position.y + body_height, target.position.z}
+					head_scale := Vec3{target.scale * 1.8, head_height, target.scale * 1.8}
+					head_t, _, head_hit := ray_box_hit(shot_origin, shot_dir, head_origin, head_scale)
+
+					hit_t := body_t
+					if head_hit && (!body_hit || head_t <= body_t) {
+						hit_t = head_t
+					} else if !body_hit {
+						continue
+					}
+
+					if hit_t < nearest_t {
+						nearest_t = hit_t
+						nearest_player = target
+
+						angle_diff := abs(normalize_angle(player.direction.y - target.direction.y))
+						backstab = angle_diff < math.PI * 0.35
+					}
+				}
+			}
+		}
+
+		if nearest_player != nil {
+			damage := player.weapon.damage > 0 ? player.weapon.damage : 50.0
+			if backstab {
+				damage *= 1.5
+			}
+			player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], backstab)
+		}
+
+		trace_hit := nearest_t <= 1.0
+		impact := Bullet_Impact{
+			origin   = shot_origin,
+			position = shot_origin + shot_dir * (trace_hit ? nearest_t : 1.0),
+			normal   = nearest_normal,
+			hit      = trace_hit,
+		}
+
+		if player.game != nil {
+			if len(player.game.impacts) >= 256 {
+				ordered_remove(&player.game.impacts, 0)
+			}
+			append(&player.game.impacts, impact)
+		}
 	}
 }
 
@@ -937,6 +1031,7 @@ player_shoot :: proc(player: ^Player) {
 	player.did_shoot = true
 	player.did_act = true
 	player.shot_seq += 1
+	player.spawn_protect_timer = 0.0
 
 	if player.burst_count != 0 {
 		player.burst_count -= 1
@@ -1077,6 +1172,14 @@ player_shoot :: proc(player: ^Player) {
 player_update :: proc(player: ^Player, delta: f32) {
 	if !player.active {
 		return
+	}
+
+	if player.spawn_protect_timer > 0.0 {
+		player.spawn_protect_timer = max(0.0, player.spawn_protect_timer - delta)
+	}
+
+	if player.melee_anim_timer > 0.0 {
+		player.melee_anim_timer = max(0.0, player.melee_anim_timer - delta)
 	}
 
 	if game_is_authority(player.game) && player.game.config.health_regen && !player.game.mode.config.no_regen && player.health < f32(player.max_health) && player.game.now - player.last_damage_time >= player.game.config.regen_delay {

@@ -704,33 +704,26 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 	}
 	direction /= length
 
-	// Move the visible start away from the eye/camera so a local tracer does
-	// not fill the first-person view. The cube's local +Y axis runs from 0..1.
-	start_offset := min(1.25, length * 0.2)
+	start_offset := min(1.2, length * 0.15)
 	visible_length := length - start_offset
 	if visible_length <= 0.01 {
 		return
 	}
 
-	// A tracer is a short dash that travels along the shot path. Keep the
-	// segment readable at close range while allowing it to reach long-range
-	// impacts without appearing as a static line across the whole map.
-	segment_length := min(0.7, visible_length)
-	speed: f32 = 110.0
-	travel_time := visible_length / speed
-	fade_time: f32 = 0.06
+	fade_time: f32 = 0.08
 
 	material := basic_material_init()
 	if material == nil {
 		return
 	}
 	material.base.transparent = true
-	material.color = shared.Vec4{1.0, 0.72, 0.12, 0.95}
+	material.color = shared.Vec4{1.0, 0.78, 0.20, 0.95}
+	material.emissive = shared.Vec4{0.6, 0.4, 0.1, 1.0}
 
 	mesh := mesh_init(create_cube_geo(), &material.base)
 	start_position := impact.origin + direction * start_offset
 	mesh.transform.position = start_position
-	mesh.transform.scale = shared.Vec3{0.055, segment_length, 0.055}
+	mesh.transform.scale = shared.Vec3{0.045, visible_length, 0.045}
 	mesh.transform.rotation_order = .EXTRINSIC
 	mesh.transform.rotation.x = math.atan2(math.sqrt(direction.x * direction.x + direction.z * direction.z), direction.y)
 	mesh.transform.rotation.y = math.atan2(direction.x, direction.z)
@@ -749,11 +742,11 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 		direction = direction,
 		start_position = start_position,
 		travel_distance = visible_length,
-		distance = 0,
-		segment_length = segment_length,
-		speed = speed,
-		lifetime = travel_time + fade_time,
-		total_lifetime = travel_time + fade_time,
+		distance = visible_length,
+		segment_length = visible_length,
+		speed = 0,
+		lifetime = fade_time,
+		total_lifetime = fade_time,
 		fade_lifetime = fade_time,
 	})
 }
@@ -802,15 +795,8 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 	for i := len(client.tracer_markers) - 1; i >= 0; i -= 1 {
 		tracer := &client.tracer_markers[i]
 		tracer.lifetime -= delta
-		tracer.distance = min(tracer.travel_distance, tracer.distance + tracer.speed * delta)
-		tail_distance := min(tracer.distance, max(0, tracer.travel_distance - tracer.segment_length))
-		tracer.mesh.transform.position = tracer.start_position + tracer.direction * tail_distance
 		material := cast(^Basic_Material)tracer.mesh.material
-		if tracer.distance >= tracer.travel_distance {
-			material.color.w = clamp(tracer.lifetime / tracer.fade_lifetime, 0.0, 1.0)
-		} else {
-			material.color.w = 0.95
-		}
+		material.color.w = clamp(tracer.lifetime / tracer.fade_lifetime, 0.0, 1.0) * 0.95
 
 		if tracer.lifetime <= 0 {
 			scene_remove_mesh(client.scene, tracer.mesh)
@@ -1114,6 +1100,11 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		for player in client.game.players {
 			if player.active {
 				player.idle_anim += shared.GAME_CONSTANTS.idle_anim_speed * delta
+				// player_update is not called for predicted players in net mode;
+				// advance the cosmetic melee timer here so swings animate online.
+				if player.melee_anim_timer > 0.0 {
+					player.melee_anim_timer = max(0.0, player.melee_anim_timer - delta)
+				}
 				shared.player_update_recoil(player, delta)
 				if player != client.me {
 					shared.player_interpolate(player, delta)

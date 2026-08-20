@@ -4,6 +4,7 @@ import "core:math/rand"
 
 game_clear_players :: proc(game: ^Game) {
 	delete(game.players)
+	game.players = nil
 	game.player_count = 0
 }
 
@@ -13,7 +14,10 @@ game_is_authority :: proc(game: ^Game) -> bool {
 
 game_init_match :: proc(game: ^Game) {
 	delete(game.objective_indices)
+	game.objective_indices = nil
 	game.match = {}
+	game.match.rounds_to_win = 1
+	game.match.round_current = 1
 	game.match.phase = game.config.warmup_time > 0 ? .WARMUP : .LIVE
 	game.match.phase_remaining = max(0.0, game.config.warmup_time)
 	game.match.time_remaining = max(0.0, f32(game.config.game_time) * 60.0)
@@ -34,6 +38,54 @@ game_init_match :: proc(game: ^Game) {
 		game.match.objective.active_zone = 0
 		game.match.objective.active_object_index = game.objective_indices[0]
 		game.match.objective.rotation_remaining = max(1.0, game.config.objective_rotation_time)
+	}
+}
+
+game_resolve_round :: proc(game: ^Game, round_winner: i32) {
+	winner := round_winner
+	if winner == 0 {
+		if game.match.team_scores[1] > game.match.team_scores[2] {
+			winner = 1
+		} else if game.match.team_scores[2] > game.match.team_scores[1] {
+			winner = 2
+		}
+	}
+
+	if winner > 0 && winner <= 2 {
+		game.match.round_wins[winner] += 1
+	}
+
+	rounds_target := max(u32(1), game.match.rounds_to_win)
+	if winner > 0 && game.match.round_wins[winner] >= rounds_target {
+		game.match.phase = .ENDED
+		game.move_lock = true
+		return
+	}
+
+	// Next round progression
+	game.match.round_current += 1
+	game.match.team_scores[1] = 0
+	game.match.team_scores[2] = 0
+	game.match.time_remaining = max(0.0, f32(game.config.game_time) * 60.0)
+	game.match.overtime = false
+
+	if game.map_inst != nil {
+		map_reset(game.map_inst)
+	}
+
+	if len(game.objective_indices) > 0 {
+		game.match.objective.active_zone = 0
+		game.match.objective.active_object_index = game.objective_indices[0]
+		game.match.objective.owner_team = 0
+		game.match.objective.contested = false
+		game.match.objective.score_accumulator = 0
+		game.match.objective.rotation_remaining = max(1.0, game.config.objective_rotation_time)
+	}
+
+	for player in game.players {
+		if player != nil {
+			player_spawn(player, player.class_index)
+		}
 	}
 }
 
@@ -66,7 +118,7 @@ game_update_objective :: proc(game: ^Game, delta: f32) {
 	zone := game.map_inst.objects[state.active_object_index]
 	occupants: [3]i32
 	for player in game.players {
-		if player.active && player.team > 0 && player.team < len(occupants) && player_collides(player, zone, 0.0) {
+		if player != nil && player.active && player.team > 0 && player.team < len(occupants) && player_collides(player, zone, 0.0) {
 			occupants[player.team] += 1
 		}
 	}
@@ -88,14 +140,18 @@ game_update_objective :: proc(game: ^Game, delta: f32) {
 	state.score_accumulator -= f32(points)
 	game.match.team_scores[state.owner_team] += points
 	for player in game.players {
-		if player.active && player.team == state.owner_team && player_collides(player, zone, 0.0) {
+		if player != nil && player.active && player.team == state.owner_team && player_collides(player, zone, 0.0) {
 			player.score += points
 		}
 	}
 
 	if game.config.score_limit > 0 && game.match.team_scores[state.owner_team] >= u32(game.config.score_limit) {
-		game.match.phase = .ENDED
-		game.move_lock = true
+		game_resolve_round(game, state.owner_team)
+		return
+	}
+
+	if game.match.overtime && game.match.team_scores[1] != game.match.team_scores[2] && !state.contested {
+		game_resolve_round(game, 0)
 	}
 }
 
@@ -112,11 +168,20 @@ game_update_match :: proc(game: ^Game, delta: f32) {
 		return
 	}
 
-	game.match.time_remaining = max(0.0, game.match.time_remaining - delta)
+	if !game.match.overtime {
+		game.match.time_remaining = max(0.0, game.match.time_remaining - delta)
+	}
 	game_update_objective(game, delta)
+	if game.match.phase == .ENDED {
+		return
+	}
+
 	if game.match.time_remaining == 0 {
-		game.match.phase = .ENDED
-		game.move_lock = true
+		if game.match.team_scores[1] == game.match.team_scores[2] || game.match.objective.contested {
+			game.match.overtime = true
+		} else {
+			game_resolve_round(game, 0)
+		}
 	}
 }
 
