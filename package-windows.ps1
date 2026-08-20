@@ -1,10 +1,22 @@
 param(
     [string]$AssetArchive = (Join-Path $PSScriptRoot "KrunkNative-Windows.zip"),
-    [string]$OutputArchive = (Join-Path $PSScriptRoot "KrunkNative-Windows-latest.zip"),
+    [string]$OutputArchive = "",
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
+
+$versionFile = Join-Path $PSScriptRoot "VERSION"
+if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
+    throw "Missing version file: $versionFile"
+}
+$version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+if ([string]::IsNullOrEmpty($version)) {
+    throw "Version file is empty: $versionFile"
+}
+if ([string]::IsNullOrEmpty($OutputArchive)) {
+    $OutputArchive = Join-Path $PSScriptRoot ("KrunkNative-Windows-" + $version + ".zip")
+}
 
 $root = (Resolve-Path $PSScriptRoot).Path
 $assetArchive = (Resolve-Path $AssetArchive).Path

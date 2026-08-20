@@ -6,7 +6,8 @@ freshly built binaries plus the repo-tracked config and Famas model/texture,
 then re-zips everything into a single distributable archive.
 
 Uses only the Python standard library, so it runs on any Linux box with
-python3 — no zip/unzip CLI needed.
+python3 — no zip/unzip CLI needed. The version number is read from the
+VERSION file in the repo root and appended to the output archive name.
 
 Usage:
   ./package-linux.py [--skip-build] [--assets <zip>] [--output <zip>]
@@ -47,12 +48,23 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true", help="reuse existing binaries in bin/")
     parser.add_argument("--assets", default=os.path.join(ROOT, "KrunkNative-Linux.zip"),
                         help="base asset archive (default: KrunkNative-Linux.zip)")
-    parser.add_argument("--output", default=os.path.join(ROOT, "KrunkNative-Linux-latest.zip"),
-                        help="output archive (default: KrunkNative-Linux-latest.zip)")
+    parser.add_argument("--output", default=None,
+                        help="output archive (default: KrunkNative-Linux-<version>.zip)")
     args = parser.parse_args()
 
     asset_archive = os.path.abspath(args.assets)
-    output_archive = os.path.abspath(args.output)
+
+    version_file = os.path.join(ROOT, "VERSION")
+    if not os.path.isfile(version_file):
+        print(f"error: missing version file: {version_file}", file=sys.stderr)
+        return 1
+    with open(version_file, encoding="utf-8") as fh:
+        version = fh.read().strip()
+    if not version:
+        print(f"error: VERSION file is empty: {version_file}", file=sys.stderr)
+        return 1
+
+    output_archive = os.path.abspath(args.output) if args.output else os.path.join(ROOT, f"KrunkNative-Linux-{version}.zip")
 
     if not os.path.isfile(asset_archive):
         print(f"error: missing asset archive: {asset_archive}", file=sys.stderr)
