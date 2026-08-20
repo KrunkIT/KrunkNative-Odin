@@ -74,6 +74,8 @@ Client :: struct {
 	fps_value:      u32,
 	fps_frames:     u32,
 	fps_elapsed:    f32,
+	viewport_width: i32,
+	viewport_height: i32,
 }
 
 g_client: ^Client
@@ -1151,12 +1153,12 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	client_tick_textures(client, now)
 
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	scene_render(client.scene, &client.camera)
+	scene_render(client.scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height))
 
 	gl.Clear(gl.DEPTH_BUFFER_BIT)
-	scene_render(client.fps_scene, &client.camera)
+	scene_render(client.fps_scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height))
 
-	ui_update(client.ui)
+	ui_update(client.ui, f32(client.viewport_width), f32(client.viewport_height))
 
 	if !client.mouse_state.locked {
 		hud_render(client, now)
@@ -1172,6 +1174,10 @@ resize_viewport :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
 	}
 
 	gl.Viewport(0, 0, width, height)
+	if g_client != nil {
+		g_client.viewport_width = width
+		g_client.viewport_height = height
+	}
 }
 
 main :: proc() {
@@ -1214,6 +1220,8 @@ main :: proc() {
 		return
 	}
 	defer glfw.DestroyWindow(client.window)
+	client.viewport_width = 1280
+	client.viewport_height = 720
 	client.windowed_rect.x, client.windowed_rect.y = glfw.GetWindowPos(client.window)
 	client.windowed_rect.width, client.windowed_rect.height = glfw.GetWindowSize(client.window)
 

@@ -184,136 +184,116 @@ scene_remove_player_mesh :: proc(scene: ^Scene, player_mesh: ^Player_Mesh, loado
 	}
 }
 
-scene_depth_sort :: proc(a, b: rawptr) -> int {
-	p_a := cast(^int)a
-	p_b := cast(^int)b
-
-	mesh_a := g_sort_scene.meshes[p_a^]
-	mesh_b := g_sort_scene.meshes[p_b^]
-
-	if !mesh_a.visible {
-		return 1
+scene_uniforms :: proc(program: u32) -> ^Shader_Uniforms {
+	if program == basic_shader_program {
+		return &u_basic
+	} else if program == quad_shader_program {
+		return &u_quad
 	}
-	if !mesh_b.visible {
-		return -1
-	}
-
-	if mesh_a.material.transparent || mesh_b.material.transparent {
-		if !mesh_b.material.transparent {
-			return 1
-		}
-		if !mesh_a.material.transparent {
-			return -1
-		}
-
-		a_depth := mesh_a.camera_space_matrix[2, 3]
-		b_depth := mesh_b.camera_space_matrix[2, 3]
-
-		if b_depth > a_depth {
-			return -1
-		}
-
-		return 1
-	}
-
-	return 0
+	return &u_text
 }
 
-g_sort_scene: ^Scene
+scene_draw_mesh :: proc(mesh: ^Mesh, camera: ^Camera) {
+	if !mesh.visible {
+		return
+	}
 
-scene_render :: proc(scene: ^Scene, camera: ^Camera) {
-	viewport: [4]i32
-	gl.GetIntegerv(gl.VIEWPORT, &viewport[0])
+	if mesh.material.transparent {
+		gl.Enable(gl.BLEND)
+	} else {
+		gl.Disable(gl.BLEND)
+	}
+
+	gl.BindVertexArray(mesh.geometry.vao)
+	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.geometry.ebo)
+
+	if g_active_shader != mesh.material.program {
+		gl.UseProgram(mesh.material.program)
+		g_active_shader = mesh.material.program
+	}
+
+	material_update_uniforms(mesh.material)
+
+	u := scene_uniforms(mesh.material.program)
+	if u.transform > -1 {
+		gl.UniformMatrix4fv(u.transform, 1, gl.FALSE, &mesh.transform_matrix[0, 0])
+	}
+	if u.camera_world_inverse > -1 {
+		gl.UniformMatrix4fv(u.camera_world_inverse, 1, gl.FALSE, &camera.world_inverse_matrix[0, 0])
+	}
+	if u.camera_projection > -1 {
+		gl.UniformMatrix4fv(u.camera_projection, 1, gl.FALSE, &camera.projection_matrix[0, 0])
+	}
+
+	if mesh.material.wireframe {
+		gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
+	} else {
+		gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
+	}
+
+	gl.DrawElements(gl.TRIANGLES, mesh.geometry.index_count, gl.UNSIGNED_INT, nil)
+}
+
+scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32) {
+	aspect := viewport_h > 0 ? viewport_w / viewport_h : (16.0 / 9.0)
 
 	gl.Enable(gl.DEPTH_TEST)
+	gl.DepthMask(gl.TRUE)
 	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 
-	camera_update_projection_matrix(camera, f32(viewport[2]) / f32(viewport[3]))
+	camera_update_projection_matrix(camera, aspect)
 	camera_update_world_inverse_matrix(camera)
 
-	indices := make([]int, len(scene.meshes))
-	defer delete(indices)
+	mesh_count := len(scene.meshes)
+	if mesh_count == 0 {
+		return
+	}
 
-	for i in 0 ..< len(scene.meshes) {
+	// 1. Draw opaque meshes directly with hardware depth testing.
+	// 2. Collect visible transparent meshes for back-to-front sorting.
+	clear(&scene.transparent_meshes)
+	for i in 0 ..< mesh_count {
 		mesh := scene.meshes[i]
+		if !mesh.visible {
+			continue
+		}
 		mesh_update_transform_matrix(mesh)
 
 		if mesh.material.transparent {
 			mesh.camera_space_matrix = camera.world_inverse_matrix * mesh.transform_matrix
+			append(&scene.transparent_meshes, mesh)
+		} else {
+			scene_draw_mesh(mesh, camera)
 		}
-
-		indices[i] = i
 	}
 
-	g_sort_scene = scene
-	sort_ints(indices)
-
-	for i in 0 ..< len(indices) {
-		mesh := scene.meshes[indices[i]]
-
-		if !mesh.visible {
-			continue
+	// Draw sorted transparent meshes
+	trans_count := len(scene.transparent_meshes)
+	if trans_count > 0 {
+		// Sort transparent meshes back-to-front (largest camera-space depth first)
+		for i in 1 ..< trans_count {
+			key := scene.transparent_meshes[i]
+			key_depth := key.camera_space_matrix[2, 3]
+			j := i - 1
+			for j >= 0 && scene.transparent_meshes[j].camera_space_matrix[2, 3] > key_depth {
+				scene.transparent_meshes[j + 1] = scene.transparent_meshes[j]
+				j -= 1
+			}
+			scene.transparent_meshes[j + 1] = key
 		}
 
-		if mesh.material.transparent {
-			gl.Enable(gl.BLEND)
-		} else {
-			gl.Disable(gl.BLEND)
+		for i in 0 ..< trans_count {
+			scene_draw_mesh(scene.transparent_meshes[i], camera)
 		}
-
-		gl.BindVertexArray(mesh.geometry.vao)
-		gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.geometry.ebo)
-
-		if g_active_shader != mesh.material.program {
-			gl.UseProgram(mesh.material.program)
-			g_active_shader = mesh.material.program
-		}
-
-		material_update_uniforms(mesh.material)
-
-		transform := gl.GetUniformLocation(mesh.material.program, "transform")
-		camera_world_inverse := gl.GetUniformLocation(mesh.material.program, "camera_world_inverse")
-		camera_projection := gl.GetUniformLocation(mesh.material.program, "camera_projection")
-
-		if transform > -1 {
-			gl.UniformMatrix4fv(transform, 1, gl.FALSE, &mesh.transform_matrix[0, 0])
-		}
-		if camera_world_inverse > -1 {
-			gl.UniformMatrix4fv(camera_world_inverse, 1, gl.FALSE, &camera.world_inverse_matrix[0, 0])
-		}
-		if camera_projection > -1 {
-			gl.UniformMatrix4fv(camera_projection, 1, gl.FALSE, &camera.projection_matrix[0, 0])
-		}
-
-		if mesh.material.wireframe {
-			gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-		} else {
-			gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
-		}
-
-		gl.DrawElements(gl.TRIANGLES, mesh.geometry.index_count, gl.UNSIGNED_INT, nil)
 	}
 
 	// Rendering state must not leak into the HUD pass.
 	gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
 }
 
-sort_ints :: proc(indices: []int) {
-	// insertion sort keeps the depth sort stable & simple
-	for i in 1 ..< len(indices) {
-		key := indices[i]
-		j := i - 1
-
-		for j >= 0 && scene_depth_sort(&key, &indices[j]) < 0 {
-			indices[j + 1] = indices[j]
-			j -= 1
-		}
-
-		indices[j + 1] = key
-	}
-}
-
 scene_fini :: proc(scene: ^Scene) {
 	delete(scene.meshes)
+	delete(scene.transparent_meshes)
+	delete(scene.sort_indices)
 	free(scene)
 }

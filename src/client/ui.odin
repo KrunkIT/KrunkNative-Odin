@@ -115,12 +115,9 @@ ui_init :: proc() -> ^UI {
 	return ui
 }
 
-ui_update :: proc(ui: ^UI) {
-	viewport: [4]i32
-	gl.GetIntegerv(gl.VIEWPORT, &viewport[0])
-
-	ui.width = f32(viewport[2])
-	ui.height = f32(viewport[3])
+ui_update :: proc(ui: ^UI, width, height: f32) {
+	ui.width = width
+	ui.height = height
 
 	scale_factor: f32 = 1.5
 	target_width: f32 = scale_factor * 1700.0
@@ -143,13 +140,16 @@ ui_fill_rect_ :: proc(ui: ^UI, shader: u32, x, y, width, height: f32) {
 	scale_x := width / ui.width
 	scale_y := height / ui.height
 
-	offset := gl.GetUniformLocation(shader, "offset")
-	scale := gl.GetUniformLocation(shader, "scale")
+	u := scene_uniforms(shader)
 
 	gl.BindVertexArray(ui.vao)
 
-	gl.Uniform2f(offset, offset_x, offset_y)
-	gl.Uniform2f(scale, scale_x, scale_y)
+	if u.offset > -1 {
+		gl.Uniform2f(u.offset, offset_x, offset_y)
+	}
+	if u.scale > -1 {
+		gl.Uniform2f(u.scale, scale_x, scale_y)
+	}
 
 	gl.DrawArrays(gl.TRIANGLE_FAN, 0, 4)
 }
