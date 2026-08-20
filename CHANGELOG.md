@@ -14,6 +14,8 @@ round of performance work.
   impact decals.
 - **Hardpoint round progression** — round resolution, score resets, and overtime
   sudden-death when the timer runs out on a tie.
+- **FPS meter toggle** — show or hide the on-screen FPS counter from the settings
+  panel.
 
 ### Changed
 
@@ -21,6 +23,8 @@ round of performance work.
   hitboxes.
 - **Renderer** — shader uniform locations are cached, opaque scenes skip the
   depth sort, and the viewport is cached instead of queried every frame.
+- **Fullscreen** — fullscreen mode now switches to the monitor's maximum
+  resolution instead of defaulting to 1280x720.
 - **Build** — `make PROFILE=minimal` and `make PROFILE=speed` optimization
   levels; default stays `none` for fast development builds.
 
