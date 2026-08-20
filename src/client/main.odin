@@ -91,6 +91,19 @@ client_remember_windowed_rect :: proc(client: ^Client) {
 	client.windowed_rect.width, client.windowed_rect.height = glfw.GetWindowSize(client.window)
 }
 
+monitor_max_video_mode :: proc(monitor: glfw.MonitorHandle) -> (width, height, refresh_rate: i32) {
+	modes := glfw.GetVideoModes(monitor)
+	for mode in modes {
+		mode_area := i32(mode.width) * i32(mode.height)
+		if mode_area > width * height || (mode_area == width * height && i32(mode.refresh_rate) > refresh_rate) {
+			width = i32(mode.width)
+			height = i32(mode.height)
+			refresh_rate = i32(mode.refresh_rate)
+		}
+	}
+	return
+}
+
 client_apply_display_settings :: proc(client: ^Client) {
 	monitor := glfw.GetPrimaryMonitor()
 	if monitor == nil {
@@ -115,7 +128,8 @@ client_apply_display_settings :: proc(client: ^Client) {
 		glfw.SetWindowSize(client.window, mode.width, mode.height)
 	case .Fullscreen:
 		glfw.SetWindowAttrib(client.window, glfw.DECORATED, 1)
-		glfw.SetWindowMonitor(client.window, monitor, 0, 0, resolution.width, resolution.height, mode.refresh_rate)
+		full_width, full_height, full_refresh_rate := monitor_max_video_mode(monitor)
+		glfw.SetWindowMonitor(client.window, monitor, 0, 0, full_width, full_height, full_refresh_rate)
 	}
 }
 

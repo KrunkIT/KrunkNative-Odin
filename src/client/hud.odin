@@ -120,6 +120,14 @@ settings_sensitivity_track_rect :: proc(layout: Settings_Layout) -> (x, y, width
 	return
 }
 
+settings_fps_toggle_rect :: proc(layout: Settings_Layout) -> (x, y, width, height: f32) {
+	width = 255.0 * layout.scale
+	height = 44.0 * layout.scale
+	x = layout.x + layout.width - width - 28.0 * layout.scale
+	y = layout.y + 320.0 * layout.scale
+	return
+}
+
 // class_picker_back_rect is the BACK button on the class picker screen.
 class_picker_back_rect :: proc(client: ^Client) -> (x, y, width, height: f32) {
 	scale := menu_scale_value(client)
@@ -248,6 +256,12 @@ render_settings :: proc(client: ^Client) {
 	knob_size := 18.0 * layout.scale
 	ui_round_rect(client.ui, white, sx + fill_width - knob_size * 0.5, sy, knob_size, knob_size, knob_size * 0.5)
 
+	fx, fy, fw, fh := settings_fps_toggle_rect(layout)
+	ui_round_rect(client.ui, control, fx, fy, fw, fh, 6.0 * layout.scale)
+	fps_state := "ON" if client.show_fps else "OFF"
+	render_centered_button_label(client, fps_state, fx, fy, fw, fh, 17.0 * layout.scale, white)
+	ui_fill_text(client.ui, white, "SHOW FPS", layout.x + 28.0 * layout.scale, fy + 29.0 * layout.scale, 18.0 * layout.scale)
+
 	bx, by, bw, bh := settings_back_rect(layout)
 	ui_round_rect(client.ui, control, bx, by, bw, bh, 6.0 * layout.scale)
 	render_centered_button_label(client, "BACK", bx, by, bw, bh, 18.0 * layout.scale, white)
@@ -285,6 +299,12 @@ settings_handle_click :: proc(client: ^Client, mouse_x, mouse_y: f32) -> bool {
 	if point_in_rect(mouse_x, mouse_y, sx - 8.0 * layout.scale, sy - 12.0 * layout.scale, sw + 16.0 * layout.scale, sh + 24.0 * layout.scale) {
 		progress := clamp((mouse_x - sx) / sw, 0.0, 1.0)
 		client.sensitivity = math.round((0.1 + progress * 1.9) * 100.0) / 100.0
+		return true
+	}
+
+	fx, fy, fw, fh := settings_fps_toggle_rect(layout)
+	if point_in_rect(mouse_x, mouse_y, fx, fy, fw, fh) {
+		client.show_fps = !client.show_fps
 		return true
 	}
 

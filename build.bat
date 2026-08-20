@@ -28,15 +28,15 @@ if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 goto:%TARGET%
 
 :client
-%ODIN% build src/client -out:%BIN_DIR%\krunknative_client.exe -o:none
+%ODIN% build src/client -out:%BIN_DIR%\krunknative_client.exe -o:aggressive
 exit /b %errorlevel%
 
 :server
-%ODIN% build src/server -out:%BIN_DIR%\krunknative_server.exe -o:none
+%ODIN% build src/server -out:%BIN_DIR%\krunknative_server.exe -o:aggressive
 exit /b %errorlevel%
 
 :tests
-%ODIN% build src/tests -out:%BIN_DIR%\krunknative_tests.exe -o:none
+%ODIN% build src/tests -out:%BIN_DIR%\krunknative_tests.exe -o:aggressive
 if errorlevel 1 exit /b %errorlevel%
 "%BIN_DIR%\krunknative_tests.exe"
 exit /b %errorlevel%
