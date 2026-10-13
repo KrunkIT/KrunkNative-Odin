@@ -294,6 +294,9 @@ main :: proc() {
 	if !test_shot_feedback() {
 		os.exit(1)
 	}
+	if !test_weapon_animations() {
+		os.exit(1)
+	}
 	if !test_objective_combat_state() {
 		os.exit(1)
 	}

@@ -112,6 +112,10 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.recoil_force = 0.0
 	player.recoil_anim = 0.0
 	player.recoil_anim_y = 0.0
+	player.view_kick = {}
+	player.view_kick_phase = 0
+	player.melee_pose = {}
+	player.melee_phase = 0
 
 	player.on_ground = true
 	player.on_wall = 0
@@ -536,6 +540,20 @@ player_swap_weapon :: proc(player: ^Player, index: i32, force_swap, instant_swap
 			player.swap_timer = player.weapon.swap_time
 		}
 	}
+	if loadout_changed {
+		player.melee_pose = {}
+		player.melee_phase = 0
+		player.view_kick = {}
+		player.view_kick_phase = 0
+		if player.weapon != nil && player.weapon.melee && player.aim_val == 0 {
+			player.melee_pose[MELEE_ARM_R] = -0.3
+			player.melee_pose_start = player.melee_pose
+			player.melee_pose_target = {}
+			player.melee_phase = 3
+			player.melee_time = 0
+			player.melee_duration = 0.31
+		}
+	}
 }
 
 player_reload :: proc(player: ^Player) {
@@ -557,6 +575,130 @@ player_apply_recoil :: proc(player: ^Player) {
 	rand_recoil := (rand.float32() - 0.5) * 2.0 * math.PI
 	player.recoil.x += player.weapon.recoil_r * math.sin(rand_recoil)
 	player.recoil.z += player.weapon.recoil_r * 0.3 * math.cos(rand_recoil)
+}
+
+// Indices match v3's armR, armT, armY, lArm, armM, armS, armE,
+// weaR, weaM, flipW, rArm channels.
+MELEE_ARM_R :: 0
+MELEE_ARM_T :: 1
+MELEE_ARM_Y :: 2
+MELEE_L_ARM :: 3
+MELEE_ARM_M :: 4
+MELEE_ARM_S :: 5
+MELEE_ARM_E :: 6
+MELEE_WEA_R :: 7
+MELEE_WEA_M :: 8
+MELEE_FLIP_W :: 9
+MELEE_R_ARM :: 10
+
+player_start_view_kick :: proc(player: ^Player) {
+	if player.weapon == nil || player.weapon.melee {
+		return
+	}
+	time := player.weapon.view_kick_time != 0 ? player.weapon.view_kick_time : player.weapon.rate
+	time *= player.game.config.fire_rate > 0 ? player.game.config.fire_rate : 1
+	if player.aim_val >= 1 && player.weapon.view_kick_aim_time != 0 {
+		time = player.weapon.view_kick_aim_time
+	}
+	player.view_kick_start = player.view_kick
+	player.view_kick_phase = 1
+	player.view_kick_time = 0
+	player.view_kick_duration = max(0.001, time * 0.15)
+	player.view_kick_return = max(0.001, time * 0.95)
+}
+
+player_start_melee_animation :: proc(player: ^Player, kind: i32) {
+	backhand := player.melee_phase != 0 && player.melee_pose[MELEE_ARM_M] >= 2
+	player.melee_pose = {}
+	player.melee_pose_target = {}
+	player.melee_punch_left = !player.melee_punch_left
+	player.melee_kind = kind
+	player.melee_phase = 1
+	player.melee_time = 0
+	if kind == 1 {
+		player.melee_duration = backhand ? 0.286 : 0.22
+		if backhand {
+			player.melee_pose[MELEE_WEA_R] = -1.1
+			player.melee_pose[MELEE_ARM_R] = 0.4
+			player.melee_pose[MELEE_WEA_M] = 0.9
+			player.melee_pose[MELEE_FLIP_W] = math.PI
+		}
+		player.melee_pose_start = player.melee_pose
+		player.melee_pose_target = player.melee_pose
+		player.melee_pose_target[MELEE_ARM_R] = backhand ? 0.4 : -0.4
+		player.melee_pose_target[MELEE_L_ARM] = 1
+		player.melee_pose_target[MELEE_ARM_T] = backhand ? -0.2 : -0.8
+		player.melee_pose_target[MELEE_ARM_Y] = -3
+		player.melee_pose_target[MELEE_ARM_M] = backhand ? -10 : 13
+		player.melee_pose_target[MELEE_ARM_E] = -2
+		player.melee_pose_target[MELEE_WEA_R] = backhand ? -1.1 : -1.6
+		player.melee_pose_target[MELEE_WEA_M] = backhand ? 0.9 : 0.7
+	} else if kind == 2 {
+		player.melee_duration = 0.01
+		player.melee_pose_start = player.melee_pose
+		player.melee_pose_target[player.melee_punch_left ? MELEE_L_ARM : MELEE_R_ARM] = -2.7
+	} else {
+		player.melee_duration = 0.3
+		player.melee_pose = {-1.3, 1, 2.9, 0, 1.7, 1.7, 1.1, -0.6, 0, 0, 0}
+		player.melee_pose_start = player.melee_pose
+		player.melee_pose_target = player.melee_pose
+		player.melee_pose_target[MELEE_ARM_Y] = -9
+		player.melee_pose_target[MELEE_ARM_S] = -0.1
+		player.melee_pose_target[MELEE_ARM_E] = -7.5
+		player.melee_pose_target[MELEE_ARM_M] = -1.5
+		player.melee_pose_target[MELEE_L_ARM] = 0.5
+		player.melee_pose_target[MELEE_WEA_R] = -3
+	}
+}
+
+player_update_visual_animations :: proc(player: ^Player, delta: f32) {
+	if player.view_kick_phase != 0 {
+		player.view_kick_time += delta
+		k := min(1.0, player.view_kick_time / player.view_kick_duration)
+		if player.view_kick_phase == 1 {
+			for i in 0 ..< 4 {
+				player.view_kick[i] = player.view_kick_start[i] + (player.weapon.view_kick[i] - player.view_kick_start[i]) * k
+			}
+		} else {
+			e := 1.0 + (k - 1.0) * (k - 1.0) * (2.70158 * (k - 1.0) + 1.70158)
+			for i in 0 ..< 4 {
+				player.view_kick[i] = player.view_kick_start[i] * (1.0 - e)
+			}
+		}
+		if k >= 1 {
+			if player.view_kick_phase == 1 {
+				player.view_kick_phase = 2
+				player.view_kick_start = player.view_kick
+				player.view_kick_duration = player.view_kick_return
+				player.view_kick_time = 0
+			} else {
+				player.view_kick_phase = 0
+			}
+		}
+	}
+	if player.melee_phase != 0 {
+		player.melee_time += delta
+		if player.melee_kind == 2 && player.melee_phase == 2 && player.melee_time < 0.1 {
+			return
+		}
+		elapsed := player.melee_time - (player.melee_kind == 2 && player.melee_phase == 2 ? 0.1 : 0.0)
+		k := min(1.0, elapsed / player.melee_duration)
+		e := player.melee_phase == 3 ? math.sin(k * math.PI * 0.5) : player.melee_kind == 2 ? k : 1.0 + (k - 1.0) * (k - 1.0) * (k - 1.0)
+		for i in 0 ..< 11 {
+			player.melee_pose[i] = player.melee_pose_start[i] + (player.melee_pose_target[i] - player.melee_pose_start[i]) * e
+		}
+		if k >= 1 {
+			if player.melee_phase == 1 {
+				player.melee_phase = 2
+				player.melee_pose_start = player.melee_pose
+				player.melee_pose_target = {}
+				player.melee_duration = player.melee_kind == 2 ? 0.15 : 0.35
+				player.melee_time = 0
+			} else {
+				player.melee_phase = 0
+			}
+		}
+	}
 }
 
 player_update_recoil :: proc(player: ^Player, delta: f32) {
@@ -923,10 +1065,8 @@ player_melee :: proc(player: ^Player) {
 	player.did_shoot = true
 	player.did_act = true
 
-	// Melee swing animation state: alternate sweep direction, restart the timer.
-	player.melee_swing_side = player.melee_swing_side <= 0 ? 1 : -1
-	player.melee_anim_duration = max(0.22, player.weapon.rate * 0.9)
-	player.melee_anim_timer = player.melee_anim_duration
+	player.shot_seq += 1
+	player_start_melee_animation(player, is_throw ? 3 : player.can_throw ? 1 : 2)
 
 	if is_throw {
 		player.can_throw = player.unlimited_ammo
@@ -1029,6 +1169,7 @@ player_shoot :: proc(player: ^Player) {
 	player.reloads[player.loadout_index] = (player.burst_count != 0 && player.weapon.burst ? player.weapon.burst_rate : player.weapon.rate) * player.game.config.fire_rate
 
 	player_apply_recoil(player)
+	player_start_view_kick(player)
 
 	is_projectile := player.weapon.projectile && (!player.weapon.projectile_disable || player.game.config.bullet_drop)
 	shot_height := player.position.y + player.height - GAME_CONSTANTS.camera_height
@@ -1161,9 +1302,7 @@ player_update :: proc(player: ^Player, delta: f32) {
 		return
 	}
 
-	if player.melee_anim_timer > 0.0 {
-		player.melee_anim_timer = max(0.0, player.melee_anim_timer - delta)
-	}
+	player_update_visual_animations(player, delta)
 
 	if game_is_authority(player.game) && player.game.config.health_regen && !player.game.mode.config.no_regen && player.health < f32(player.max_health) && player.game.now - player.last_damage_time >= player.game.config.regen_delay {
 		class := &player.game.classes[player.class_index]

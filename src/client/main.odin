@@ -556,7 +556,16 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 	}
 	player.shot_seq = state.shot_seq
 	for _ in 0 ..< int(new_shots) {
-		shared.player_apply_recoil(player)
+		if player.weapon.melee {
+			is_throw := player.can_throw && player.aim_val >= 1 && player.game.config.throwable_melees
+			shared.player_start_melee_animation(player, is_throw ? 3 : player.can_throw ? 1 : 2)
+			if is_throw {
+				player.can_throw = player.unlimited_ammo
+			}
+		} else {
+			shared.player_apply_recoil(player)
+			shared.player_start_view_kick(player)
+		}
 	}
 
 	if state.active && (!was_active || player.mesh == nil) {
@@ -1114,11 +1123,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		for player in client.game.players {
 			if player.active {
 				player.idle_anim += shared.GAME_CONSTANTS.idle_anim_speed * delta
-				// player_update is not called for predicted players in net mode;
-				// advance the cosmetic melee timer here so swings animate online.
-				if player.melee_anim_timer > 0.0 {
-					player.melee_anim_timer = max(0.0, player.melee_anim_timer - delta)
-				}
+				shared.player_update_visual_animations(player, delta)
 				shared.player_update_recoil(player, delta)
 				if player != client.me {
 					shared.player_interpolate(player, delta)

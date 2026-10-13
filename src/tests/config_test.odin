@@ -273,6 +273,55 @@ test_famas_burst :: proc() -> bool {
 	return true
 }
 
+test_weapon_animations :: proc() -> bool {
+	game := shared.Game{}
+	game.config.fire_rate = 1
+	player := shared.Player{game = &game, weapon = &shared.WEAPON_AK47}
+	shared.player_start_view_kick(&player)
+	shared.player_update_visual_animations(&player, 0.024)
+	if math.abs(player.view_kick[0] - 0.065) > 0.001 || math.abs(player.view_kick[3] - 0.1) > 0.001 {
+		fmt.eprintln("AK viewmodel kick test failed")
+		return false
+	}
+	shared.player_update_visual_animations(&player, 0.152)
+	if math.abs(player.view_kick[0]) > 0.001 || math.abs(player.view_kick[3]) > 0.001 {
+		fmt.eprintln("AK viewmodel return test failed")
+		return false
+	}
+	player.weapon = &shared.WEAPON_KNIFE
+	shared.player_start_melee_animation(&player, 1)
+	shared.player_update_visual_animations(&player, 0.22)
+	if math.abs(player.melee_pose[shared.MELEE_ARM_M] - 13) > 0.001 || math.abs(player.melee_pose[shared.MELEE_WEA_R] + 1.6) > 0.001 {
+		fmt.eprintln("Knife swing pose test failed")
+		return false
+	}
+	shared.player_start_melee_animation(&player, 1)
+	if math.abs(player.melee_pose[shared.MELEE_FLIP_W] - math.PI) > 0.001 || math.abs(player.melee_duration - 0.286) > 0.001 {
+		fmt.eprintln("Knife backhand test failed")
+		return false
+	}
+	shared.player_start_melee_animation(&player, 2)
+	shared.player_update_visual_animations(&player, 0.01)
+	shared.player_update_visual_animations(&player, 0.09)
+	if math.abs(player.melee_pose[shared.MELEE_L_ARM] + 2.7) > 0.001 {
+		fmt.eprintln("Empty-hand punch delay test failed")
+		return false
+	}
+	shared.player_update_visual_animations(&player, 0.16)
+	if math.abs(player.melee_pose[shared.MELEE_L_ARM]) > 0.001 {
+		fmt.eprintln("Empty-hand punch return test failed")
+		return false
+	}
+	shared.player_start_melee_animation(&player, 3)
+	shared.player_update_visual_animations(&player, 0.3)
+	if math.abs(player.melee_pose[shared.MELEE_ARM_R] + 1.3) > 0.001 || math.abs(player.melee_pose[shared.MELEE_ARM_Y] + 9) > 0.001 {
+		fmt.eprintln("Knife throw release pose test failed")
+		return false
+	}
+	fmt.println("Weapon animation tests OK")
+	return true
+}
+
 test_shot_feedback :: proc() -> bool {
 	wall := shared.Object{
 		active = true,
