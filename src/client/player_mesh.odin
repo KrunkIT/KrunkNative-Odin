@@ -607,8 +607,8 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 
 	arm_anchor.rotation.x = -math.cos(player.idle_anim) * bob_crouch_mlt * 0.01 * idle_anim +
 		player.weapon.rotation_offset * anim_mlt_lean + player.weapon.rotation_offset_aim * (1.0 - anim_mlt_lean) -
-		player.view_kick[0] * recoil_mlt +
 		player.land_bob_yr * 0.4 +
+		player.view_kick[0] * recoil_mlt +
 		player.lean_anim.y * lean_aim_mlt * (player.weapon.lean_mlt != 0 ? player.weapon.lean_mlt : 1.0) * weapon_lean_mlt +
 		step_half_rotate * -0.9 * anim_mlt
 
@@ -623,7 +623,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 
 	arm_anchor.position.x = player.recoil.x * recoil_aim_mlt -
 		player.jump_rotate_mlt * anim_mlt_lean * 1.3 +
-		(player.lean_anim.z * 0.35 - player.weapon.crouch_rotation * left_hand_mlt * player.crouch_val * anim_mlt_lean + step_anim * 0.5 * anim_mlt_crouch * anim_mlt_lean) * aim_val_mlt * anim_mlt +
+		(player.lean_anim.z * 0.35 - player.weapon.crouch_rotation * left_hand_mlt * player.crouch_val * anim_mlt_lean + step_anim * 0.5 * anim_mlt_crouch * anim_mlt_lean) * (1.0 - aim_val_mlt) * anim_mlt +
 		weapon_offset.x - (weapon_offset.x - player.weapon.origin.x * left_hand_mlt) * aim_val
 
 	arm_anchor.position.y = player.recoil.z * recoil_aim_mlt +

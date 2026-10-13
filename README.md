@@ -88,6 +88,17 @@ Build from PowerShell or cmd with the bundled helper. The leading `.\` works in 
 .\build.bat clean
 ```
 
+Pass an optimization level after the build target: `none`, `minimal`, `size`,
+`speed`, or `aggressive` (the default). For `all`, a third argument sets the server
+level separately; otherwise both binaries use the same level.
+
+```bat
+.\build.bat client speed
+.\build.bat server minimal
+.\build.bat tests none
+.\build.bat all speed minimal
+```
+
 To build the client and server and package them with the minimum curated runtime assets, run:
 
 ```powershell
