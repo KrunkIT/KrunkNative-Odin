@@ -112,11 +112,8 @@ Player_Arm_Mesh :: struct {
 	joint:    ^Mesh,
 	lower:    ^Color_Cube,
 	anchor:   Mesh_Transform,
-	// Snapshot of anchor.position/rotation at generation time.
-	// Used every frame to restore the arm to its rest pose before
-	// applying the melee swing delta so offsets don't accumulate.
-	base_pos: shared.Vec3,
-	base_rot: shared.Vec3,
+	// Melee poses animate this parent without replacing the generated arm rest transform.
+	pivot:    Mesh_Transform,
 }
 
 Player_Arms :: struct {

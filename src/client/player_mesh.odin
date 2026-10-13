@@ -135,9 +135,8 @@ generate_arm :: proc(x, y: f32, weapon: ^shared.Weapon, is_left, third_person, l
 	arm.anchor.rotation.x = -arm_angles[1] + math.atan2(weapon.offset.y + hold.y - y, -(weapon.offset.z - hold.z))
 	arm.anchor.rotation.y = math.atan2(x - (weapon.offset.x * left_handed_mlt - hold.x) * (is_left && weapon.akimbo ? -1.0 : 1.0), -(weapon.offset.z - hold.z))
 	arm.anchor.rotation_order = .EXTRINSIC
-
-	arm.base_pos = arm.anchor.position
-	arm.base_rot = arm.anchor.rotation
+	arm.anchor.parent = &arm.pivot
+	arm.pivot.scale = shared.Vec3{1.0, 1.0, 1.0}
 
 	return arm
 }
@@ -153,8 +152,8 @@ generate_arms :: proc(weapon: ^shared.Weapon, third_person, left_handed: bool, s
 	arms.anchor.position.z += third_person ? 0.0 : weapon.hold_distance_offset
 
 	arms.anchor.scale = shared.Vec3{1.0, 1.0, 1.0}
-	arms.left.anchor.parent = &arms.anchor
-	arms.right.anchor.parent = &arms.anchor
+	arms.left.pivot.parent = &arms.anchor
+	arms.right.pivot.parent = &arms.anchor
 
 	return arms
 }
@@ -356,7 +355,7 @@ player_generate_meshes :: proc(player: ^shared.Player, render_you: bool) {
 
 					melee_mat.texture = melee_texture
 
-					melee.transform.parent = render_you ? &arms.right.anchor : &arms.anchor
+					melee.transform.parent = render_you ? &arms.right.pivot : &arms.anchor
 					melee.transform.position = shared.Vec3{render_you ? 0.9 : 1.7, render_you ? -0.95 : -0.4, render_you ? 0.72 : 1.2}
 					melee.transform.rotation = shared.Vec3{MELEE_ROT_X, render_you ? MELEE_ROT_Y : math.PI * 0.5, MELEE_ROT_Z}
 					melee.transform.scale = shared.Vec3{0.9, 0.9, 0.9}
@@ -587,23 +586,16 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	}
 
 	reload_mlt: f32 = third_person ? 0.4 : 1.0
-	// The camera already receives local recoil. Applying the same pitch to the
-	// first-person mesh cancels the weapon kick in camera space.
-	mesh_recoil_pitch := player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt
-	if player.render_you && !third_person {
-		mesh_recoil_pitch = 0
-	}
-
 	player_mesh.upper_body_anchor.rotation.x = bob_anim_y * -0.2 + land_bob_ya + reload_anim * (reload_mlt * -2.8) +
 		player.direction.x * (player.render_you && !third_person ? 1.0 : 0.5) +
-		(-math.PI * 0.25 * swap_anim + mesh_recoil_pitch) +
+		(-math.PI * 0.25 * swap_anim + player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt) +
 		(player.weapon.y_rotation != 0 ? player.weapon.y_rotation : 0.0)
 
 	player_mesh.upper_body_anchor.rotation.y = reload_anim * -reload_mlt
 	player_mesh.upper_body_anchor.rotation.z = 0.35 * weapon_rotation
 
 	player_mesh.upper_body_anchor.position.x = 0.0
-	player_mesh.upper_body_anchor.position.z = player.render_you && !third_person ? player.recoil_anim_y * 0.08 * recoil_mlt : 0.0
+	player_mesh.upper_body_anchor.position.z = 0.0
 	player_mesh.upper_body_anchor.position.y = player.recoil_anim_y * (player.weapon.recoil_y_mlt != 0 ? player.weapon.recoil_y_mlt : 0.3) * recoil_y_mlt + (player.render_you && !third_person ? player.height : shared.GAME_CONSTANTS.player_height) - shared.GAME_CONSTANTS.camera_height - shared.GAME_CONSTANTS.leg_height
 
 	if player.loadout_index < 0 || player.loadout_index >= i32(len(player_mesh.arms)) || player_mesh.arms[player.loadout_index] == nil {
@@ -647,24 +639,24 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		player.bob_anim.z * anim_mlt + player.recoil_anim * player.weapon.recoil_z * recoil_z_mlt
 
 	if arms.right != nil {
-		arms.right.anchor.position = arms.right.base_pos
-		arms.right.anchor.rotation = arms.right.base_rot
+		arms.right.pivot.position = {}
+		arms.right.pivot.rotation = {}
 	}
 	if arms.left != nil {
-		arms.left.anchor.position = arms.left.base_pos
-		arms.left.anchor.rotation = arms.left.base_rot
+		arms.left.pivot.position = {}
+		arms.left.pivot.rotation = {}
 	}
 	if player.weapon.melee && player.render_you && !third_person && arms.right != nil && arms.left != nil {
 		pose := player.melee_pose
-		arms.right.anchor.position = {0.4, 0.3, -step_anim}
-		arms.right.anchor.rotation = {-0.4, 0, -0.3}
-		arms.left.anchor.position = {0.3, -0.5, step_anim}
-		arms.left.anchor.rotation = {0, 0, -0.4}
-		arms.left.anchor.position.z += pose[shared.MELEE_L_ARM]
-		arms.left.anchor.position.y -= pose[shared.MELEE_L_ARM] * 0.27
-		arms.left.anchor.rotation.y += pose[shared.MELEE_L_ARM] * 0.1
-		arms.left.anchor.position.x -= pose[shared.MELEE_L_ARM] * 0.3
-		arms.right.anchor.rotation.z += player.crouch_val * 0.12 - step_half_rotate + player.jump_bob_y * 0.2
+		arms.right.pivot.position = {0.4, 0.3, -step_anim}
+		arms.right.pivot.rotation = {-0.4, 0, -0.3}
+		arms.left.pivot.position = {0.3, -0.5, step_anim}
+		arms.left.pivot.rotation = {0, 0, -0.4}
+		arms.left.pivot.position.z += pose[shared.MELEE_L_ARM]
+		arms.left.pivot.position.y -= pose[shared.MELEE_L_ARM] * 0.27
+		arms.left.pivot.rotation.y += pose[shared.MELEE_L_ARM] * 0.1
+		arms.left.pivot.position.x -= pose[shared.MELEE_L_ARM] * 0.3
+		arms.right.pivot.rotation.z += player.crouch_val * 0.12 - step_half_rotate + player.jump_bob_y * 0.2
 		if arms.weapon_right != nil {
 			arms.weapon_right.visible = player.can_throw
 			arms.weapon_right.transform.position = {0.9, -0.95, 0.72}
@@ -672,20 +664,20 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		}
 		if player.aim_val > 0 && player.can_throw && player.weapon.can_throw {
 			wind_up := player.aim_val
-			arms.right.anchor.rotation.z -= wind_up * 1.3
-			arms.right.anchor.position.x += wind_up * 1.7
-			arms.right.anchor.position.z += wind_up * 1.8
-			arms.right.anchor.position.y += wind_up * 2.9
-			arms.right.anchor.rotation.y += wind_up
-			arms.right.anchor.rotation.x += wind_up * 1.7
+			arms.right.pivot.rotation.z -= wind_up * 1.3
+			arms.right.pivot.position.x += wind_up * 1.7
+			arms.right.pivot.position.z += wind_up * 1.8
+			arms.right.pivot.position.y += wind_up * 2.9
+			arms.right.pivot.rotation.y += wind_up
+			arms.right.pivot.rotation.x += wind_up * 1.7
 		} else {
 			r_arm := pose[shared.MELEE_R_ARM]
-			arms.right.anchor.rotation.z += pose[shared.MELEE_ARM_R]
-			arms.right.anchor.rotation.y += pose[shared.MELEE_ARM_T] - r_arm * 0.25
-			arms.right.anchor.rotation.x += pose[shared.MELEE_ARM_S]
-			arms.right.anchor.position.x += pose[shared.MELEE_ARM_M] + r_arm * 0.3
-			arms.right.anchor.position.z += pose[shared.MELEE_ARM_E] + r_arm * 1.15
-			arms.right.anchor.position.y += pose[shared.MELEE_ARM_Y] - r_arm * 0.3
+			arms.right.pivot.rotation.z += pose[shared.MELEE_ARM_R]
+			arms.right.pivot.rotation.y += pose[shared.MELEE_ARM_T] - r_arm * 0.25
+			arms.right.pivot.rotation.x += pose[shared.MELEE_ARM_S]
+			arms.right.pivot.position.x += pose[shared.MELEE_ARM_M] + r_arm * 0.3
+			arms.right.pivot.position.z += pose[shared.MELEE_ARM_E] + r_arm * 1.15
+			arms.right.pivot.position.y += pose[shared.MELEE_ARM_Y] - r_arm * 0.3
 			if arms.weapon_right != nil {
 				arms.weapon_right.transform.rotation.z += pose[shared.MELEE_WEA_R]
 				arms.weapon_right.transform.position.x += pose[shared.MELEE_WEA_M]
