@@ -479,6 +479,9 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 	}
 
 	player.team = state.team
+	if state.active && !was_active {
+		shared.player_reset_movement_animation(player)
+	}
 	player.active = state.active
 	if state.is_you {
 		if state.active {
@@ -1100,7 +1103,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS {
 				ordered_remove(&client.predicted_inputs, 0)
 			}
-			shared.player_proc_input(client.me, &input, true, client.game.move_lock)
+			shared.player_proc_input(client.me, &input, true, client.game.move_lock, true)
 			net_client_send_input(&client.net, &input)
 		} else {
 			shared.player_queue_input(client.me, &input)

@@ -167,6 +167,12 @@ You can also choose a class on the spawn screen before entering the game.
 | `Esc` | Release the mouse cursor |
 | `F11` | Toggle fullscreen |
 
+Run N Gun, Agent, and Runner can also wall jump: jump beside a wall, release
+`Space`, then press it again while touching the wall to kick away. Holding
+`Shift` while falling against a wall slows your descent. Maps can disable wall
+jumping on individual surfaces; ramps, cylinders, and ladders do not count as
+walls for this ability.
+
 ## Runtime dependencies (Linux)
 
 - `libglfw3` is the only required runtime library. It pulls in the X11/Wayland/GLX/EGL runtime

@@ -43,6 +43,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	}
 
 	player.speed = class.speed
+	player.wall_jump = class.wall_jump
 	player.health = f32(class.health)
 	player.max_health = class.health
 
@@ -116,6 +117,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.view_kick_phase = 0
 	player.melee_pose = {}
 	player.melee_phase = 0
+	player_reset_movement_animation(player)
 
 	player.on_ground = true
 	player.on_wall = 0
@@ -229,6 +231,10 @@ player_queue_input :: proc(player: ^Player, input: ^Input) {
 }
 
 player_reset_step :: proc(player: ^Player, recon: bool) {
+	if !recon && player.render_you && player.velocity.y != 0 {
+		player_animate_land(player)
+	}
+
 	if !player.game.config.can_slide || player.game.mode.config.real_movement || player.crouch_val == 0 || !player.can_slide {
 		return
 	}
@@ -412,6 +418,9 @@ player_do_map_collisions :: proc(player: ^Player, input: ^Input, move_dir: f32, 
 				y_collision := true
 
 				if player.last_position.y >= obj.position.y + obj.scale.y {
+					if !recon && player.render_you && player.last_position.y > player.position.y && player.velocity.y != 0 {
+						player_animate_land(player)
+					}
 					player.position.y = obj.position.y + obj.scale.y
 					player.velocity.y = 0.0
 					player.on_ground = true
@@ -652,6 +661,7 @@ player_start_melee_animation :: proc(player: ^Player, kind: i32) {
 }
 
 player_update_visual_animations :: proc(player: ^Player, delta: f32) {
+	player_update_movement_animation(player, delta)
 	if player.view_kick_phase != 0 {
 		player.view_kick_time += delta
 		k := min(1.0, player.view_kick_time / player.view_kick_duration)
@@ -722,7 +732,9 @@ player_update_recoil :: proc(player: ^Player, delta: f32) {
 	}
 }
 
-player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool) {
+// Fresh client prediction may play movement effects. Reconciliation replays
+// leave predict_effects false so snapshots cannot restart the same animation.
+player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool, predict_effects: bool = false) {
 	delta := min(input.delta, GAME_CONSTANTS.max_delta)
 	move_dir := -math.PI / 2.0 + math.PI / 4.0 * f32(input.move_dir)
 
@@ -888,6 +900,9 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 			if input.jump && (!player.did_jump || player.game.config.auto_jump) {
 				player_jump(player)
+				if player.render_you && (!recon || predict_effects) {
+					player_animate_jump(player, false)
+				}
 			}
 		}
 
@@ -951,7 +966,9 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		player.on_ramp = false
 
 		if !player.noclip {
-			player_do_map_collisions(player, input, move_dir, can_jump, delta, recon)
+			// Collision's recon flag suppresses landing effects only; physics is
+			// identical for fresh prediction and reconciliation replay.
+			player_do_map_collisions(player, input, move_dir, can_jump, delta, recon && !predict_effects)
 		}
 
 		if !player.did_jump && player.ramp_fix != nil && math.abs(player.position.y - player.ramp_fix^) <= GAME_CONSTANTS.climb_height {
@@ -1034,6 +1051,9 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 		if !player.did_wall_jump && input.jump {
 			player.did_wall_jump = true
+			if player.render_you && (!recon || predict_effects) {
+				player_animate_jump(player, true)
+			}
 
 			velocity: f32 = (player.game.mode.config.real_movement ? 0.7 : 1.0) * 0.03
 			player.velocity.y = (player.game.mode.config.real_movement ? 0.9 : 1.0) * 0.058
