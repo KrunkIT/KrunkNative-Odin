@@ -390,6 +390,7 @@ Player :: struct {
 	jump_rotate_mlt:                 f32,
 	step_val:                        f32,
 	step_chase:                      f32,
+	step_dir_neg:                    bool,
 	bob_anim:                        Vec3,
 	lean_anim:                       Vec3,
 	recoil:                          Vec3,

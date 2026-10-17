@@ -744,6 +744,17 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 	pitch_delta := normalize_angle(input.x_dir - player.direction.x)
 	yaw_delta := normalize_angle(input.y_dir - player.direction.y)
+	animate_local := player.render_you && (!recon || predict_effects)
+	if animate_local {
+		// These deltas are new - old; the reference uses old - new.
+		player.lean_anim.x = clamp(player.lean_anim.x + yaw_delta * GAME_CONSTANTS.lean_sensitivity, -GAME_CONSTANTS.lean_max, GAME_CONSTANTS.lean_max)
+		player.lean_anim.y = clamp(player.lean_anim.y + pitch_delta * GAME_CONSTANTS.lean_sensitivity, -GAME_CONSTANTS.lean_max, GAME_CONSTANTS.lean_max)
+		player.lean_anim.x *= math.pow(GAME_CONSTANTS.lean_pull, delta * 1000)
+		player.lean_anim.y *= math.pow(GAME_CONSTANTS.lean_pull, delta * 1000)
+		player.lean_anim.z *= math.pow(GAME_CONSTANTS.lean_pull_z, delta * 1000)
+		player.bob_anim.y *= math.pow(GAME_CONSTANTS.bob_pull_y, delta * 1000)
+		player.bob_anim.z *= math.pow(GAME_CONSTANTS.bob_pull_z, delta * 1000)
+	}
 
 	player.direction.x = clamp(input.x_dir, -math.PI / 2.0, math.PI / 2.0)
 	player.direction.y = input.y_dir
@@ -813,7 +824,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		player.crouch_val = min(1.0, player.crouch_val + GAME_CONSTANTS.crouch_speed * delta)
 
 		if player.on_ground {
-			// TODO: bob anim
+			if animate_local { player.bob_anim.y -= GAME_CONSTANTS.crouch_anim * 1.4 * delta }
 		} else {
 			player.position.y += GAME_CONSTANTS.crouch_speed * delta
 		}
@@ -821,7 +832,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		player.crouch_val = max(0.0, player.crouch_val - GAME_CONSTANTS.crouch_speed * delta)
 
 		if player.on_ground {
-			// TODO: bob anim
+			if animate_local { player.bob_anim.y += GAME_CONSTANTS.crouch_anim * delta }
 		} else {
 			player.position.y -= GAME_CONSTANTS.crouch_speed * delta
 		}
@@ -993,6 +1004,23 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 	delta_pos2D := math.sqrt((player.position.x - player.last_position.x) * (player.position.x - player.last_position.x) + (player.position.z - player.last_position.z) * (player.position.z - player.last_position.z))
 	player.covered_distance += delta_pos2D
+	if (!recon || predict_effects) && player.game.map_inst.config.model != .SPRITE {
+		// Cadence follows actual displacement, including slopes and ladders.
+		delta_y := player.position.y - player.last_position.y
+		distance := math.sqrt(delta_pos2D * delta_pos2D + delta_y * delta_y) * (player.render_you && player.on_ladder ? 1.4 : 1.0)
+		stepping := contact && input.move_dir >= 0 && !move_lock
+		if player.is_you && stepping { player_step(player, distance) }
+		if animate_local {
+			player.bob_anim.z += delta_pos2D * GAME_CONSTANTS.bob_mlt_z
+			player.bob_anim.y += delta_y * GAME_CONSTANTS.bob_mlt_y
+			if stepping {
+				player.lean_anim.z -= distance * GAME_CONSTANTS.lean_mlt_z * (player.weapon.z_lean_mlt != 0 ? player.weapon.z_lean_mlt : 1.0) * math.cos(move_dir)
+			} else {
+				player.step_val *= math.pow(GAME_CONSTANTS.step_pull, delta * 1000)
+			}
+			player.step_chase += (player.step_val - player.step_chase) * 0.15
+		}
+	}
 
 	if !recon && player.game.map_inst.config.model != .SPRITE {
 		if input.reload && !player.game.mode.config.no_reloads {
@@ -1075,7 +1103,12 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 }
 
 player_step :: proc(player: ^Player, distance: f32) {
-	// TODO
+	if distance <= 0 { return }
+	step_distance := distance * (!player.render_you && player.crouch_val != 0 ? 1.6 : 1.0)
+	player.step_val += step_distance * 0.25 * (player.step_dir_neg ? -1.0 : 1.0)
+	if (player.step_val >= math.PI / 2 && !player.step_dir_neg) || (player.step_val <= -math.PI / 2 && player.step_dir_neg) {
+		player.step_dir_neg = !player.step_dir_neg
+	}
 }
 
 player_melee :: proc(player: ^Player) {

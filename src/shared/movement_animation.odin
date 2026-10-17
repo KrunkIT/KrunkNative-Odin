@@ -58,6 +58,7 @@ player_reset_movement_animation :: proc(player: ^Player) {
 	player.land_bob_yr = 0
 	player.step_val = 0
 	player.step_chase = 0
+	player.step_dir_neg = false
 	player.bob_anim = {}
 	player.lean_anim = {}
 	player.movement_anim_seed = 0x9e3779b9
