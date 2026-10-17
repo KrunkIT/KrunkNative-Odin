@@ -9,6 +9,8 @@ import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
 import stbi "vendor:stb/image"
 import shared "../shared"
+import menuui "../menu"
+import clay "../third_party/clay"
 
 Display_Mode :: enum {
 	Windowed,
@@ -49,13 +51,12 @@ Client :: struct {
 	last_fullscreen_key: bool,
 	last_escape_key:   bool,
 	last_swap_key:     u8,
-	last_mouse_button: bool,
 	in_game:           bool,
 	spawn_pending:     bool,
 	spawn_retry_timer: f32,
 	selected_class:    i32,
-	class_picker_open: bool,
-	settings_open:     bool,
+	menu:             menuui.State,
+	menu_scroll:      clay.Vector2,
 	display_mode:      Display_Mode,
 	resolution_index:  i32,
 	sensitivity:       f32,
@@ -965,64 +966,16 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	client.last_fullscreen_key = fullscreen_key
 	client.mouse_state.locked = glfw.GetInputMode(client.window, glfw.CURSOR) == glfw.CURSOR_DISABLED
 
-	left_down := glfw.GetMouseButton(client.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
-
 	escape_key := glfw.GetKey(client.window, glfw.KEY_ESCAPE) == glfw.PRESS
-	if !client.mouse_state.locked && escape_key && !client.last_escape_key && client.settings_open {
-		client.settings_open = false
-	} else if client.mouse_state.locked && escape_key {
+	if client.mouse_state.locked && escape_key && !client.last_escape_key {
 		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 		client.mouse_state.locked = false
-	} else if !client.mouse_state.locked && left_down && !client.last_mouse_button {
-		clicked_ui := false
-
-		if client.settings_open {
-			clicked_ui = settings_handle_click(client, f32(x), f32(y))
-		} else if client.class_picker_open {
-			// Class picker screen: clicking a class selects it, clicking BACK
-			// returns to the spawn screen.
-			layout := class_picker_layout(client)
-			for i in 0 ..< shared.class_rotation_count() {
-				bx, by, bw, bh := class_button_rect(layout, i)
-				if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
-					client.selected_class = shared.class_rotation_id(i)
-					clicked_ui = true
-					break
-				}
-			}
-
-			if !clicked_ui {
-				bx, by, bw, bh := class_picker_back_rect(client)
-				if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
-					client.class_picker_open = false
-					clicked_ui = true
-				}
-			}
-		} else {
-			// Spawn screen buttons open their respective menus; clicking anywhere
-			// else starts or resumes the game.
-			bx, by, bw, bh := pick_your_class_button_rect(client)
-			if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
-				client.class_picker_open = true
-				clicked_ui = true
-			} else {
-				bx, by, bw, bh = settings_button_rect(client)
-				if point_in_rect(f32(x), f32(y), bx, by, bw, bh) {
-					client.settings_open = true
-					clicked_ui = true
-				}
-			}
-		}
-
-		if !clicked_ui {
-			glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-			client.mouse_state.locked = true
-			client.mouse_state.last_pos.x = f32(x)
-			client.mouse_state.last_pos.y = f32(y)
-		}
+		client.menu.page = .HOME
+		client.menu.pressed = 0
+		client.menu.previous.escape = true
+		client.menu.previous.down = glfw.GetMouseButton(client.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
 	}
 
-	client.last_mouse_button = left_down
 	client.last_escape_key = escape_key
 
 	if client.mouse_state.locked && (client.me == nil || !client.me.active) {
@@ -1174,7 +1127,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	ui_update(client.ui, f32(client.viewport_width), f32(client.viewport_height))
 
 	if !client.mouse_state.locked {
-		hud_render(client, now)
+		hud_render(client, delta)
 	} else {
 		overlay_render(client, delta)
 	}
@@ -1241,6 +1194,7 @@ main :: proc() {
 	set_window_icon(client)
 
 	glfw.SetFramebufferSizeCallback(client.window, resize_viewport)
+	glfw.SetScrollCallback(client.window, menu_scroll)
 	glfw.MakeContextCurrent(client.window)
 
 	if bool(glfw.RawMouseMotionSupported()) {
@@ -1259,6 +1213,11 @@ main :: proc() {
 	if client.scene == nil || client.fps_scene == nil || client.ui == nil {
 		return
 	}
+	if !menuui.init(&client.menu, menu_measure_text, client.ui) {
+		fmt.eprintln("Failed to initialize the menu layout")
+		return
+	}
+	defer menuui.fini(&client.menu)
 
 	config_path := shared.concat(shared.assets_path(), "config/game.toml")
 	defer delete(config_path)

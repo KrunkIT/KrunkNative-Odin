@@ -270,6 +270,10 @@ project_root :: proc() -> string {
 }
 
 main :: proc() {
+	if !test_menu() {
+		fmt.eprintln("Menu tests failed")
+		os.exit(1)
+	}
 	if !test_net_send_queue() {
 		os.exit(1)
 	}

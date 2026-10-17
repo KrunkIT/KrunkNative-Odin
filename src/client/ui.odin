@@ -12,6 +12,17 @@ g_font_info: stbtt.fontinfo
 g_font_loaded: bool
 g_font_data: []byte
 
+stb_font_metrics :: proc(ascent, descent, gap: ^i32) {
+	load_font()
+	if g_font_loaded {
+		stbtt.GetFontVMetrics(&g_font_info, ascent, descent, gap)
+	} else {
+		ascent^ = 1
+		descent^ = 0
+		gap^ = 0
+	}
+}
+
 load_glyph :: proc(c: u8) -> ^Glyph_Cache_Entry {
 	if cached, ok := g_glyph_cache[c]; ok {
 		return cached

@@ -297,5 +297,6 @@ later phases are intentionally broad and may change as the project and community
 
 - [Odin](https://odin-lang.org/) - the language and standard library, including vendor bindings
   for GLFW, OpenGL, and STB
+- [Clay](https://github.com/nicbarker/clay) - responsive menu layout and pointer interaction
 - KrunkNative C version - the original gameplay logic this port mirrors 1:1
 - See [the dependency notes](doc/dependencies.md) for how the Odin port replaced the C dependencies
