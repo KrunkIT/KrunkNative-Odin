@@ -4,11 +4,13 @@ import "base:runtime"
 import "core:fmt"
 import "core:encoding/json"
 import "core:math"
+import "core:strings"
 import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
 import menuui "../menu"
 import clay "../third_party/clay"
 import shared "../shared"
+import kproto "../krunker"
 
 menu_measure_text :: proc "c" (label: clay.StringSlice, config: ^clay.TextElementConfig, user: rawptr) -> clay.Dimensions {
 	context = runtime.default_context()
@@ -43,21 +45,83 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 	resolution := DISPLAY_RESOLUTIONS[client.resolution_index]
 	player_count := 0
 	for player in client.game.players { if player.active { player_count += 1 } }
+	if client.krunker.connected && len(client.krunker_world.players) > player_count { player_count = len(client.krunker_world.players) }
 	return {
 		classes = classes, selected_class = client.selected_class,
-		online = client.net.connected, active = client.me != nil && client.me.active,
-		spawn_pending = client.spawn_pending, ready = client.game.ready && (!client.net.connected || client.net.match_state_received),
+		online = client.net.connected || client.krunker.connected, active = client.me != nil && client.me.active || client.krunker.spawned,
+		spawn_pending = client.spawn_pending, ready = (client.game.ready && (!client.net.connected || client.net.match_state_received)) || client.krunker.connected && client.krunker_world.ready,
 		map_name = map_name, mode = "HARDPOINT", player_count = player_count,
 		display_mode = i32(client.display_mode), sensitivity = client.sensitivity, show_fps = client.show_fps,
 		resolution = fmt.tprintf("%d x %d", resolution.width, resolution.height),
+		join_status = client.join_status,
+	}
+}
+
+client_join_from_clipboard :: proc(client: ^Client) {
+	kproto.network_log_begin()
+	clipboard := glfw.GetClipboardString(client.window)
+	kproto.network_log("clipboard", fmt.tprintf("input bytes=%d link=%s", len(clipboard), clipboard))
+	if len(clipboard) == 0 {
+		kproto.network_log("invite", "ERROR clipboard is empty")
+		delete(client.join_status)
+		client.join_status = strings.clone("Clipboard is empty. Copy a lobby link first.")
+		return
+	}
+
+	parsed, ok := shared.join_link_parse(clipboard)
+	if !ok {
+		kproto.network_log("invite", "ERROR join_link_parse rejected the clipboard link")
+		delete(client.join_status)
+		client.join_status = strings.clone("That is not a supported Krunker lobby link.")
+		return
+	}
+	shared.join_link_free(&client.join_link)
+	client.join_link = parsed
+	kproto.krunker_world_reset(&client.krunker_world)
+
+	if parsed.scheme == "http" || parsed.scheme == "https" || parsed.scheme == "game" {
+		delete(client.join_status)
+		if len(parsed.game_id) == 0 {
+			kproto.network_log("invite", "ERROR browser invite is missing its game id")
+			client.join_status = strings.clone("The invite URL is missing its game id.")
+		} else {
+			net_client_disconnect(&client.net)
+			krunker_ws_connect(client, &client.join_link)
+		}
+		return
+	}
+	if parsed.scheme == "ws" || parsed.scheme == "wss" {
+		net_client_disconnect(&client.net)
+		krunker_ws_connect(client, &client.join_link)
+		return
+	}
+	if len(parsed.host) == 0 {
+		delete(client.join_status)
+		client.join_status = strings.clone("The lobby link does not contain a server host.")
+		return
+	}
+
+	port := parsed.port
+	if port <= 0 { port = 21015 }
+	net_client_disconnect(&client.net)
+	new_net, connected := net_client_connect(parsed.host, int(port))
+	client.net = new_net
+	delete(client.join_status)
+	if connected {
+		client.join_status = strings.clone(fmt.tprintf("Connected to %s:%d.", parsed.host, port))
+	} else {
+		client.join_status = strings.clone(fmt.tprintf("Could not connect to %s:%d; staying offline.", parsed.host, port))
 	}
 }
 
 menu_apply_action :: proc(client: ^Client, action: menuui.Action) {
 	switch action.kind {
 	case .NONE:
+	case .JOIN_LINK:
+		client_join_from_clipboard(client)
 	case .PLAY:
-		if !client.game.ready || client.spawn_pending || client.net.connected && !client.net.match_state_received { return }
+		if client.krunker.connected && (!client.krunker.spawned || client.me == nil) { return }
+		if (!client.game.ready && !(client.krunker.connected && client.krunker_world.ready)) || client.spawn_pending || client.net.connected && !client.net.match_state_received { return }
 		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
 		client.mouse_state.locked = true
 		x, y := glfw.GetCursorPos(client.window)

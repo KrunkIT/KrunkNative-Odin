@@ -19,6 +19,7 @@ Shader_Uniforms :: struct {
 	face_scale:           i32,
 	color:                i32,
 	emissive:             i32,
+	alpha_test:           i32,
 	tex_transform:        i32,
 	tex:                  i32,
 	aspect:               i32,
@@ -48,6 +49,7 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.face_scale = gl.GetUniformLocation(program, "face_scale")
 	u.color = gl.GetUniformLocation(program, "color")
 	u.emissive = gl.GetUniformLocation(program, "emissive")
+	u.alpha_test = gl.GetUniformLocation(program, "alpha_test")
 	u.tex_transform = gl.GetUniformLocation(program, "tex_transform")
 	u.tex = gl.GetUniformLocation(program, "tex")
 	u.aspect = gl.GetUniformLocation(program, "aspect")
@@ -101,6 +103,7 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 
 	gl.Uniform4f(color, material.color.x, material.color.y, material.color.z, material.color.w)
 	gl.Uniform4f(emissive, material.emissive.x, material.emissive.y, material.emissive.z, material.emissive.w)
+	gl.Uniform1f(u_basic.alpha_test, material.alpha_test)
 
 	if material.texture != 0 && g_active_texture == material.texture || material.texture == 0 && g_blank_texture != 0 && g_active_texture == g_blank_texture {
 		return

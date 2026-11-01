@@ -94,6 +94,17 @@ home :: proc(state: ^State, view: View) {
 			label := view.spawn_pending ? "JOINING..." : !view.ready ? "WAITING FOR SERVER..." : view.active ? "RESUME" : "PLAY NOW"
 			button(state, label, "Play", {kind = .PLAY}, primary = true, enabled = view.ready && !view.spawn_pending)
 		}
+		if clay.UI(clay.ID("JoinCard"))({
+			layout = {sizing = {width = clay.SizingFixed(310 * s), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(10 * s)},
+			backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(8 * s),
+		}) {
+			text("CUSTOM / RANKED LOBBY", 12, s, MUTED)
+			text("JOIN FROM A LINK", 23, s)
+			status := len(view.join_status) > 0 ? view.join_status : "Paste an invite link from your clipboard."
+			text(status, 14, s, MUTED)
+			spacer()
+			button(state, "PASTE & JOIN LINK", "JoinLink", {kind = .JOIN_LINK}, primary = true)
+		}
 	}
 }
 

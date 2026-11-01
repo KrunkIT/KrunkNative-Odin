@@ -7,8 +7,8 @@ with Odin!
 ![KrunkNative running Littletown](doc/demo.png)
 
 > [!NOTE]
-> The Odin port is actively developed. The client supports offline play and a localhost TCP
-> multiplayer path; the network address is currently fixed to `127.0.0.1:21015`.
+> The Odin port is actively developed. The client starts in offline mode and exposes an explicit
+> **PASTE & JOIN LINK** action on the home screen for network experiments.
 >
 > The native protocol is project-owned and intentionally targets only this native client and
 > dedicated server.
@@ -32,8 +32,8 @@ pack is not tracked. Before starting the client, unpack a compatible Krunker `mo
 - `assets/sound/`
 - `assets/css/fonts/font2.ttf`
 
-A 2020-2021 asset pack is recommended. Keep the files already present in `assets/`; see the
-[asset instructions](assets/README.md) for details.
+The current asset pack is recommended for the v3 map. Keep the files already present in `assets/`; see
+the [asset instructions](assets/README.md) for details.
 
 ## Building
 
@@ -136,9 +136,64 @@ Start the server in one terminal, then start one or more clients from other term
 ./bin/krunknative_client
 ```
 
-On Windows, use `.\bin\krunknative_server.exe` and `.\bin\krunknative_client.exe`. With no
-`--offline` or `--map` option, the client tries the local server first and falls back to offline
-play when the server is unavailable. Passing `--map` always starts a local custom-map session.
+On Windows, use `.\bin\krunknative_server.exe` and `.\bin\krunknative_client.exe`. The
+client remains offline until the join control is used. Passing `--map` always starts a local
+custom-map session.
+
+### Joining a lobby link
+
+Copy a Krunker invite (`https://krunker.io/?game=<id>`) and choose **PASTE & JOIN LINK** on the
+home screen. The client parses browser invite links, assigned game URLs, and direct `tcp://host:port`
+endpoints without probing a server at startup. Browser invites are resolved through the matchmaker,
+then the live adapter keeps a libcurl WSS connection open and sends the MessagePack load/team/class/
+spawn bootstrap. Set `KRUNKER_ACCESS_TOKEN` in the ignored `.env` (or in the environment) for browser
+invite resolution. Direct `wss://` links are accepted as well; offline sessions continue to use the
+existing local renderer and simulation.
+
+Live joins reassemble complete WebSocket messages before decoding, load the server's
+official map (including the Sandstorm v3 alias), and attach the camera/view model only
+after `start` and a matching local player position arrive. Team/class entry waits for
+`ready` and sends the bootstrap in paced steps. If the server reports `gmsg("wt")`,
+the menu shows that it is waiting for players; that state has no confirmed spawn yet.
+After spawning, keyboard/mouse input is sent as live `q` batches with local prediction
+and authoritative position corrections.
+
+Join diagnostics are always enabled in the client. Launch `.\bin\krunknative_client.exe`
+from this worktree directory, retry **PASTE & JOIN LINK**, and inspect
+`logs/krunker-network.log` (also printed to the console). Each attempt records the parsed
+invite, token source/expiry, matchmaker URLs, HTTP status/response headers/error body,
+curl DNS/TLS details and timings, WebSocket upgrade, and MessagePack spawn stages.
+Credentials and cookies are redacted. Error bodies are limited to 16 KiB per log entry;
+routine frame/opcode details are limited to the first 40 frames to control log volume.
+The log appends across runs and is ignored by Git. The on-screen error includes the HTTP
+status and a short server response excerpt.
+
+The diagnostic regression test uses a local HTTP server and needs no account or lobby:
+
+```powershell
+odin build tools/network_diagnostics_test -out:bin/network_diagnostics_test.exe -o:none
+python tools/test_network_diagnostics.py
+# Optional: tests the map/player handoff using a hidden OpenGL window.
+odin test src/client -out:bin/krunknative_client_tests.exe
+```
+
+The standalone flow diagnostic requires a fresh `KRUNKER_ACCESS_TOKEN` because the `/seek-game`
+endpoint rejects anonymous requests. It reads that variable from the environment first, then from
+the local `.env` file. It fetches a validation token, resolves the invite, builds the assigned WSS
+URL, and probes the TLS WebSocket upgrade without sending gameplay packets.
+
+To run the standalone link-flow diagnostic, build it as a single Odin file and pass one copied
+link. It prints each stage and exits nonzero at the exact failing stage:
+
+```powershell
+odin build tools/krunker_link_flow_test.odin -file -out:bin/krunker_link_flow_test.exe -o:none
+# The diagnostic loads KRUNKER_ACCESS_TOKEN from .env in the current directory.
+.\bin\krunker_link_flow_test.exe "https://krunker.io/?game=<id>"
+```
+
+For protocol experiments, see `experiments/python_link_flow/README.md`. Its
+`--packets` mode sends the initial MessagePack `load` packet and logs decoded
+server frames and trailer values.
 
 ### Client options
 

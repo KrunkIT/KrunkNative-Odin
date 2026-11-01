@@ -9,6 +9,7 @@ import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
 import stbi "vendor:stb/image"
 import shared "../shared"
+import kproto "../krunker"
 import menuui "../menu"
 import clay "../third_party/clay"
 
@@ -62,7 +63,12 @@ Client :: struct {
 	sensitivity:       f32,
 	freecam_enabled:   bool,
 	map_loaded:        bool,
+	offline_custom_map: ^shared.Map,
 	net:               Net_Client_State,
+	krunker:           Krunker_WS_State,
+	krunker_world:     kproto.Krunker_World_State,
+	join_link:         shared.Join_Link,
+	join_status:       string,
 	net_input_seq:     i32,
 	snapshot_send_rate: f32,
 	predicted_inputs:  [dynamic]shared.Input,
@@ -201,11 +207,7 @@ map_name_is_valid :: proc(name: string) -> bool {
 }
 
 map_asset_name :: proc(name: string) -> string {
-	if name == "ss_v3" {
-		return "sandstorm_v3"
-	}
-
-	return name
+	return shared.map_asset_name(name)
 }
 
 parse_client_options :: proc() -> (options: Client_Options, ok: bool) {
@@ -881,10 +883,18 @@ client_update_freecam :: proc(client: ^Client, mouse_delta: shared.Vec2, delta: 
 }
 
 client_enter_game :: proc(client: ^Client) {
-	if !client.game.ready || client.in_game || client.spawn_pending {
+	if (!client.game.ready && !(client.krunker.connected && client.krunker_world.ready)) || client.in_game || client.spawn_pending {
 		return
 	}
 	if client.net.connected && !client.net.match_state_received {
+		return
+	}
+	if client.krunker.connected {
+		// The live adapter performs the Krunker player-entry handshake itself.
+		// Never fall through to the local simulation while that socket is active.
+		if !client.krunker.spawned {
+			client.spawn_pending = true
+		}
 		return
 	}
 
@@ -917,7 +927,10 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	if client.net.connected {
 		net_client_poll(client)
 	}
-	if !client.game.ready {
+	if client.krunker.connected {
+		krunker_ws_poll(client)
+	}
+	if !client.game.ready && !(client.krunker.connected && client.krunker_world.ready) {
 		return
 	}
 
@@ -933,7 +946,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	debug_key := glfw.GetKey(client.window, glfw.KEY_GRAVE_ACCENT) == glfw.PRESS
 	freecam_key := glfw.GetKey(client.window, glfw.KEY_RIGHT_BRACKET) == glfw.PRESS
 
-	if debug_key && !client.last_debug_key && !client.net.connected {
+	if debug_key && !client.last_debug_key && !client.net.connected && !client.krunker.connected {
 		client_unload_map(client)
 
 		if client.me != nil {
@@ -1004,7 +1017,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		input.y_dir = client.me.direction.y
 
 		if client.mouse_state.locked && !client.freecam_enabled {
-			if noclip_key && !client.last_noclip_key {
+			if noclip_key && !client.last_noclip_key && !client.krunker.connected {
 				client.me.noclip = !client.me.noclip
 			}
 
@@ -1051,7 +1064,13 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 		input.seq = client.net_input_seq
 		client.net_input_seq += 1
-		if client.net.connected {
+		if client.krunker.connected {
+			input.seq = client.krunker.input_sequence
+			append(&client.predicted_inputs, input)
+			if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }
+			shared.player_proc_input(client.me, &input, true, client.krunker_world.move_lock, true)
+			krunker_ws_send_input(client, &input)
+		} else if client.net.connected {
 			append(&client.predicted_inputs, input)
 			if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS {
 				ordered_remove(&client.predicted_inputs, 0)
@@ -1071,7 +1090,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	client.mouse_state.last_pos.y = f32(y)
 	client.last_noclip_key = noclip_key
 
-	if !client.net.connected {
+	if !client.net.connected && !client.krunker.connected {
 		shared.game_tick(&client.game, now, delta)
 	} else {
 		// The local player is predicted above. Remote players remain one snapshot
@@ -1110,7 +1129,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		client.camera.rotation.y = client.me.direction.y
 		client.camera.zoom = 1.0 + (client.me.weapon.zoom - 1.0) * client.me.aim_val
 
-		if client.me.mesh != nil && !client.net.connected {
+		if client.me.mesh != nil && !client.net.connected && !client.krunker.connected {
 			player_update_meshes(client.me, false)
 		}
 	}
@@ -1227,11 +1246,9 @@ main :: proc() {
 	if len(options.class_name) > 0 {
 		client.selected_class = i32(shared.class_config_index(options.class_name))
 	}
-	// Explicit map selection is a local/custom-map workflow unless a future
-	// server handshake advertises that exact content.
-	if !options.offline && len(options.map_name) == 0 {
-		client.net, _ = net_client_connect("127.0.0.1", 21015)
-	}
+	// Sessions start offline.  A live lobby is an explicit user action (for
+	// example, pasting a custom-lobby link into the join control), so startup
+	// must not probe localhost or any remote server implicitly.
 
 	if len(options.map_name) > 0 {
 		g_map_name = options.map_name
@@ -1243,6 +1260,7 @@ main :: proc() {
 			fmt.eprintf("Failed to load map: %s\n", options.map_name)
 			return
 		}
+		client.offline_custom_map = selected_map
 
 		maps := []^shared.Map{selected_map}
 		shared.game_configure(&client.game, &gameplay_config.game, maps, nil, gameplay_config.weapons, gameplay_config.classes)
@@ -1276,19 +1294,15 @@ main :: proc() {
 
 	client_unload_map(client)
 	net_client_disconnect(&client.net)
+	krunker_ws_disconnect(&client.krunker)
+	shared.join_link_free(&client.join_link)
+	delete(client.join_status)
+	kproto.krunker_world_reset(&client.krunker_world)
 	client_clear_impacts(client)
-	if client.me != nil && client.me.mesh != nil {
-		scene_remove_player_mesh(client.fps_scene, cast(^Player_Mesh)client.me.mesh, int(client.me.loadout_size))
-		player_meshes_fini(client.me)
-	}
-	game_destroy_maps := len(options.map_name) == 0
-	selected_map := client.game.map_inst
+	client_clear_players(client)
 	shared.game_destroy(&client.game)
-	if game_destroy_maps {
-		shared.unload_default_maps()
-	} else if selected_map != nil {
-		shared.map_destroy(selected_map)
-	}
+	shared.unload_default_maps()
+	if client.offline_custom_map != nil { shared.map_destroy(client.offline_custom_map) }
 	scene_fini(client.fps_scene)
 	scene_fini(client.scene)
 	overlay_fini()

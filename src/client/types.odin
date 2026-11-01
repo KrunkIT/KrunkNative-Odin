@@ -71,6 +71,7 @@ Basic_Material :: struct {
 	face_scale: shared.Vec3,
 	color: shared.Vec4,
 	emissive: shared.Vec4,
+	alpha_test: f32,
 	texture_repeat: shared.Vec2,
 	texture_offset: shared.Vec2,
 	texture: u32,

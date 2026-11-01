@@ -61,6 +61,9 @@ test_menu :: proc() -> bool {
 	menu_test_frame(&state, view, {pointer = {box.x + 5, box.y + 5}, down = true})
 	if menu_test_frame(&state, view, {pointer = {1270, 710}}).kind != .NONE { return false }
 	if menu_test_click(&state, view, clay.ID("Play")).kind != .PLAY { fmt.eprintln("Menu play click failed"); return false }
+	// Invite links are available from the offline home screen. The client layer
+	// owns clipboard access and network setup; the menu emits a stable action.
+	if menu_test_click(&state, view, clay.ID("JoinLink")).kind != .JOIN_LINK { fmt.eprintln("Menu join-link click failed"); return false }
 	view.ready = false
 	menu_test_frame(&state, view, {})
 	if menu_test_click(&state, view, clay.ID("Play")).kind != .NONE { return false }

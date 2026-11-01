@@ -51,13 +51,11 @@ net_client_send :: proc(nc: ^Net_Client_State, data: []byte) -> bool {
 }
 
 net_client_connect :: proc(host: string, port: int) -> (nc: Net_Client_State, ok: bool) {
-	addr4 := net.IP4_Address{127, 0, 0, 1}
-	endpoint := net.Endpoint {
-		address = addr4,
-		port    = port,
-	}
-
-	socket, err := net.dial_tcp(endpoint)
+	// Resolve the requested host instead of silently forcing every connection
+	// to localhost.  This is important for pasted custom-lobby links, where
+	// the assigned game server is a remote hostname.  The net package handles
+	// both DNS names and dotted IPv4 literals through this overload.
+	socket, err := net.dial_tcp(host, port)
 	if err != nil {
 		fmt.printf("[Net Client] Offline mode (server at %s:%d not reachable)\n", host, port)
 		return nc, false

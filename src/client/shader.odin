@@ -23,8 +23,12 @@ shader_compile :: proc(vertex_shader_path, fragment_shader_path: string) -> u32 
 
 	v_cstr := cstring(raw_data(v_src))
 	f_cstr := cstring(raw_data(f_src))
+	// read_file returns bytes without a terminating NUL. Passing explicit
+	// lengths prevents GL from compiling memory beyond the source buffer.
+	v_length := i32(len(v_src))
+	f_length := i32(len(f_src))
 
-	gl.ShaderSource(vert, 1, &v_cstr, nil)
+	gl.ShaderSource(vert, 1, &v_cstr, &v_length)
 	gl.CompileShader(vert)
 
 	status: i32
@@ -40,7 +44,7 @@ shader_compile :: proc(vertex_shader_path, fragment_shader_path: string) -> u32 
 		return 0
 	}
 
-	gl.ShaderSource(frag, 1, &f_cstr, nil)
+	gl.ShaderSource(frag, 1, &f_cstr, &f_length)
 	gl.CompileShader(frag)
 
 	gl.GetShaderiv(frag, gl.COMPILE_STATUS, &status)

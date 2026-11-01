@@ -98,10 +98,6 @@ prefab_textures := [?]string{
 	"tile",
 }
 
-custom_asset_tree_ids := [?]string{
-	"2412a",
-}
-
 prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json.Value) -> ^Mesh {
 	obj_obj, is_obj := raw_obj.(json.Object)
 	if !is_obj {
@@ -115,18 +111,19 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 	}
 
 	prefab_model := prefab_models[prefab_id]
+	alpha_test: f32
 
 	if prefab_id == int(shared.Prefab.CUSTOM_ASSET) {
-		if aid_val, has_aid := obj_obj["aid"]; has_aid {
-			if aid_str, is_str := aid_val.(json.String); is_str {
-				for tree_id in custom_asset_tree_ids {
-					if aid_str == tree_id {
-						prefab_model = prefab_models[int(shared.Prefab.TREE)]
-						break
-					}
-				}
-			}
+		aid, is_string := obj_obj["aid"].(json.String)
+		if !is_string {
+			return nil
 		}
+		asset, supported := shared.map_custom_asset(string(aid))
+		if !supported {
+			return nil
+		}
+		prefab_model = Prefab_Model{filename = asset.filename, scale = 1.0}
+		alpha_test = asset.alpha_test
 	}
 
 	raw_visibility, has_visibility := obj_obj["v"]
@@ -224,6 +221,7 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 		mesh.transform.scale = shared.Vec3{scale, scale, scale}
 
 		material.base.transparent = prefab_model.transparent || opacity != 1.0
+		material.alpha_test = alpha_test
 		material.texture = texture_id
 		material.color = color
 		material.color.w = opacity

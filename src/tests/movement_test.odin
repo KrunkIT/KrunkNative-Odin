@@ -6,6 +6,7 @@ import "core:os"
 import "core:strings"
 
 import shared "../shared"
+import krunker "../krunker"
 
 EPSILON :: 1e-3
 
@@ -270,8 +271,32 @@ project_root :: proc() -> string {
 }
 
 main :: proc() {
+	if !test_krunker_join_pipeline() || !test_krunker_live_input() {
+		os.exit(1)
+	}
+	if !test_krunker_seek_query() {
+		os.exit(1)
+	}
+	if !test_krunker_diagnostics() {
+		os.exit(1)
+	}
+	if !test_krunker_msgpack() {
+		os.exit(1)
+	}
+	if !test_krunker_world() {
+		os.exit(1)
+	}
 	if !test_menu() {
 		fmt.eprintln("Menu tests failed")
+		os.exit(1)
+	}
+	if !test_join_link_parser() {
+		os.exit(1)
+	}
+	if !test_sandstorm_palms() {
+		os.exit(1)
+	}
+	if !test_sandstorm_hidden_colliders() {
 		os.exit(1)
 	}
 	if !test_net_send_queue() {

@@ -5,7 +5,10 @@ import "base:runtime"
 import clay "../third_party/clay"
 
 Page :: enum { HOME, CLASSES, SETTINGS, CONTROLS }
-Action_Kind :: enum { NONE, PLAY, QUIT, SELECT_CLASS, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
+// JOIN_LINK asks the client layer to read the invite URL from the clipboard,
+// parse it, and establish a network session. Keeping this as a menu action
+// avoids coupling the Clay UI to GLFW or the networking implementation.
+Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, SELECT_CLASS, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
 Action :: struct { kind: Action_Kind, index: i32, value: f32 }
 Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_jump, available: bool }
 View :: struct {
@@ -13,6 +16,9 @@ View :: struct {
 	selected_class: i32,
 	online, active, spawn_pending, ready: bool,
 	map_name, mode, resolution: string,
+	// Status is supplied by the client after a join attempt. The menu only
+	// renders it; an empty value uses the default paste hint.
+	join_status: string,
 	player_count: int,
 	display_mode: i32,
 	sensitivity: f32,

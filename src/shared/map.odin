@@ -30,6 +30,16 @@ DEFAULT_MAP_NAMES := [?]string{
 ROTATION_MAPS := [?]int{2, 4, 12, 14}
 ROTATION_MODES := [?]i32{0}
 
+// Sandstorm's original map export is retained as assets/maps/sandstorm.json
+// for reference. Runtime requests for the public name use the current v3
+// export so custom and offline sessions see the same geometry.
+map_asset_name :: proc(name: string) -> string {
+	if name == "sandstorm" || name == "ss_v3" {
+		return "sandstorm_v3"
+	}
+	return name
+}
+
 DEFAULT_MAP_CONFIG := Map_Config {
 	cam_type      = .NORMAL,
 	cam_rotation  = true,
@@ -63,7 +73,7 @@ load_default_map :: proc(index: int) -> ^Map {
 		return g_maps[index]
 	}
 
-	path := strings.concatenate({assets_path(), "maps/", DEFAULT_MAP_NAMES[index], ".json"})
+	path := strings.concatenate({assets_path(), "maps/", map_asset_name(DEFAULT_MAP_NAMES[index]), ".json"})
 	defer delete(path)
 
 	map_inst, ok := map_load_from_file(path)
@@ -315,19 +325,13 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 		l_val, has_l := raw_obj["l"]
 		col_val, has_col := raw_obj["col"]
 		bo_val, has_bo := raw_obj["bo"]
-		v_val, has_v := raw_obj["v"]
 
+		// Visibility (`v`) is independent of collision. Maps use hidden blocks
+		// as solid collision volumes beneath non-colliding decorative meshes.
+		// The browser derives noCol from `l` / `col`, never from `v`.
 		no_collisions := (has_l && !is_nullish(l_val) && (!json_is_number(l_val) || get_json_f32(l_val) != 0)) ||
 		                 (has_col && !is_nullish(col_val) && (!json_is_number(col_val) || get_json_f32(col_val) != 0))
 		is_border := has_bo && !is_nullish(bo_val) && (!json_is_number(bo_val) || get_json_f32(bo_val) != 0)
-
-		// Invisible objects (v:1) are visual-only in the map data; the player
-		// must be able to walk through them. Without this, maps like sandstorm_v3
-		// get invisible walls that block movement in otherwise open areas.
-		invisible := has_v && json_is_number(v_val) && get_json_f32(v_val) == 1.0
-		if invisible {
-			no_collisions = true
-		}
 
 		switch prefab_id {
 		case i32(Prefab.CUBE), i32(Prefab.GATE), i32(Prefab.DEPOSIT_BOX), i32(Prefab.PREMIUM_ZONE), i32(Prefab.VERIFIED_ZONE), i32(Prefab.TEAM_ZONE):

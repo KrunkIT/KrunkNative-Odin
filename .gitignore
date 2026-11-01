@@ -1,9 +1,15 @@
 .idea/
 .vscode/
+.env
+logs/
 cmake-build-debug/
 cmake-build-release/
 bin/
 assets/*/*
+!assets/models/custom/
+!assets/textures/custom/
+!assets/models/custom/2412.obj
+!assets/textures/custom/2412.png
 !assets/maps/*
 !assets/img/*
 !assets/shaders/*
@@ -16,3 +22,8 @@ KrunkNative-Windows/
 KrunkNative-Windows-latest.zip
 KrunkNative-v0.0.1-alpha-Windows-x86-64.zip
 game.js
+KRUNKER_CUSTOM_CLIENT_NETWORK_REPORT.md
+RANKED_MODE_FLOW_REPORT.md
+mod.zip
+__pycache__/
+*.pyc

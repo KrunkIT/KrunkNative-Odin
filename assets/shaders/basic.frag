@@ -13,6 +13,7 @@ uniform vec3 face_scale;
 
 uniform vec4 color;
 uniform vec4 emissive;
+uniform float alpha_test;
 
 uniform mat3 tex_transform;
 uniform sampler2D tex;
@@ -59,4 +60,6 @@ void main() {
 
     vec3 t_tex_coord = tex_transform * vec3(scaled_tex_coord, 1.0f);
     frag_color = texture(tex, t_tex_coord.xy) * mix(color, emissive, 0.0f);
+    // Cutout foliage stays in the opaque pass, with holes in color and depth.
+    if (frag_color.a < alpha_test) discard;
 }
