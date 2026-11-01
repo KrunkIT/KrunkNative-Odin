@@ -84,7 +84,10 @@ prefab_textures := [?]string{
 	"floor",
 	"grid",
 	"grey",
-	"default",
+	// Map texture index 5 is the game's DEFAULT material. The current asset
+	// pack stores its concrete/sand surface as sand_0.png; default_0.png does
+	// not exist and would silently bind the white blank texture.
+	"sand",
 	"roof",
 	"flag",
 	"grass",
@@ -250,7 +253,7 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 
 		texture_path = shared.concat(shared.assets_path(), fmt.tprintf("textures/pubs/b_%d.png", billboard_id))
 	} else {
-		name := prefab_textures[tex_id] if tex_id >= 0 && tex_id < len(prefab_textures) else "default"
+		name := prefab_textures[tex_id] if tex_id >= 0 && tex_id < len(prefab_textures) else "sand"
 		texture_path = shared.concat(shared.assets_path(), fmt.tprintf("textures/%s_%d.png", name, tex_id == 8 ? 1 : 0))
 	}
 

@@ -8,6 +8,12 @@ import shared "../shared"
 import kproto "../krunker"
 
 when ODIN_TEST {
+	@(test)
+	prefab_texture_registry :: proc(t: ^testing.T) {
+		testing.expect(t, len(prefab_textures) > 5, "prefab texture registry is missing the default slot")
+		testing.expect(t, prefab_textures[5] == "sand", "map texture index 5 must resolve to sand_0.png")
+	}
+
 	// Exercise the actual map/mesh/camera handoff in a hidden GL window. This
 	// uses synthetic server state and never connects to a live account/lobby.
 	@(test)
