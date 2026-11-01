@@ -155,6 +155,14 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 
 	map_inst := new(Map)
 	map_inst.config = DEFAULT_MAP_CONFIG
+	// Parse the stable environment fields before retaining the complete map
+	// object. Older maps omit most fields and naturally use browser defaults.
+	map_inst.lighting, _ = lighting_parse_json(json_val)
+	if override_path := lighting_map_override_path(filename); len(override_path) > 0 {
+		if override, override_ok := lighting_load_from_file(override_path); override_ok {
+			map_inst.lighting = override
+		}
+	}
 	map_inst.death_y = GAME_CONSTANTS.death_y
 	map_inst.raw_data = json_val
 	map_inst.colors = parsed_colors[:]

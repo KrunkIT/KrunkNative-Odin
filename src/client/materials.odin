@@ -1,11 +1,16 @@
 package main
 
+import "core:math"
 import gl "vendor:OpenGL"
 import shared "../shared"
 
 basic_shader_program: u32
 quad_shader_program: u32
 text_shader_program: u32
+
+// Active map environment. It is updated when a map is loaded and consumed by
+// the basic world material for every draw.
+g_lighting_config: shared.Lighting_Config = shared.DEFAULT_LIGHTING_CONFIG
 
 // Cached uniform locations. glGetUniformLocation is a driver-side string
 // lookup; resolving each uniform once per program instead of once per mesh per
@@ -22,6 +27,15 @@ Shader_Uniforms :: struct {
 	alpha_test:           i32,
 	tex_transform:        i32,
 	tex:                  i32,
+	ambient_color:        i32,
+	ambient_intensity:    i32,
+	light_color:          i32,
+	light_intensity:      i32,
+	light_dir:            i32,
+	fog_color:            i32,
+	fog_near:             i32,
+	fog_far:              i32,
+	camera_position:      i32,
 	aspect:               i32,
 	r_clip:               i32,
 	border_bottom_left_radius:  i32,
@@ -52,6 +66,15 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.alpha_test = gl.GetUniformLocation(program, "alpha_test")
 	u.tex_transform = gl.GetUniformLocation(program, "tex_transform")
 	u.tex = gl.GetUniformLocation(program, "tex")
+	u.ambient_color = gl.GetUniformLocation(program, "uAmbientColor")
+	u.ambient_intensity = gl.GetUniformLocation(program, "uAmbientIntensity")
+	u.light_color = gl.GetUniformLocation(program, "uLightColor")
+	u.light_intensity = gl.GetUniformLocation(program, "uLightIntensity")
+	u.light_dir = gl.GetUniformLocation(program, "uLightDir")
+	u.fog_color = gl.GetUniformLocation(program, "uFogColor")
+	u.fog_near = gl.GetUniformLocation(program, "uFogNear")
+	u.fog_far = gl.GetUniformLocation(program, "uFogFar")
+	u.camera_position = gl.GetUniformLocation(program, "uCameraPosition")
 	u.aspect = gl.GetUniformLocation(program, "aspect")
 	u.r_clip = gl.GetUniformLocation(program, "r_clip")
 	u.border_bottom_left_radius = gl.GetUniformLocation(program, "border_bottom_left_radius")
@@ -104,6 +127,22 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform4f(color, material.color.x, material.color.y, material.color.z, material.color.w)
 	gl.Uniform4f(emissive, material.emissive.x, material.emissive.y, material.emissive.z, material.emissive.w)
 	gl.Uniform1f(u_basic.alpha_test, material.alpha_test)
+
+	// Current Krunker uses an ambient light plus a directional sky/sun light.
+	// Keep the same angle convention as the browser's sceneInit (degrees,
+	// negated before conversion to radians).
+	light_x := g_lighting_config.light_distance * math.cos(-g_lighting_config.sun_angle_x * math.PI / 180.0)
+	light_y := g_lighting_config.light_distance * math.sin(-g_lighting_config.sun_angle_x * math.PI / 180.0) * math.sin(-g_lighting_config.sun_angle_y * math.PI / 180.0)
+	light_z := g_lighting_config.light_distance * math.sin(-g_lighting_config.sun_angle_x * math.PI / 180.0) * math.cos(-g_lighting_config.sun_angle_y * math.PI / 180.0)
+	gl.Uniform3f(u_basic.ambient_color, g_lighting_config.ambient_color.x, g_lighting_config.ambient_color.y, g_lighting_config.ambient_color.z)
+	gl.Uniform1f(u_basic.ambient_intensity, g_lighting_config.ambient_intensity)
+	gl.Uniform3f(u_basic.light_color, g_lighting_config.light_color.x, g_lighting_config.light_color.y, g_lighting_config.light_color.z)
+	gl.Uniform1f(u_basic.light_intensity, g_lighting_config.light_intensity)
+	gl.Uniform3f(u_basic.light_dir, light_x, light_y, light_z)
+	gl.Uniform3f(u_basic.fog_color, g_lighting_config.fog_color.x, g_lighting_config.fog_color.y, g_lighting_config.fog_color.z)
+	gl.Uniform1f(u_basic.fog_near, 1.0)
+	gl.Uniform1f(u_basic.fog_far, max(1.0, g_lighting_config.fog_distance))
+	gl.Uniform3f(u_basic.camera_position, g_render_camera_position.x, g_render_camera_position.y, g_render_camera_position.z)
 
 	if material.texture != 0 && g_active_texture == material.texture || material.texture == 0 && g_blank_texture != 0 && g_active_texture == g_blank_texture {
 		return

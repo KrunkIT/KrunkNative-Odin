@@ -5,6 +5,8 @@ import "core:math/linalg"
 import gl "vendor:OpenGL"
 import shared "../shared"
 
+g_render_camera_position: shared.Vec3
+
 scene_init :: proc() -> ^Scene {
 	return new(Scene)
 }
@@ -243,6 +245,7 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 
 	camera_update_projection_matrix(camera, aspect)
 	camera_update_world_inverse_matrix(camera)
+	g_render_camera_position = camera.position
 
 	mesh_count := len(scene.meshes)
 	if mesh_count == 0 {

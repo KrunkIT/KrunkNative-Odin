@@ -178,6 +178,9 @@ Map_Config :: struct {
 
 Map :: struct {
 	config:          Map_Config,
+	// Environment settings are part of every current Krunker map export. They
+	// drive ambient/directional lighting, clear colour, and distance fog.
+	lighting:        Lighting_Config,
 	death_y:         f32,
 	spawns:          [dynamic]^Spawn,
 	objects:         [dynamic]^Object,
@@ -195,6 +198,23 @@ Class_Config :: struct {
 	loadout:         []i32,
 	secondary:       bool,
 	wall_jump:       bool,
+	// Current Krunker class exports include movement/animation and availability
+	// fields in addition to the small gameplay subset used by the original C
+	// port. Keep them in the shared config so the client can consume the same
+	// registry without throwing away data needed by later parity work.
+	throw_charge:    f32,
+	turn_speed:      f32,
+	wall_jump_mlt:   f32,
+	leap:            bool,
+	back_slide:      bool,
+	slide_time:      f32,
+	slide_accel:     f32,
+	min_recovery:    f32,
+	face:            i32,
+	melee_rate:      f32,
+	hidden:          bool,
+	no_mobile:       bool,
+	no_sleeve:       bool,
 	colors:          [6]i32,
 	health:          i32,
 	health_segments: i32,

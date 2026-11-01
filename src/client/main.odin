@@ -643,6 +643,18 @@ client_load_current_map :: proc(client: ^Client) {
 		return
 	}
 
+	// Activate the map's current environment before creating its materials.
+	// The browser clears to `sky` and applies the same fog/lighting settings to
+	// every map mesh; keeping this state global lets the existing scene API stay
+	// lightweight while still matching per-map captures.
+	g_lighting_config = client.game.map_inst.lighting
+	gl.ClearColor(
+		g_lighting_config.sky_color.x,
+		g_lighting_config.sky_color.y,
+		g_lighting_config.sky_color.z,
+		1.0,
+	)
+
 	shared.map_load_meshes(client.game.map_inst, prefab_init_cb)
 	client_load_map(client)
 	client.map_loaded = true

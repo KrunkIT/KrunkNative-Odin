@@ -105,8 +105,28 @@ test_gameplay_config :: proc() -> bool {
 		fmt.eprintln("Gameplay config default-copy test failed")
 		return false
 	}
-
 	spray_index := shared.class_config_index("spray_n_pray")
+
+	// When the current browser export is present, compact JSON keys must be
+	// translated into the shared class registry (including classes that were
+	// absent from the old 14-class TOML snapshot).
+	survivor_index := shared.class_config_index("survivor")
+	infiltrator_index := shared.class_config_index("infiltrator")
+	latest_classes_ok :=
+		len(config.classes) == 16 &&
+		survivor_index == 14 && infiltrator_index == 15 &&
+		config.classes[spray_index].speed == 0.9 &&
+		config.classes[shared.class_config_index("rocketeer")].secondary &&
+		config.classes[shared.class_config_index("agent")].health == 105 &&
+		config.classes[shared.class_config_index("trooper")].wall_jump &&
+		config.classes[survivor_index].hidden &&
+		config.classes[survivor_index].no_mobile &&
+		config.classes[infiltrator_index].face == 5234
+	if !latest_classes_ok {
+		fmt.eprintln("Current class JSON registry test failed")
+		return false
+	}
+
 	lmg_index := shared.weapon_config_index("lmg")
 	spray_loadout_ok :=
 		spray_index >= 0 && lmg_index >= 0 &&
@@ -186,6 +206,59 @@ loadout = ["ak47", "deagle", "knife"]
 	}
 
 	fmt.println("Gameplay config tests OK")
+	return true
+}
+
+test_lighting_config :: proc() -> bool {
+	// Verify both the live map form and the exported krunker-sky-export wrapper
+	// used by the reverse-engineering workflow. Packed integer colours and CSS
+	// hex colours must normalize to the same RGB representation.
+	map_path := fmt.tprintf("%sassets/maps/sandstorm_v3.json", project_root())
+	map_inst, map_ok := shared.map_load_from_file(map_path)
+	if !map_ok || map_inst == nil {
+		fmt.eprintln("Lighting map config test could not load Sandstorm v3")
+		return false
+	}
+	map_lighting := map_inst.lighting
+	shared.map_destroy(map_inst)
+
+	wrapper_path := fmt.tprintf("%skrunker-configs/Sandstorm-Config-2026-11-01T18-19-09-832Z.json", project_root())
+	wrapper_lighting, wrapper_ok := shared.lighting_load_from_file(wrapper_path)
+	if !wrapper_ok {
+		fmt.eprintln("Lighting wrapper config test could not load Sandstorm export")
+		return false
+	}
+	burg_path := fmt.tprintf("%sassets/maps/burg.json", project_root())
+	burg_map, burg_ok := shared.map_load_from_file(burg_path)
+	if !burg_ok || burg_map == nil {
+		fmt.eprintln("Lighting override test could not load Burg")
+		return false
+	}
+	burg_sky := burg_map.lighting.sky_color
+	shared.map_destroy(burg_map)
+	burg_wrapper_path := fmt.tprintf("%skrunker-configs/Burg-Config-2026-11-01T18-17-33-116Z.json", project_root())
+	burg_wrapper, burg_wrapper_ok := shared.lighting_load_from_file(burg_wrapper_path)
+	if !burg_wrapper_ok {
+		fmt.eprintln("Lighting override test could not load Burg export")
+		return false
+	}
+
+	close_enough := proc(a, b: f32) -> bool { return abs(a - b) < 0.0001 }
+	values_ok :=
+		map_lighting.sky_dome && wrapper_lighting.sky_dome &&
+		close_enough(map_lighting.ambient_color.x, wrapper_lighting.ambient_color.x) &&
+		close_enough(map_lighting.fog_color.z, wrapper_lighting.fog_color.z) &&
+		close_enough(map_lighting.fog_distance, 750.0) &&
+		close_enough(wrapper_lighting.light_intensity, 1.1) &&
+		close_enough(wrapper_lighting.sky_dome_colors[0].x, 0xA7 / 255.0) &&
+		close_enough(burg_sky.x, burg_wrapper.sky_color.x) &&
+		close_enough(burg_sky.y, burg_wrapper.sky_color.y)
+	if !values_ok {
+		fmt.eprintln("Lighting map/wrapper parser test failed")
+		return false
+	}
+
+	fmt.println("Lighting config parser tests OK")
 	return true
 }
 

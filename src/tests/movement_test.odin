@@ -308,6 +308,9 @@ main :: proc() {
 	if !test_gameplay_config() {
 		os.exit(1)
 	}
+	if !test_lighting_config() {
+		os.exit(1)
+	}
 	if !test_configured_weapon_switch() {
 		os.exit(1)
 	}

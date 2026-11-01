@@ -23,7 +23,7 @@ CLASS_HUNTER := Class_Config {
 	health          = 60,
 	health_segments = 5,
 	regen           = 0.1,
-	speed           = 1.05,
+	speed           = 1.0,
 }
 
 CLASS_RUN_N_GUN := Class_Config {
@@ -50,7 +50,7 @@ CLASS_SPRAY_N_PRAY := Class_Config {
 	health          = 170,
 	health_segments = 7,
 	regen           = 0.05,
-	speed           = 0.95,
+	speed           = 0.9,
 }
 
 CLASS_VINCE := Class_Config {
@@ -99,7 +99,7 @@ CLASS_ROCKETEER := Class_Config {
 	icon_index      = 7,
 	texts           = []string{"..."},
 	loadout         = []i32{8},
-	secondary       = false,
+	secondary       = true,
 	wall_jump       = false,
 	colors          = [6]i32{0xA77860, 0x586849, 0x49563C, 0x282828, 0x6C5042, 0x2B3324},
 	health          = 130,
@@ -115,7 +115,7 @@ CLASS_AGENT := Class_Config {
 	secondary       = false,
 	wall_jump       = true,
 	colors          = [6]i32{0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x282828, 0xBFBFBF},
-	health          = 100,
+	health          = 105,
 	health_segments = 6,
 	regen           = 0.1,
 	speed           = 1.2,
@@ -179,10 +179,36 @@ CLASS_TROOPER := Class_Config {
 	icon_index      = 13,
 	loadout         = []i32{18},
 	secondary       = false,
-	wall_jump       = false,
+	wall_jump       = true,
 	colors          = [6]i32{0xA77860, 0xBDC2C9, 0xBDC2C9, 0x2E2E2E, 0x282828, 0x2E2E2E},
 	health          = 100,
 	health_segments = 6,
+	regen           = 0.1,
+	speed           = 1.0,
+}
+
+CLASS_SURVIVOR := Class_Config {
+	name            = "Survivor",
+	icon_index      = 14,
+	loadout         = []i32{19},
+	secondary       = false,
+	wall_jump       = true,
+	colors          = [6]i32{0xA77860, 0xA77860, 0xA77860, 0xA77860, 0x6C5042, 0xA77860},
+	health          = 150,
+	health_segments = 6,
+	regen           = 0.1,
+	speed           = 0.8,
+}
+
+CLASS_INFILTRATOR := Class_Config {
+	name            = "Infiltrator",
+	icon_index      = 15,
+	loadout         = []i32{28},
+	secondary       = true,
+	wall_jump       = false,
+	colors          = [6]i32{11635832, 14983351, 14983351, 10066329, 15452519, 10066329},
+	health          = 90,
+	health_segments = 5,
 	regen           = 0.1,
 	speed           = 1.0,
 }
@@ -202,6 +228,8 @@ CLASSES_LIST := [?]Class_Config{
 	CLASS_BOWMAN,
 	CLASS_COMMANDO,
 	CLASS_TROOPER,
+	CLASS_SURVIVOR,
+	CLASS_INFILTRATOR,
 }
 
 // Stable class IDs enabled by the standard ruleset. Other classes remain

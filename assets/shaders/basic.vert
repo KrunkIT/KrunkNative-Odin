@@ -4,6 +4,7 @@ layout (location = 1) in vec2 v_tex_coord;
 
 out vec2 tex_coord;
 out flat int face_idx;
+out vec3 world_pos;
 
 uniform bool is_ramp;
 
@@ -13,6 +14,7 @@ uniform mat4 camera_projection;
 
 void main() {
     tex_coord = v_tex_coord;
+    world_pos = vec3(transform * vec4(v_pos, 1.0));
 
     if (is_ramp) {
         if (gl_VertexID < 4) face_idx = 0;
@@ -23,5 +25,5 @@ void main() {
         face_idx = gl_VertexID / 4; // only works for quad mesh!
     }
 
-    gl_Position = camera_projection * camera_world_inverse * transform * vec4(v_pos, 1.0f);
+    gl_Position = camera_projection * camera_world_inverse * vec4(world_pos, 1.0f);
 }
