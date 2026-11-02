@@ -4,13 +4,14 @@ import "core:fmt"
 import "base:runtime"
 import clay "../third_party/clay"
 
-Page :: enum { HOME, SETTINGS, CONTROLS, SESSION, CLASSES }
+Page :: enum { HOME, SETTINGS, CONTROLS, SESSION, CLASSES, LOADOUT }
 Lobby_Presentation :: enum { STANDARD, COMPETITIVE }
 // The client owns clipboard access and session changes. The menu emits actions
 // and renders requested selections separately from confirmed lobby state.
-Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
+Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
 Action :: struct { kind: Action_Kind, index: i32, value: f32 }
-Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_jump, available: bool, reason: string, used, limit: int, portrait: rawptr }
+Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_jump, available: bool, reason: string, used, limit: int, portrait, weapon_icon: rawptr }
+Secondary :: struct { id: i32, name: string, icon: rawptr }
 Player :: struct { name, class_name: string, team: i32, is_you: bool }
 Team :: struct { id: i32, name: string, capacity: int, available: bool, reason: string, score: u32 }
 View :: struct {
@@ -18,6 +19,11 @@ View :: struct {
 	ranked, team_selection: bool,
 	classes: []Class,
 	selected_class: i32,
+	secondaries: []Secondary,
+	selected_secondary: i32,
+	secondary_name, secondary_reason: string,
+	secondary_pending: bool,
+	respawn_remaining: f32,
 	confirmed_class, confirmed_team, requested_team: i32,
 	team_pending, class_pending, local_practice, has_life, connecting: bool,
 	players: []Player,
@@ -49,6 +55,8 @@ State :: struct {
 	control_count: int,
 	focus, pressed: u32,
 	return_focus: u32,
+	loadout_parent: Page,
+	loadout_return_focus: u32,
 	invite_buffer: [2048]u8,
 	invite_length: int,
 	previous: Input,
@@ -103,8 +111,7 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 	if input.escape && !state.previous.escape {
 		state.pressed = 0
 		if state.page != .HOME {
-			state.page = .HOME
-			state.focus = state.return_focus
+			state.page, state.focus = back_page(state), back_focus(state)
 		} else if view.active {
 			return {kind = .PLAY}
 		}
@@ -170,12 +177,23 @@ activate :: proc(state: ^State, control: Control) -> Action {
 	if control.action.kind == .INSPECT_CLASS || control.action.kind == .EDIT_INVITE { return {} }
 	// Navigation changes the menu page without dispatching a gameplay action.
 	if control.action.kind == .NONE {
+		previous_page := state.page
 		if state.page == .HOME { state.return_focus = control.id.id }
 		state.page = Page(control.action.index)
-		state.focus = state.page == .HOME ? state.return_focus : 0
+		state.focus = state.page == .HOME ? state.return_focus : previous_page == .LOADOUT && state.page == state.loadout_parent ? state.loadout_return_focus : 0
 		return {}
 	}
 	return control.action
+}
+
+back_page :: proc(state: ^State) -> Page {
+	if state.page == .LOADOUT { return state.loadout_parent }
+	if state.page == .CONTROLS { return .SETTINGS }
+	return .HOME
+}
+
+back_focus :: proc(state: ^State) -> u32 {
+	return state.page == .LOADOUT ? state.loadout_return_focus : state.return_focus
 }
 
 focus_visible :: proc(control: Control, page: Page) {
@@ -185,6 +203,7 @@ focus_visible :: proc(control: Control, page: Page) {
 		if page == .CLASSES { container = "ClassPicker" }
 	}
 	if page == .SETTINGS && (control.slider || control.action.kind == .DISPLAY_MODE || control.action.kind == .RESOLUTION || control.action.kind == .FPS) { container = "SettingsPanel" }
+	if control.action.kind == .SELECT_SECONDARY { container = "SecondaryPicker" }
 	if len(container) == 0 { return }
 	data := clay.GetScrollContainerData(clay.ID(container))
 	if !data.found { return }

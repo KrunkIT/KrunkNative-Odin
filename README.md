@@ -12,6 +12,10 @@ with Odin!
 > choose a team and class, then select **Enter Game**. **Local practice** starts an offline session for network experiments.
 > Competitive and Ranked sessions use the team-roster lobby. Ordinary sessions and Local practice
 > use a compact Play menu with a **Change class** overlay; manual team controls appear when allowed.
+> Pick a class to open its loadout, showing its primary and available secondaries:
+> Pistol, Desert Eagle, Alien Blaster, Sawed Off, Auto Pistol and Techy-9.
+> Choose a secondary there, then select **Done** to return to the lobby.
+> Changes made while alive apply on the next spawn; live lobbies confirm the loadout.
 >
 > The native protocol is project-owned and intentionally targets only this native client and
 > dedicated server.
@@ -134,6 +138,11 @@ Run the binaries from the repository root so every asset path resolves consisten
 
 On Windows, use `.\bin\krunknative_client.exe --offline`.
 
+Shotgun, Sawed Off and Rocket Launcher shots boost you away from nearby map
+surfaces. Aim at the floor to gain height or at a wall to push away from it;
+the boost weakens with distance. Servers can adjust it with `impulseMlt`
+(or `[game] impulse_mlt` in native configuration).
+
 ### Local multiplayer
 
 Start the server in one terminal, then start one or more clients from other terminals:
@@ -164,6 +173,11 @@ after `start` and a matching local player position arrive. Team/class entry wait
 the menu shows that it is waiting for players; that state has no confirmed spawn yet.
 After spawning, keyboard/mouse input is sent as live `q` batches with local prediction
 and authoritative position corrections.
+
+Live match clocks/scores, objectives, team and round changes, movement locks,
+player flags, interaction progress, hit confirmations, and standard projectile
+notifications are also handled. See [packet coverage](doc/live-packets.md) for
+supported schemas, validation, and remaining protocol work.
 
 Join diagnostics are always enabled in the client. Launch `.\bin\krunknative_client.exe`
 from this worktree directory, retry **PASTE & JOIN LINK**, and inspect

@@ -141,6 +141,32 @@ when ODIN_TEST {
 	}
 
 	@(test)
+	krunker_empty_entry_rejection_allows_retry :: proc(t: ^testing.T) {
+		client: Client
+		defer delete(client.join_status)
+		defer delete(client.selection_status)
+		defer krunker_ws_disconnect(&client.krunker)
+		client.krunker = {connected=true, got_load=true, ready_received=true, bootstrapped=true, bootstrap_step=3, secondary_response_pending=true}
+		client.game.ready = true
+		client.spawn_pending, client.team_pending = true, true
+		client.lobby_team, client.requested_team, client.selected_class = 1, 2, 2
+		packet, ok := kproto.krunker_msgpack_encode_packet("fe", nil, 0)
+		if !testing.expect(t, ok) { return }
+		defer delete(packet)
+		krunker_ws_apply_world(&client, packet)
+		testing.expect(t, !client.spawn_pending && !client.team_pending && client.requested_team == 1 && !client.krunker.bootstrapped,
+			"an argumentless fe must release the pending entry and preserve confirmed membership")
+		testing.expect(t, strings.contains(client.selection_status, "rejected"))
+		client_enter_game(&client)
+		testing.expect(t, !client.spawn_pending, "rejections must briefly throttle repeated entry attempts")
+		client.krunker_world.respawn_available_at = 0
+		client_enter_game(&client)
+		krunker_ws_bootstrap_tick(&client, entry_test_send)
+		testing.expect(t, client.spawn_pending && client.krunker.bootstrapped && client.krunker.q_index == 3,
+			"entry must be retryable after the rejection throttle expires")
+	}
+
+	@(test)
 	krunker_server_disconnect_diagnostics :: proc(t: ^testing.T) {
 		client: Client
 		defer delete(client.join_status)

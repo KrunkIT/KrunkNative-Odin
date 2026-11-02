@@ -13,19 +13,20 @@ when ODIN_TEST {
 			{"fixMov", true}, {"strafeSpd", f64(1.3)}, {"jumpMlt", f64(1.005)},
 			{"slidSpd", f64(0.97)}, {"slidTime", f64(1.5)}, {"deltaMlt", f64(0.8)},
 			{"gravMlt", f64(0.9)}, {"wallJP", f64(2)}, {"canSlide", false}, {"autoJump", true},
+			{"impulseMlt", f64(0.75)},
 		}
 		init := []kproto.Krunker_Msgpack_Value{"init", i64(2), i64(2), i64(0), i64(0), i64(0), kproto.Krunker_Msgpack_Nil{}, config}
 		if !testing.expect(t, kproto.krunker_world_apply_init(&world, init)) { return }
 		cfg := world.game_config
 		testing.expect(t, world.has_game_config && cfg.fixed_movement && cfg.strafe_speed == 1.3 && cfg.jump_mlt == 1.005 &&
 			cfg.slide_speed == 0.97 && cfg.slide_time == 1.5 && cfg.delta_mlt == 0.8 && cfg.gravity_mlt == 0.9 &&
-			cfg.wall_jump == 2 && !cfg.can_slide && cfg.auto_jump,
+			cfg.wall_jump == 2 && !cfg.can_slide && cfg.auto_jump && cfg.impulse_mlt == 0.75,
 			"movement must use the actual INIT_GAME config, including comp settings and custom overrides")
 		// A subsequent lobby may omit values or send no config at all. Do not
 		// carry comp velocity integration or modified multipliers into it.
 		kproto.krunker_world_apply_init(&world, init[:3])
 		testing.expect(t, !world.game_config.fixed_movement && world.game_config.strafe_speed == 1.2 &&
-			world.game_config.slide_speed == 1 && world.game_config.jump_mlt == 1 && world.game_config.can_slide,
+			world.game_config.slide_speed == 1 && world.game_config.jump_mlt == 1 && world.game_config.can_slide && world.game_config.impulse_mlt == 1,
 			"missing lobby settings must use browser defaults, without leaking the previous lobby's options")
 	}
 

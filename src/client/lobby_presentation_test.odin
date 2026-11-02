@@ -10,6 +10,39 @@ import shared "../shared"
 
 when ODIN_TEST {
 	@(test)
+	competitive_lobby_size_reaches_both_rosters :: proc(t: ^testing.T) {
+		client := Client{krunker = {connected = true}}
+		defer kproto.krunker_world_reset(&client.krunker_world)
+		defer { delete(menu_portraits); menu_portraits = nil }
+		config := []kproto.Krunker_Msgpack_Map_Entry{{"maxPlayers", i64(10)}, {"tmSize", i64(0)}}
+		packet: [18]kproto.Krunker_Msgpack_Value
+		packet[0], packet[1], packet[2], packet[7], packet[16] = "init", i64(2), i64(2), config, true
+		for size in 0..<4 {
+			config[1].value = i64(size)
+			testing.expect(t, kproto.krunker_world_apply_init(&client.krunker_world, packet[:]))
+			view := menu_view(&client)
+			testing.expect(t, view.presentation == .COMPETITIVE && client.krunker_world.lobby_capacity == 10)
+			for team in view.teams {
+				testing.expect(t, team.capacity == size+1, "1v1 through 4v4 must use tmSize, excluding spectator capacity")
+			}
+		}
+		// Config order must not allow maxPlayers to overwrite team size.
+		config[0], config[1] = {"tmSize", i64(1)}, {"maxPlayers", i64(10)}
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		testing.expect(t, menu_view(&client).teams[0].capacity == 2)
+		// Servers without tmSize retain the total-player fallback. A new init
+		// must clear the previous lobby's explicit team capacity.
+		packet[7] = config[1:]
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		for team in menu_view(&client).teams {
+			testing.expect(t, team.capacity == 5, "missing tmSize must clear stale team size and fall back to maxPlayers")
+		}
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:3])
+		testing.expect(t, client.krunker_world.lobby_team_capacity == 0 && menu_view(&client).teams[0].capacity == 0,
+			"a short init must clear both capacities")
+	}
+
+	@(test)
 	lobby_presentation_follows_session_flags :: proc(t: ^testing.T) {
 		client: Client
 		defer kproto.krunker_world_reset(&client.krunker_world)
@@ -65,6 +98,7 @@ when ODIN_TEST {
 		client.krunker.render_map_ready = true
 		client.menu.page = .CLASSES
 		client.menu.return_focus = 1234
+		client.menu.focus = 5678
 		menu_apply_action(&client, {kind=.SELECT_CLASS,index=4}, class_selection_test_send)
 		testing.expect(t, client.menu.page == .CLASSES && client.selected_class == 0 && len(client.selection_status)>0, "restricted selections must leave the picker open")
 		menu_apply_action(&client, {kind=.SELECT_CLASS,index=2}, class_selection_test_send)
@@ -72,8 +106,8 @@ when ODIN_TEST {
 			"failed sends must preserve the old selection and keep the picker open")
 		client.krunker.q_index = 1
 		menu_apply_action(&client, {kind=.SELECT_CLASS,index=2}, class_selection_test_send)
-		testing.expect(t, client.menu.page == .HOME && client.menu.focus == 1234 && client.selected_class == 2 && client.krunker.class_index == 2 && len(client.selection_status)==0,
-			"accepted requests must close the picker and restore its caller's focus")
+		testing.expect(t, client.menu.page == .LOADOUT && client.menu.loadout_parent == .CLASSES && client.menu.loadout_return_focus == 5678 && client.menu.return_focus == 1234 && client.selected_class == 2 && client.krunker.class_index == 2 && len(client.selection_status)==0,
+			"accepted class requests must open that class's loadout and retain the path back to its picker")
 		testing.expect(t, !client.spawn_pending && !client.team_pending && !client.krunker_world.in_game, "class selection must not spawn or change teams")
 		view := menu_view(&client)
 		testing.expect(t, view.presentation == .STANDARD && len(menuui.play_reason(view)) == 0, "an automatic-team lobby must allow entry without a manual team")
@@ -92,6 +126,11 @@ when ODIN_TEST {
 			menu_apply_action(&client, {kind=.SELECT_CLASS,index=class.id}, class_selection_test_send)
 			testing.expect(t, client.selected_class == class.id && len(client.selection_status)==0, "every practice class must be selectable")
 		}
+		client.menu.page = .HOME
+		client.menu.focus = 2468
+		menu_apply_action(&client, {kind=.SELECT_CLASS,index=0}, class_selection_test_send)
+		testing.expect(t, client.menu.page == .LOADOUT && client.menu.loadout_parent == .HOME && client.menu.return_focus == 2468 && client.menu.loadout_return_focus == 2468,
+			"choosing a competitive class tile must also open its loadout and preserve lobby focus")
 		client.local_practice = false
 		client.krunker.connected = true
 		view = menu_view(&client)

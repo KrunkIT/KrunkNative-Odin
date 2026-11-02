@@ -87,12 +87,12 @@ net_client_send_input :: proc(nc: ^Net_Client_State, input: ^shared.Input) {
 	}
 }
 
-net_client_send_spawn :: proc(nc: ^Net_Client_State, class_id: i32) {
+net_client_send_spawn :: proc(nc: ^Net_Client_State, class_id: i32, secondary_id: i32 = 2) {
 	if !nc.connected {
 		return
 	}
-	buf: [16]byte
-	size := shared.packet_serialize_connect(buf[:], class_id)
+	buf: [32]byte
+	size := shared.packet_serialize_connect(buf[:], class_id, secondary_id)
 	if size > 0 {
 		if !net_client_send(nc, buf[:size]) {
 			nc.connected = false

@@ -158,6 +158,7 @@ lighting_load_from_file :: proc(filename: string) -> (config: Lighting_Config, o
 // still use the map's embedded values.
 lighting_map_override_path :: proc(filename: string) -> string {
 	lower := strings.to_lower(filename)
+	defer delete(lower)
 	if strings.contains(lower, "sandstorm") { return "krunker-configs/Sandstorm-Config-2026-11-01T18-19-09-832Z.json" }
 	if strings.contains(lower, "undergrowth") { return "krunker-configs/Undergrowth-Config-2026-11-01T18-19-43-132Z.json" }
 	if strings.contains(lower, "subzero") { return "krunker-configs/Subzero-Config-2026-11-01T18-18-24-715Z.json" }

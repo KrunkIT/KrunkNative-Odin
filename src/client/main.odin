@@ -56,6 +56,7 @@ Client :: struct {
 	spawn_pending:     bool,
 	spawn_retry_timer: f32,
 	selected_class:    i32,
+	selected_secondary: i32,
 	local_practice: bool,
 	has_life: bool,
 	lobby_team: i32,
@@ -89,6 +90,7 @@ Client :: struct {
 	tracer_markers: [dynamic]Tracer_Marker,
 	bullet_trails: [dynamic]Bullet_Trail,
 	projectile_meshes: [dynamic]^Mesh,
+	explosions: [dynamic]Krunker_Explosion_Flash,
 	show_fps:       bool,
 	fps_value:      u32,
 	fps_frames:     u32,
@@ -299,8 +301,7 @@ fps_render :: proc(client: ^Client) {
 	text_size := 34.0 * client.ui.scale
 	// Keep the performance counter beside the timer instead of stacking it
 	// above the timer. The timer uses the same text size and left inset here.
-	remaining := max(0, int(client.game.match.time_remaining + 0.999))
-	timer := fmt.tprintf("%02d:%02d", remaining / 60, remaining % 60)
+	timer := krunker_client_timer_label(client)
 	timer_width := ui_measure_text(client.ui, timer, HUD_TIMER_TEXT_SIZE * client.ui.scale)
 	timer_holder_width := timer_width + (HUD_TIMER_TEXT_INSET + HUD_TIMER_RIGHT_PADDING) * client.ui.scale
 	x := 20.0 * client.ui.scale + timer_holder_width + 12.0 * client.ui.scale
@@ -484,19 +485,19 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		player.uid = i32(state.player_id)
 		player.team = state.team
 		shared.game_players_add(&client.game, player)
-		shared.player_spawn(player, state.class_id)
+		shared.player_spawn(player, state.class_id, state.secondary_id)
 		player.swap_timer = 0
 		player.active = false
 	}
 
 	was_active := player.active
 	previous_shot_seq := player.shot_seq
-	if player.class_index != state.class_id {
+	if player.class_index != state.class_id || player.secondary_id != shared.secondary_weapon_id(client.game.weapons, state.secondary_id) {
 		if player.mesh != nil {
 			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
 			player_meshes_fini(player)
 		}
-		shared.player_spawn(player, state.class_id)
+		shared.player_spawn(player, state.class_id, state.secondary_id)
 		player.swap_timer = 0
 		was_active = false
 	}
@@ -747,6 +748,7 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 }
 
 client_clear_impacts :: proc(client: ^Client) {
+	krunker_client_clear_explosions(client)
 	client_clear_projectiles(client)
 	client_clear_bullet_holes(client)
 	client_clear_tracers(client)
@@ -787,6 +789,7 @@ client_update_freecam :: proc(client: ^Client, mouse_delta: shared.Vec2, delta: 
 }
 
 client_enter_game :: proc(client: ^Client) {
+	if krunker_client_respawn_remaining(client, glfw.GetTime()) > 0 { return }
 	if (!client.game.ready && !(client.krunker.connected && client.krunker_world.ready)) || (client.me != nil && client.me.active) || client.spawn_pending {
 		return
 	}
@@ -796,6 +799,12 @@ client_enter_game :: proc(client: ^Client) {
 	if client.krunker.connected {
 		if !client.krunker.spawned {
 			client.krunker.class_index = client.selected_class
+			client.krunker.secondary_index = client_secondary_request(client, client.selected_class)
+			client.krunker.secondary_response_pending = true
+			client.krunker.secondary_request_revision = 0
+			for player in client.krunker_world.players {
+				if player.sid == client.krunker_world.local_sid { client.krunker.secondary_request_revision = player.secondary_revision }
+			}
 			client.krunker.team = client.lobby_team
 			client.spawn_pending = true
 			client.krunker.bootstrapped = false
@@ -824,14 +833,14 @@ client_enter_game :: proc(client: ^Client) {
 		client.has_life = true
 		client.me.is_you = true
 		client.me.team = client.lobby_team
-		shared.player_spawn(client.me, client.selected_class)
+		shared.player_spawn(client.me, client.selected_class, client_secondary_choice(client))
 		player_generate_meshes(client.me, true)
 		shared.player_swap_weapon(client.me, 0, true, false, false)
 		scene_add_player_mesh(client.fps_scene, cast(^Player_Mesh)client.me.mesh, int(client.me.loadout_size))
 	} else if client.net.connected {
 		client.spawn_pending = true
 		client.spawn_retry_timer = 0.5
-		net_client_send_spawn(&client.net, client.selected_class)
+		net_client_send_spawn(&client.net, client.selected_class, client_secondary_choice(client))
 	}
 }
 
@@ -845,6 +854,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	}
 	if client.krunker.connected {
 		krunker_ws_poll(client)
+		krunker_client_sync_match(client, f64(now))
 	}
 	if !client.game.ready && !(client.krunker.connected && client.krunker_world.ready) {
 		return
@@ -855,7 +865,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	if client.spawn_pending && client.net.connected {
 		client.spawn_retry_timer = max(0.0, client.spawn_retry_timer - delta)
 		if client.spawn_retry_timer == 0 {
-			net_client_send_spawn(&client.net, client.selected_class)
+			net_client_send_spawn(&client.net, client.selected_class, client_secondary_choice(client))
 			client.spawn_retry_timer = 0.5
 		}
 	}
@@ -1055,6 +1065,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	}
 	client_tick_impacts(client, delta)
 	client_tick_projectiles(client)
+	krunker_client_tick_explosions(client, delta)
 
 	client_tick_textures(client, now)
 
@@ -1112,6 +1123,7 @@ main :: proc() {
 	client.display_mode = .Windowed
 	client.resolution_index = 0
 	client.sensitivity = 1.0
+	client.selected_secondary = 2
 
 	client.camera.zoom = 1.0
 	client.camera.fov = math.PI / 2.0
@@ -1119,8 +1131,15 @@ main :: proc() {
 	client.camera.far = 10000.0
 
 	glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-	glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
-	glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 5)
+
+	when ODIN_OS == .Darwin {
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 1)
+		glfw.WindowHint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE) // apple silicon needs this?
+	} else {
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 5)
+	}
 
 	client.window = glfw.CreateWindow(1280, 720, "KrunkNative", nil, nil)
 	if client.window == nil {

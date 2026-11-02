@@ -61,3 +61,18 @@ models/weapons/weapon_29.obj
 textures/weapons/weapon_29.png
 textures/weapons/icon_29.png
 textures/scopes/scope_0.png
+
+# Sawed Off secondary shotgun.
+models/weapons/weapon_16.obj
+textures/weapons/weapon_16.png
+textures/weapons/icon_16.png
+
+# Auto Pistol secondary.
+models/weapons/weapon_17.obj
+textures/weapons/weapon_17.png
+textures/weapons/icon_17.png
+
+# Techy-9 (browser Tehchy-9) burst secondary.
+models/weapons/weapon_22.obj
+textures/weapons/weapon_22.png
+textures/weapons/icon_22.png

@@ -28,8 +28,21 @@ krunker_world_apply_player_gone :: proc(state: ^Krunker_World_State, packet: []K
 	sid := krunker_world_i32(packet[1], -1)
 	for &player in state.players {
 		if player.sid != sid { continue }
+		opcode, _ := packet[0].(string)
+		numeric, _ := packet[0].(i64)
+		if sid == state.local_sid && !player.life_ended && (opcode == "3" || numeric == 3) {
+			// Browser deathDelay: 0xaf0 ms. Disconnects and round switches
+			// do not impose a death cooldown; duplicate deaths do not extend it.
+			state.respawn_available_at = state.received_at + 2.8
+		}
 		player.health = 0
 		player.active = false
+		player.life_ended = true
+		if sid == state.local_sid { state.in_game = false }
+		// REMOVE_PLAYER(2) has no death count; KILL_PLAYER(3) does.
+		if (opcode == "3" || numeric == 3) && len(packet) > 2 {
+			if deaths, ok := krunker_world_bounded_number(packet[2], 0, 2147483647); ok { player.deaths = u32(deaths) }
+		}
 		player.pose_count = 0
 		player.revision += 1
 		return true

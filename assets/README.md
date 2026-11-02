@@ -21,6 +21,12 @@ including textures and HUD icons, using `config/weapon-assets.txt`.
 This also includes the practice-class primaries and `textures/scopes/scope_0.png`.
 The shotgun uses the browser's Nova Pump replacement (`weapon_6_0.obj`,
 `weapon_6_38.png`) with its own model scale and mounting offset.
+The supported Sawed Off secondary uses `weapon_16.obj`, `weapon_16.png`
+and `icon_16.png`, also included in the weapon packaging manifest.
+Auto Pistol uses `weapon_17.obj`, `weapon_17.png` and `icon_17.png`.
+Techy-9 (spelled "Tehchy-9" in the browser) is a separate burst secondary,
+using `weapon_22.obj`, `weapon_22.png` and `icon_22.png`.
+Both are included in the same manifest.
 
 Run `python download_maps.py` from the repository to refresh all 47 official
 map files from GAPI. The script keeps native server IDs aligned with the

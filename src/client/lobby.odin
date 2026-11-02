@@ -100,14 +100,62 @@ menu_class_name :: proc(client: ^Client, id: i32) -> string {
 	return "Choosing class"
 }
 
+client_secondary_choice :: proc(client: ^Client) -> i32 {
+	return shared.secondary_weapon_id(client.game.weapons, client.selected_secondary)
+}
+
+client_secondary_request :: proc(client: ^Client, class_id: i32) -> i32 {
+	if client.game.config.no_secondaries || client.krunker.connected && client.krunker_world.has_game_config && client.krunker_world.game_config.no_secondaries { return -1 }
+	if class_id < 0 || int(class_id) >= len(client.game.classes) || !client.game.classes[class_id].secondary { return -1 }
+	return client_secondary_choice(client)
+}
+
+client_secondary_reason :: proc(client: ^Client) -> string {
+	if client.game.config.no_secondaries || client.krunker.connected && client.krunker_world.has_game_config && client.krunker_world.game_config.no_secondaries { return "Secondaries are disabled in this lobby" }
+	if client.selected_class < 0 || int(client.selected_class) >= len(client.game.classes) || !client.game.classes[client.selected_class].secondary { return "This class has no secondary weapon" }
+	return ""
+}
+
+menu_weapon_icon :: proc(client: ^Client, id: i32) -> rawptr {
+	if id < 0 || int(id) >= len(client.game.weapons) || client.game.weapons[id] == nil { return nil }
+	texture := menu_portraits[-id-1]
+	if texture == 0 && client.ui != nil {
+		weapon := client.game.weapons[id]
+		folder := weapon.melee ? "melee" : "weapons"
+		path := shared.concat(shared.assets_path(), fmt.tprintf("textures/%s/%s.png", folder, weapon.icon))
+		texture = load_texture(path); delete(path)
+		menu_portraits[-id-1] = texture
+	}
+	return rawptr(uintptr(texture))
+}
+
 menu_view :: proc(client: ^Client) -> menuui.View {
 	classes := make([]menuui.Class, len(client.game.classes), context.temp_allocator)
 	if menu_portraits == nil { menu_portraits = make(map[i32]u32) }
+	secondaries := make([dynamic]menuui.Secondary, context.temp_allocator)
+	secondary_id := client_secondary_choice(client)
+	secondary_name := "None"
+	for weapon, id in client.game.weapons {
+		if weapon == nil || !weapon.secondary || weapon.melee { continue }
+		append(&secondaries, menuui.Secondary{id = i32(id), name = weapon.name, icon = menu_weapon_icon(client, i32(id))})
+		if i32(id) == secondary_id { secondary_name = weapon.name }
+	}
+	secondary_reason := client_secondary_reason(client)
+	if len(secondary_reason) > 0 { secondary_name = "None" }
+	secondary_pending := false
+	if client.me != nil && client.me.active && len(secondary_reason) == 0 {
+		secondary_pending = true
+		for id in client.me.loadout { if id == secondary_id { secondary_pending = false } }
+	}
 	for class, i in client.game.classes {
 		weapon := "Melee"
+		weapon_icon: rawptr
 		if len(class.loadout) > 0 {
 			id := class.loadout[0]
-			if id >= 0 && int(id) < len(client.game.weapons) && client.game.weapons[id] != nil { weapon = client.game.weapons[id].name }
+			if id >= 0 && int(id) < len(client.game.weapons) && client.game.weapons[id] != nil {
+				weapon = client.game.weapons[id].name
+				weapon_icon = menu_weapon_icon(client, id)
+			}
 		}
 		texture, cached := menu_portraits[class.icon_index]
 		if !cached {
@@ -116,7 +164,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 			delete(path)
 			menu_portraits[class.icon_index] = texture
 		}
-		classes[i] = {id = i32(i), name = class.name, weapon = weapon, available = client.local_practice || shared.class_is_in_rotation(i32(i)), portrait = rawptr(uintptr(texture))}
+		classes[i] = {id = i32(i), name = class.name, weapon = weapon, health = class.health, wall_jump = class.wall_jump, available = client.local_practice || shared.class_is_in_rotation(i32(i)), portrait = rawptr(uintptr(texture)), weapon_icon = weapon_icon}
 		if !classes[i].available { classes[i].reason = "Outside this lobby's class rotation" }
 	}
 	players := make([dynamic]menuui.Player, 0, len(client.game.players), context.temp_allocator)
@@ -153,6 +201,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 	team_selection := (client.local_practice || client.krunker.connected && client.krunker_world.lobby_select_team) && (client.game.mode == nil || client.game.mode.config.teams)
 	if client.krunker.connected {
 		capacity = int((client.krunker_world.lobby_capacity+1)/2)
+		if client.krunker_world.lobby_team_capacity > 0 { capacity = int(client.krunker_world.lobby_team_capacity) }
 		for name, i in client.krunker_world.lobby_team_names { if len(name)>0 { team_names[i]=name } }
 	}
 	if client.net.connected { team_selection = client.net.lobby_received && client.net.lobby.select_team; capacity = int(client.net.lobby.capacity); team_names = client.net.lobby.team_names }
@@ -160,6 +209,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		presentation = client_lobby_presentation(client), ranked = client.krunker.connected && client.krunker_world.is_ranked,
 		team_selection = team_selection,
 		classes = classes, selected_class = client.selected_class, confirmed_class = confirmed_class,
+		secondaries = secondaries[:], selected_secondary = secondary_id, secondary_name = secondary_name, secondary_reason = secondary_reason, secondary_pending = secondary_pending,
 		confirmed_team = client.lobby_team, requested_team = client.requested_team, team_pending = client.team_pending,
 		players = players[:], online = online, local_practice = client.local_practice,
 		active = (online || client.local_practice) && client.me != nil && client.me.active, class_pending = client.spawn_pending && confirmed_class != client.selected_class, has_life = client.has_life,
@@ -169,10 +219,15 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		display_mode = i32(client.display_mode), sensitivity = client.sensitivity, show_fps = client.show_fps,
 		resolution = fmt.tprintf("%d x %d", DISPLAY_RESOLUTIONS[client.resolution_index].width, DISPLAY_RESOLUTIONS[client.resolution_index].height),
 		match_status = client.game.move_lock ? "Waiting for match to start" : "Match in progress",
+		respawn_remaining = krunker_client_respawn_remaining(client, glfw.GetTime()),
 	}
 	if !online && !client.local_practice { view.ready = false }
 	if team_selection && client.lobby_team == 0 && !(client.team_pending && client.requested_team > 0) { view.play_reason = "Choose a team to enter game" }
 	if client.team_pending && client.requested_team == 0 { view.play_reason = "Leaving team..." }
+	if reason := krunker_client_match_reason(client); len(reason) > 0 { view.play_reason, view.match_status = reason, reason }
+	else if countdown := krunker_client_countdown_label(client, glfw.GetTime()); len(countdown) > 0 {
+		view.match_status = countdown
+	}
 	for i in 0..<2 {
 		view.teams[i] = {id = i32(i+1), name = team_names[i], capacity = capacity, available = team_selection, score = client.game.match.team_scores[i+1]}
 		if !team_selection { view.teams[i].reason = "Server assigns teams automatically" }
@@ -265,21 +320,43 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: pr
 			if !menuui.class_selectable(view, class) { client_selection_status(client, len(class.reason)>0 ? class.reason : "Class limit reached. Choose another class."); return }
 			if client.krunker.connected {
 				previous_class := client.krunker.class_index
+				previous_secondary := client.krunker.secondary_index
 				client.krunker.class_index = action.index
+				client.krunker.secondary_index = client_secondary_request(client, action.index)
 				if !send_class(&client.krunker, "class") {
 					client.krunker.class_index = previous_class
+					client.krunker.secondary_index = previous_secondary
 					client_selection_status(client, "Could not send class selection.")
 					return
 				}
 			}
 			client.selected_class = action.index
 			client_selection_status(client, "")
-			if client.menu.page == .CLASSES {
-				client.menu.page = .HOME
-				client.menu.focus = client.menu.return_focus
+			if client.menu.page != .LOADOUT {
+				client.menu.loadout_parent = client.menu.page
+				client.menu.loadout_return_focus = client.menu.focus
+				if client.menu.page == .HOME { client.menu.return_focus = client.menu.focus }
 			}
+			client.menu.page = .LOADOUT
+			client.menu.focus = clay.ID("LoadoutDone", u32(menuui.Page.HOME)).id
 			return
 		}
+	case .SELECT_SECONDARY:
+		if len(client_secondary_reason(client)) > 0 { client_selection_status(client, client_secondary_reason(client)); return }
+		if shared.secondary_weapon_id(client.game.weapons, action.index) != action.index { return }
+		if client.krunker.connected {
+			previous_class, previous_secondary := client.krunker.class_index, client.krunker.secondary_index
+			client.krunker.class_index, client.krunker.secondary_index = client.selected_class, action.index
+			if !send_class(&client.krunker, "class") {
+				client.krunker.class_index, client.krunker.secondary_index = previous_class, previous_secondary
+				client_selection_status(client, "Could not send secondary selection.")
+				return
+			}
+		}
+		client.selected_secondary = action.index
+		// Preserve the current life; offline automatic respawns use this preference.
+		if client.local_practice && client.me != nil { client.me.secondary_id = action.index }
+		client_selection_status(client, "")
 	case .QUIT: glfw.SetWindowShouldClose(client.window, true)
 	case .DISPLAY_MODE: client_set_display_mode(client, Display_Mode(action.index))
 	case .RESOLUTION:

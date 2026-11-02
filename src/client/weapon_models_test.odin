@@ -161,6 +161,6 @@ when ODIN_TEST {
 				testing.expect(t, scene.mesh_count == 0, "removing a weapon must detach all meshes")
 			}
 		}
-		testing.expect(t, supported == 18, "render check must cover all 18 supported weapons")
+		testing.expect(t, supported == 21, "render check must cover all 21 supported weapons")
 	}
 }

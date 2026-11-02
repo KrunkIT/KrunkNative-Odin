@@ -303,6 +303,9 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 		obj := new(Object)
 		obj.active = true
 		obj.raw_data = raw_obj
+		obj.no_shoot = "ns" in raw_obj && !is_nullish(raw_obj["ns"])
+		obj.no_impulse = "ip" in raw_obj && !is_nullish(raw_obj["ip"])
+		obj.no_player_collision = "pl" in raw_obj && !is_nullish(raw_obj["pl"])
 		obj.position.x = get_json_f32(pos_arr[0])
 		obj.position.y = get_json_f32(pos_arr[1])
 		obj.position.z = get_json_f32(pos_arr[2])
@@ -478,6 +481,18 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 			map_inst.max_dim.z = obj.position.z + obj.scale.z * 0.5
 		}
 
+		if obj.objective || obj.score_zone {
+			// Objective UIDs have their own namespace, separate from object
+			// indices. Authored objId is one-based, as in the browser loader.
+			count: i32
+			for previous in map_inst.objects {
+				if previous.objective || previous.score_zone { count += 1; obj.objective_id = max(obj.objective_id, previous.objective_id + 1) }
+			}
+			obj.objective_id = max(obj.objective_id, count)
+			if id, authored := raw_obj["objId"]; authored {
+				if n := get_json_f32(id); n != 0 { obj.objective_id = i32(clamp(n, 1, 10)) - 1 }
+			}
+		}
 		append(&map_inst.objects, obj)
 	}
 

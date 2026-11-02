@@ -313,9 +313,9 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 			billboard_id = int(get_json_f32(bb))
 		}
 
-		if billboard_id == 0 {
-			billboard_id = 1
-		}
+		// Browser billboard names contain Random plus six actual images.
+		// Clamp authored IDs to that registry before constructing the path.
+		billboard_id = clamp(billboard_id, 1, int(shared.GAME_CONSTANTS.billboard_count))
 
 		texture_path = shared.concat(shared.assets_path(), fmt.tprintf("textures/pubs/b_%d.png", billboard_id))
 	} else {
@@ -343,7 +343,9 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 	texture_id: u32 = 0
 	if len(texture_path) > 0 {
 		base_texture_path := ""
-		if tex_id >= 0 && tex_id < len(prefab_textures) && prefab_textures[tex_id] != "default" {
+		if prefab_id == int(shared.Prefab.BILLBOARD) {
+			base_texture_path = shared.concat(shared.assets_path(), "textures/pubs/b_1.png")
+		} else if tex_id >= 0 && tex_id < len(prefab_textures) && prefab_textures[tex_id] != "default" {
 			name := prefab_textures[tex_id]
 			base_suffix := tex_id == 8 ? "_1" : "_0"
 			base_texture_path = shared.concat(shared.assets_path(), fmt.tprintf("textures/%s%s.png", name, base_suffix))

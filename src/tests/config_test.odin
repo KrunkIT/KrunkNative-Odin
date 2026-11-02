@@ -168,7 +168,7 @@ team2_name = "Bravo custom"
 	}
 	// Check the complete supported magazine registry through both startup paths.
 	// Previously game.toml silently replaced modern defaults with legacy stats.
-	magazines := [?]u32{3, 30, 10, 24, 6, 2, 50, 8, 3, 28, 7, 4, 0, 3, 24, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	magazines := [?]u32{3, 30, 10, 24, 6, 2, 50, 8, 3, 28, 7, 4, 0, 3, 24, 3, 15, 0, 16, 0, 0, 15, 0, 0, 0, 0, 0, 0, 1}
 	for rounds, id in magazines {
 		if embedded.weapons[id] == nil { continue }
 		if config.weapons[id].ammo != rounds || embedded.weapons[id].ammo != rounds {
@@ -579,7 +579,7 @@ test_shot_feedback :: proc() -> bool {
 		fmt.eprintln("Melee must never emit a bullet trail or wall decal")
 		return false
 	}
-	// Physical-power traces apply knockback/damage without an extra bullet.
+	// Physical-power probes apply self-impulse without an extra damage pellet.
 	physical_weapon := game.weapons[1]^
 	physical_weapon.physical_power = 1
 	physical_weapon.physical_range = 15
@@ -765,6 +765,7 @@ test_objective_combat_state :: proc() -> bool {
 		ack_seq = 42,
 		spread_plus = 123.5,
 		projectile_shot_seq = 23,
+		secondary_id = 15,
 	}
 	player_packet_size := shared.packet_serialize_state(buf[:], &player_state)
 	header_payload_size, _ := endian.get_u16(buf[5:7], .Little)
@@ -773,7 +774,7 @@ test_objective_combat_state :: proc() -> bool {
 	wire_ack, _ := endian.get_i32(buf[88:92], .Little)
 	wire_spread_plus, _ := endian.get_f32(buf[92:96], .Little)
 	wire_projectile_seq, _ := endian.get_u32(buf[96:100], .Little)
-	if player_packet_size != 100 || header_payload_size != shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE || buf[79] != player_state.weapon_id || wire_ammo != player_state.active_ammo || wire_shot_seq != player_state.shot_seq || wire_ack != player_state.ack_seq || wire_spread_plus != player_state.spread_plus || wire_projectile_seq != player_state.projectile_shot_seq {
+	if player_packet_size != 104 || header_payload_size != shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE || buf[79] != player_state.weapon_id || wire_ammo != player_state.active_ammo || wire_shot_seq != player_state.shot_seq || wire_ack != player_state.ack_seq || wire_spread_plus != player_state.spread_plus || wire_projectile_seq != player_state.projectile_shot_seq {
 		fmt.eprintln("Player-state fixed wire layout test failed")
 		return false
 	}
@@ -816,12 +817,14 @@ test_objective_combat_state :: proc() -> bool {
 		return false
 	}
 
-	connect_size := shared.packet_serialize_connect(buf[:], 6)
+	connect_size := shared.packet_serialize_connect(buf[:], 6, 15)
 	connect_class, connect_version, connect_ok := shared.packet_deserialize_connect(buf[:connect_size])
-	if !connect_ok || connect_size != 13 || connect_class != 6 || connect_version != shared.PROTOCOL_VERSION {
+	if !connect_ok || connect_size != 17 || connect_class != 6 || connect_version != shared.PROTOCOL_VERSION {
 		fmt.eprintln("Protocol-version handshake test failed")
 		return false
 	}
+	_, connect_secondary, _, loadout_ok := shared.packet_deserialize_loadout(buf[:connect_size])
+	if !loadout_ok || connect_secondary != 15 { return false }
 
 	fmt.println("Objective/combat state tests OK")
 	return true

@@ -155,11 +155,11 @@ net_server_poll :: proc(ns: ^Net_Server, game: ^shared.Game) {
 					packet := client.recv_buffer[:packet_size]
 					#partial switch header.packet_type {
 					case .CONNECT:
-						if class_id, version, connect_ok := shared.packet_deserialize_connect(packet); connect_ok && version == shared.PROTOCOL_VERSION && class_id >= 0 && class_id < i32(len(game.classes)) && client.player != nil {
+						if class_id, secondary_id, version, connect_ok := shared.packet_deserialize_loadout(packet); connect_ok && version == shared.PROTOCOL_VERSION && class_id >= 0 && class_id < i32(len(game.classes)) && client.player != nil {
 							if !client.joined {
 								shared.game_players_add(game, client.player)
 							}
-							shared.player_spawn(client.player, class_id)
+							shared.player_spawn(client.player, class_id, shared.secondary_weapon_id(game.weapons, secondary_id))
 							client.joined = true
 							fmt.printf("[Net Server] Client #%d spawned as class %d on team %d\n", client.id, class_id, client.player.team)
 						} else if connect_ok && version != shared.PROTOCOL_VERSION {
@@ -289,6 +289,7 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 				is_you = player == client.player,
 				team = player.team,
 				class_id = player.class_index,
+				secondary_id = player.secondary_id,
 				position = player.position,
 				velocity = player.velocity,
 				x_dir = player.direction.x,

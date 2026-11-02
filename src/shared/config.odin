@@ -24,8 +24,8 @@ CONFIG_CLASS_PATH :: "krunker-configs/class-configs.json"
 weapon_config_names := [?]string{
 	"awp", "ak47", "pistol", "smg", "revolver", "shotgun",
 	"lmg", "semi", "rpg", "akimbo", "deagle", "alien", "knife",
-	"crossbow", "famas", "", "", "", "blaster", "build_tool",
-	"", "", "", "", "", "", "", "", "charge_rifle",
+	"crossbow", "famas", "sawed_off", "auto_pistol", "", "blaster", "build_tool",
+	"", "techy_9", "", "", "", "", "", "", "charge_rifle",
 }
 
 // Section names map config keys to stable class indices (CLASSES_LIST order).
@@ -191,6 +191,7 @@ config_apply_toml :: proc(config: ^Gameplay_Config, source: string) -> bool {
 		if name, valid := toml_get_string(game_table, "team2_name"); valid { config.game.team2_name = strings.clone(name, allocator) }
 		config_apply_i32(game_table, "game_time", "game", 0, &config.game.game_time)
 		config_apply_f32(game_table, "warmup_time", "game", 0, &config.game.warmup_time)
+		config_apply_f32(game_table, "impulse_mlt", "game", 0, &config.game.impulse_mlt)
 		config_apply_i32(game_table, "auto_respawn", "game", 0, &config.game.auto_respawn)
 		config_apply_i32(game_table, "score_limit", "game", 0, &config.game.score_limit)
 		config_apply_bool(game_table, "health_regen", "game", 0, &config.game.health_regen)

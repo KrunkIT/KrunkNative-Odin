@@ -37,8 +37,24 @@ when ODIN_TEST {
 			path := shared.concat(shared.assets_path(), fmt.tprintf("textures/classes/icon_%d.png", class.icon_index))
 			texture := load_texture(path); delete(path)
 			classes[i] = {id=i32(i), name=class.name, weapon="Primary weapon", available=shared.class_is_in_rotation(i32(i)), portrait=rawptr(uintptr(texture)), reason="Restricted by lobby rules"}
+			classes[i].health, classes[i].wall_jump = class.health, class.wall_jump
+			if len(class.loadout) > 0 {
+				weapon := shared.WEAPONS_LIST[class.loadout[0]]
+				folder := weapon.melee ? "melee" : "weapons"
+				path = shared.concat(shared.assets_path(), fmt.tprintf("textures/%s/%s.png", folder, weapon.icon))
+				classes[i].weapon_icon = rawptr(uintptr(load_texture(path))); delete(path)
+				classes[i].weapon = weapon.name
+			}
 		}
 		classes[2].weapon="SMG"
+		secondaries := make([dynamic]menuui.Secondary)
+		defer delete(secondaries)
+		for weapon, id in shared.WEAPONS_LIST {
+			if weapon == nil || !weapon.secondary || weapon.melee { continue }
+			path := shared.concat(shared.assets_path(), fmt.tprintf("textures/weapons/%s.png", weapon.icon))
+			texture := load_texture(path); delete(path)
+			append(&secondaries, menuui.Secondary{id=i32(id),name=weapon.name,icon=rawptr(uintptr(texture))})
+		}
 		selected_name := classes[2].name
 		classes[1].used=1; classes[1].limit=1
 		players := [?]menuui.Player{
@@ -51,6 +67,7 @@ when ODIN_TEST {
 		view := menuui.View{classes=classes[:],players=players[:],online=true,ready=true,selected_class=2,confirmed_class=0,confirmed_team=1,map_name="Sandstorm",mode="Hardpoint",lobby_name="EU competitive / A1B2",match_status="Waiting for players",resolution="1920 x 1080",sensitivity=1,
 			teams={{id=1,name="Alpha",capacity=4,available=true,score=42},{id=2,name="Bravo",capacity=4,available=true,score=38}}}
 		view.presentation = .COMPETITIVE
+		view.secondaries = secondaries[:]
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		sizes := [?][2]i32{{1280,720}, {1920,1080}, {2560,1600}}
 		for size in sizes {
@@ -61,13 +78,16 @@ when ODIN_TEST {
 			full_players: [32]menuui.Player
 			for &player, i in full_players { player = {name="Competitive player with a long name", class_name="Run N Gun", team=i32(i%2+1), is_you=i==0} }
 			play_y: f32
-			for scenario in 0..<18 {
+			for scenario in 0..<29 {
 				view.online=true; view.team_pending=false; view.class_pending=false; view.spawn_pending=false; view.join_status=""; view.active=false
 				view.presentation=.COMPETITIVE; view.ranked=false; view.team_selection=false; view.local_practice=false; view.ready=true; view.confirmed_team=1; view.play_reason=""
 				view.teams[0].name="Alpha"; view.teams[1].name="Bravo"
 				classes[2].name=selected_name; classes[2].weapon="SMG"
 				state.page=.HOME
 				view.players=players[:]; view.teams[0].capacity=4; view.teams[1].capacity=4; view.selection_status=""
+				view.secondary_name="Pistol"; view.selected_secondary=2; view.secondary_reason=""; view.secondary_pending=false
+				view.respawn_remaining=0
+				view.selected_class=2; state.loadout_parent=.CLASSES; state.loadout_return_focus=clay.ID("ClassChoice",0).id
 				switch scenario {
 				case 0:
 				case 1: view.team_pending=true; view.requested_team=2; view.class_pending=true; view.spawn_pending=true; view.selection_status="Awaiting server confirmation"
@@ -87,28 +107,77 @@ when ODIN_TEST {
 				case 15: view.presentation=.STANDARD; view.online=false; view.local_practice=true; view.team_selection=true
 				case 16: view.presentation=.STANDARD; view.ready=false
 				case 17: view.ranked=true
+				case 18: view.presentation=.STANDARD; state.page=.LOADOUT; view.selected_class=0; view.selected_secondary=15; view.secondary_name="Sawed Off"
+				case 19: view.presentation=.STANDARD; state.page=.LOADOUT; view.selected_class=0; view.active=true; view.secondary_pending=true; view.selection_status="Could not send secondary selection. Please try again."
+				case 20: view.presentation=.STANDARD; state.page=.LOADOUT; view.secondary_reason="This class has no secondary weapon"; view.secondary_name="None"
+				case 21: state.page=.LOADOUT; view.selected_class=0; state.loadout_parent=.HOME
+				case 22: view.presentation=.STANDARD; state.page=.LOADOUT; view.selected_class=0; view.secondary_reason="Secondaries are disabled in this lobby"; view.secondary_name="None"
+				case 24,25,26,27:
+					view.players = []menuui.Player{players[0], players[4]}
+					view.teams[0].capacity, view.teams[1].capacity = scenario-23, scenario-23
+				case 28: view.respawn_remaining=2.4; view.has_life=true
+				case 23: view.presentation=.STANDARD; state.page=.LOADOUT; classes[2].name="An exceptionally long selected class name"; classes[2].weapon="An exceptionally long primary weapon name"
 				}
 				page := state.page
 				commands := menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
-				testing.expect(t, state.errors == 0, "menu layout reported an error")
+				if scenario == 21 {
+					// The final secondary must remain reachable in the loadout grid.
+					state.focus = clay.ID("SecondaryChoice", 16).id
+					state.previous = {}
+					menuui.interact(&state, {tab = true}, view)
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+					box := clay.GetElementData(clay.ID("SecondaryChoice", 21)).boundingBox
+					parent := clay.GetElementData(clay.ID("SecondaryPicker")).boundingBox
+					testing.expect(t, state.focus == clay.ID("SecondaryChoice", 21).id && box.height > 0 &&
+						box.y >= parent.y-1 && box.y+box.height <= parent.y+parent.height+1,
+						"Techy-9 must scroll fully into view on keyboard focus")
+					action := menuui.interact(&state, {enter = true}, view)
+					testing.expect(t, action.kind == .SELECT_SECONDARY && action.index == 21,
+						"Techy-9 must remain selectable separately from Auto Pistol")
+				}
+					testing.expect(t, state.errors == 0, "menu layout reported an error")
+				if page == .LOADOUT {
+					for id in ([?]string{"ClassLoadout", "LoadoutClass", "LoadoutPrimary", "LoadoutStatus"}) {
+						box := clay.GetElementData(clay.ID(id)).boundingBox
+						testing.expect(t, box.width>0 && box.height>0 && box.x>=0 && box.y>=0 && box.x+box.width<=ui.width+1 && box.y+box.height<=ui.height+1,
+							"class loadout sections must stay within the viewport")
+					}
+					if len(view.secondary_reason) > 0 {
+						for control in state.controls[:state.control_count] {
+							testing.expect(t, control.action.kind != .SELECT_SECONDARY, "restricted classes must explain the empty secondary slot without offering invalid choices")
+						}
+					}
+				}
 				gl.ClearColor(0.17, 0.17, 0.17, 1)
 				gl.Clear(gl.COLOR_BUFFER_BIT)
 				menu_render_commands(ui, commands)
 				labels := [?][2]string{
 					{"Quit", "Quit"}, {"Enter Game", "Play"}, {"Respawn", "Play"}, {"Resume", "Play"}, {"Join", "JoinLink"}, {"Paste", "Paste"},
-					{"Change class", "ChangeClass"},
+					{"Change class", "ChangeClass"}, {"Done", "LoadoutDone"},
 				}
 				for command in commands.internalArray[:commands.length] {
 					if command.commandType != .Text { continue }
 					text := command.renderData.text.stringContents
+					testing.expect(t, string(text.chars[:text.length]) != "Change secondary", "the lobby must not have a separate secondary button")
 					for label in labels {
 						if string(text.chars[:text.length]) != label[0] { continue }
-						parent := clay.GetElementData(clay.ID(label[1], label[1] == "ChangeClass" ? u32(menuui.Page.CLASSES) : 0))
+						index := label[1] == "ChangeClass" ? u32(menuui.Page.CLASSES) : 0
+						parent := clay.GetElementData(clay.ID(label[1], index))
 						box := command.boundingBox
 						testing.expect(t, parent.found && box.x >= parent.boundingBox.x && box.y >= parent.boundingBox.y &&
 							box.x + box.width <= parent.boundingBox.x + parent.boundingBox.width &&
 							box.y + box.height <= parent.boundingBox.y + parent.boundingBox.height,
 							"actual font label must fit inside its button")
+					}
+					if page == .CLASSES {
+						label := string(text.chars[:text.length])
+						for class in classes {
+							if label != class.name { continue }
+							parent := clay.GetElementData(clay.ID("ClassChoiceName", u32(class.id))).boundingBox
+							box := command.boundingBox
+							testing.expect(t, box.x>=parent.x && box.y>=parent.y && box.x+box.width<=parent.x+parent.width+1 && box.y+box.height<=parent.y+parent.height+1,
+								"each class name must fit beneath its portrait")
+						}
 					}
 					if scenario == 9 {
 						label := string(text.chars[:text.length])
@@ -126,6 +195,16 @@ when ODIN_TEST {
 					play := clay.GetElementData(clay.ID("Play")).boundingBox
 					if scenario==0 { play_y=play.y }
 					testing.expect(t, abs(play.y-play_y)<1, "Play must stay fixed when selections are pending")
+					footer := clay.GetElementData(clay.ID("Footer")).boundingBox
+					testing.expect(t, footer.y+footer.height <= ui.height && left.y+left.height < footer.y && right.y+right.height < footer.y, "rosters must leave the footer visible at every team size")
+					for team in view.teams {
+						if team.capacity > 4 { continue }
+						count := 0
+						for player in view.players { if player.team == team.id { count += 1 } }
+						rows := max(count,team.capacity)
+						box := clay.GetElementData(clay.ID("Roster", u32(team.id))).boundingBox
+						testing.expect(t, box.height >= f32(rows*60-4)*state.scale-1, "all competitive slots must fit without scrolling or clipping")
+					}
 					testing.expect(t, abs(left.width-right.width)<1 && abs(left.y-right.y)<1, "team panels must have equal widths and top alignment")
 						testing.expect(t, play.x >= left.x+left.width && play.x+play.width <= right.x, "Play must sit between the rosters")
 				}
@@ -158,6 +237,23 @@ when ODIN_TEST {
 					delete(header)
 					delete(file)
 					delete(pixels)
+				}
+				if page == .LOADOUT {
+					parent, return_focus := state.loadout_parent, state.loadout_return_focus
+					state.previous = {}
+					action := menuui.interact(&state, {escape=true}, view)
+					testing.expect(t, state.page == parent && state.focus == return_focus && action.kind == .NONE,
+						"Escape must return to class selection without resuming an active life")
+					state.page = .LOADOUT
+					menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+					state.previous, state.focus = {}, clay.ID("Back", u32(parent)).id
+					menuui.interact(&state, {enter=true}, view)
+					testing.expect(t, state.page == parent && state.focus == return_focus, "Back must match Escape from the class loadout")
+					state.page = .LOADOUT
+					menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+					state.previous, state.focus = {}, clay.ID("LoadoutDone").id
+					menuui.interact(&state, {enter=true}, view)
+					testing.expect(t, state.page == .HOME && state.focus == state.return_focus, "Done must return directly to the lobby")
 				}
 			}
 		}

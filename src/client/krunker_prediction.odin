@@ -64,12 +64,13 @@ krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input) {
 		command.swap = state.input_swap
 		state.input_swap = 0
 		if client.krunker_world.move_lock { command.move_dir = -1; command.jump = false }
-		append(&client.predicted_inputs, command)
-		if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }
 		append(&state.input_commands, command)
 		state.render_previous = {client.me.position, client.me.aim_val}
 		client.me.direction = state.command_direction
 		shared.player_proc_input(client.me, &command, true, client.krunker_world.move_lock, true, true)
+		// Keep client-only impulse metadata produced by prediction for replay.
+		append(&client.predicted_inputs, command)
+		if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }
 		state.command_direction = client.me.direction
 		state.render_current = {client.me.position, client.me.aim_val}
 		state.input_sequence += 1
@@ -82,6 +83,18 @@ krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input) {
 krunker_client_apply_motion :: proc(client: ^Client, player: ^shared.Player, source: ^kproto.Krunker_World_Player, respawned: bool) {
 	state := &client.krunker
 	is_you := player.is_you
+	if is_you && source.position_revision != state.local_position_revision {
+		// lm is an explicit server reset, not an ACK to replay past inputs over.
+		krunker_client_reset_prediction(client)
+		state.input_reset = true
+		state.local_position_revision = source.position_revision
+		state.local_sync_revision = source.sync_revision
+		player.position, player.velocity, player.direction = source.position, source.velocity, source.direction
+		player.crouch_val, player.on_ground, player.on_ladder = source.crouch_val, source.on_ground, source.on_ladder
+		shared.player_update_height(player)
+		state.command_direction = source.direction
+		return
+	}
 	if !is_you {
 		// Remote poses are sampled from their timestamped buffer each display
 		// frame. Metadata and shot packets must never snap them to the latest k.

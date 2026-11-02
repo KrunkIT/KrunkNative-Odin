@@ -8,6 +8,7 @@ player_init :: proc(game: ^Game) -> ^Player {
 	player.game = game
 	player.slid_cont = 1
 	player.scale = GAME_CONSTANTS.player_scale
+	player.secondary_id = 2
 	return player
 }
 
@@ -15,8 +16,15 @@ player_update_height :: proc(player: ^Player) {
 	player.height = GAME_CONSTANTS.player_height - player.crouch_val * GAME_CONSTANTS.crouch_distance
 }
 
-player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
+// Invalid/unsupported choices fall back to the default pistol.
+secondary_weapon_id :: proc(weapons: []^Weapon, requested: i32) -> i32 {
+	if requested >= 0 && int(requested) < len(weapons) && weapons[requested] != nil && weapons[requested].secondary && !weapons[requested].melee { return requested }
+	return 2
+}
+
+player_spawn :: proc(player: ^Player, class_index: i32 = 0, secondary_id: i32 = -1) {
 	player.active = true
+	player.frozen, player.speed_boost = false, 0
 	player.class_index = class_index
 	player.respawn_timer = 0
 	player.last_damage_time = -1000
@@ -49,6 +57,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.max_health = class.health
 
 	weapons := player.game.weapons if player.game != nil && len(player.game.weapons) > 0 else g_weapons()
+	player.secondary_id = secondary_weapon_id(weapons, secondary_id >= 0 ? secondary_id : player.secondary_id)
 
 	// Build the full loadout: the class's configured primary weapons, plus the
 	// sidearm (when the class has one) and the melee knife. The C port shipped a
@@ -76,10 +85,9 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 		}
 	}
 
-	if class.secondary && !has_secondary {
-		// Pistol is the default sidearm (index 2 in the weapon registry).
-		if 2 < len(weapons) && weapons[2] != nil {
-			append(&composed, 2)
+	if class.secondary && !has_secondary && (player.game == nil || !player.game.config.no_secondaries) {
+		if int(player.secondary_id) < len(weapons) && weapons[player.secondary_id] != nil {
+			append(&composed, player.secondary_id)
 		}
 	}
 
@@ -764,6 +772,10 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 	player.direction.x = clamp(input.x_dir, -math.PI / 2.0, math.PI / 2.0)
 	player.direction.y = input.y_dir
+	if player.frozen {
+		player.velocity = {}
+		return
+	}
 
 	if input.swap != 0 && player.loadout_size > 1 {
 		swap_secondary := input.swap == 1
@@ -861,6 +873,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		accel *= player.crouch_val != 0 ? GAME_CONSTANTS.crouch_slow : 1.0
 		accel *= player.game.mode.config.speed_mlt[player.team]
 		accel *= player.weapon.speed_mlt
+		if player.speed_boost != 0 { accel *= player.speed_boost }
 		accel *= (player.noclip ? 2.0 : 1.0) * delta
 
 		decel: f32
@@ -1052,6 +1065,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 	// Live Krunker predicts magazine/reload state and shot presentation once,
 	// while movement reconciliation never repeats these effects.
+	velocity_before_combat := player.velocity
 	if (!recon || predict_combat) && player.game.map_inst.config.model != .SPRITE {
 		if input.reload && !player.game.mode.config.no_reloads {
 			player_reload(player)
@@ -1087,7 +1101,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 				if player.weapon.melee {
 					player_melee(player, recon)
 				} else {
-					if player.ammo[player.loadout_index] > 0 {
+					if player.ammo[player.loadout_index] > 0 || player.unlimited_ammo {
 						player_shoot(player, recon)
 					} else if !player.game.mode.config.no_reloads {
 						player_reload(player)
@@ -1095,6 +1109,15 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 				}
 			}
 		}
+	}
+
+	// Reapply the recorded movement impulse after restoring an authoritative
+	// snapshot. Replay must preserve the boost without firing/consuming ammo.
+	if predict_combat {
+		input.predicted_weapon_impulse = player.velocity - velocity_before_combat
+	} else if recon && !move_lock && input.predicted_weapon_impulse != (Vec3{}) {
+		player.velocity += input.predicted_weapon_impulse
+		player.on_ground = false
 	}
 
 	// Advance recoil after firing so a new shot is visible in this frame.
@@ -1171,7 +1194,7 @@ player_melee :: proc(player: ^Player, presentation_only: bool = false) {
 
 		if player.game != nil && player.game.map_inst != nil {
 			for object in player.game.map_inst.objects {
-				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
+				if !object.active || object.no_shoot || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
 					continue
 				}
 				t, _, hit := ray_box_hit(shot_origin, shot_dir, object.position, object.scale)
@@ -1253,7 +1276,9 @@ player_shoot :: proc(player: ^Player, presentation_only: bool = false) {
 		shots: u32 = player.weapon.shots != 0 ? player.weapon.shots : 1
 
 		start: i32 = player.weapon.physical_power != 0 ? -1 : 0
-		for i := start; i < i32(shots); i += 1 {
+		// Projectile weapons still probe for a boost, but their projectile owns damage.
+		end := is_projectile ? 0 : i32(shots)
+		for i := start; i < end; i += 1 {
 			shot_angles = player_hitscan_angles(player, i)
 
 			range := i < 0 ? player.weapon.physical_range : player.weapon.range
@@ -1272,7 +1297,7 @@ player_shoot :: proc(player: ^Player, presentation_only: bool = false) {
 			headshot := false
 
 			for object, object_index in player.game.map_inst.objects {
-				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
+				if !object.active || object.no_shoot || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
 					continue
 				}
 				t, normal, hit := ray_box_hit(shot_origin, shot_dir, object.position, object.scale)
@@ -1281,6 +1306,20 @@ player_shoot :: proc(player: ^Player, presentation_only: bool = false) {
 					nearest_normal = normal
 					nearest_object_index = i32(object_index)
 				}
+			}
+
+			// The extra, unspread ray is a self-impulse probe, never a damage
+			// pellet. Its nearest surface can block boosting via map flags.
+			if i < 0 {
+				if nearest_object_index >= 0 && nearest_t >= 0 && nearest_t < 1 && range > 0 {
+					object := player.game.map_inst.objects[nearest_object_index]
+					strength := (1 - nearest_t) * player.weapon.physical_power * player.game.config.impulse_mlt
+					if !object.no_impulse && !object.no_player_collision && strength != 0 {
+						player.velocity -= shot_dir * (strength / range)
+						player.on_ground = false
+					}
+				}
+				continue
 			}
 
 			for target in player.game.players {
@@ -1329,8 +1368,6 @@ player_shoot :: proc(player: ^Player, presentation_only: bool = false) {
 				player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], headshot)
 			}
 
-			// The physical-power pass applies damage without a bullet effect.
-			if i < 0 { continue }
 			trace_hit := nearest_t <= 1.0
 			impact := Bullet_Impact{
 				origin   = shot_origin,

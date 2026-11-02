@@ -10,6 +10,7 @@ projectile_spawn :: proc(player: ^Player, angles: Vec2) {
 	if !weapon.projectile || weapon.projectile_speed <= 0 || weapon.projectile_range <= 0 { return }
 	if len(player.game.projectiles) >= 256 { ordered_remove(&player.game.projectiles, 0) }
 	append(&player.game.projectiles, Projectile{
+		predicted_id = player.projectile_shot_seq,
 		owner_uid = player.uid,
 		weapon_id = player.loadout[player.loadout_index],
 		position = {player.position.x, player.position.y + player.height - GAME_CONSTANTS.camera_height, player.position.z},
@@ -26,7 +27,7 @@ game_tick_projectiles :: proc(game: ^Game, delta: f32) {
 		for player in game.players {
 			if player.uid == projectile.owner_uid { owner = player; break }
 		}
-		if owner == nil || projectile.weapon_id < 0 || int(projectile.weapon_id) >= len(game.weapons) {
+		if owner == nil && !projectile.networked || projectile.weapon_id < 0 || int(projectile.weapon_id) >= len(game.weapons) {
 			unordered_remove(&game.projectiles, i)
 			continue
 		}
@@ -34,6 +35,15 @@ game_tick_projectiles :: proc(game: ^Game, delta: f32) {
 		if weapon == nil { unordered_remove(&game.projectiles, i); continue }
 		distance := min(projectile.remaining, weapon.projectile_speed * delta)
 		segment := projectile.direction * distance
+		if projectile.networked {
+			// Server-owned visuals end on pre or range exhaustion. Local
+			// collision estimates cannot determine live damage or impact timing.
+			projectile.position += segment
+			projectile.remaining -= distance
+			projectile.travelled += distance
+			if projectile.remaining <= 0 { unordered_remove(&game.projectiles, i) }
+			continue
+		}
 		radius := max(0, weapon.projectile_scale) * 0.5
 		padding := Vec3{radius * 2, radius * 2, radius * 2}
 		nearest: f32 = 2

@@ -8,6 +8,7 @@ import "core:strings"
 krunker_world_apply_game_config :: proc(state: ^Krunker_World_State, packet: []Krunker_Msgpack_Value) {
 	state.game_config = shared.DEFAULT_GAME_CONFIG
 	state.lobby_capacity = 0
+	state.lobby_team_capacity = 0
 	state.lobby_select_team = true
 	for &name in state.lobby_team_names { delete(name); name = "" }
 	state.has_game_config = true
@@ -20,6 +21,11 @@ krunker_world_apply_game_config :: proc(state: ^Krunker_World_State, packet: []K
 		if !textual { continue }
 		switch key {
 		case "maxPlayers": state.lobby_capacity = clamp(krunker_world_i32(entry.value), 0, 64)
+		case "tmSize":
+			// Competitive size is a zero-based selector: 0 = 1v1, 3 = 4v4.
+			// maxPlayers can include spectator slots, so keep these separate.
+			size := krunker_world_i32(entry.value, -1)
+			if size >= 0 && size <= 3 { state.lobby_team_capacity = size + 1 }
 		case "selTeam": state.lobby_select_team = krunker_world_bool(entry.value)
 		case "team1Name", "team2Name":
 			if name, named := entry.value.(string); named {
@@ -30,6 +36,7 @@ krunker_world_apply_game_config :: proc(state: ^Krunker_World_State, packet: []K
 		case "strafeSpd": config.strafe_speed = krunker_world_f32(entry.value, 1.2)
 		case "gravMlt": config.gravity_mlt = krunker_world_f32(entry.value, 1)
 		case "jumpMlt": config.jump_mlt = krunker_world_f32(entry.value, 1)
+		case "impulseMlt": config.impulse_mlt = krunker_world_f32(entry.value, 1)
 		case "deltaMlt": config.delta_mlt = krunker_world_f32(entry.value, 1)
 		case "slidTime": config.slide_time = krunker_world_f32(entry.value, 1)
 		case "slidSpd": config.slide_speed = krunker_world_f32(entry.value, 1)
@@ -38,6 +45,7 @@ krunker_world_apply_game_config :: proc(state: ^Krunker_World_State, packet: []K
 		case "autoJump": config.auto_jump = krunker_world_bool(entry.value)
 		case "airStrf": config.air_strafe = krunker_world_bool(entry.value)
 		case "throwMel": config.throwable_melees = krunker_world_bool(entry.value)
+		case "noSecondary": config.no_secondaries = krunker_world_bool(entry.value)
 		}
 	}
 }

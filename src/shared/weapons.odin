@@ -314,6 +314,8 @@ WEAPON_REVOLVER := Weapon {
 }
 
 WEAPON_SHOTGUN := Weapon {
+	physical_range = 35,
+	physical_power = 0.09,
 	move_spread = 1,
 	name        = "Shotgun",
 	secondary   = false,
@@ -487,6 +489,8 @@ WEAPON_SEMI_AUTO := Weapon {
 }
 
 WEAPON_RPG := Weapon {
+	physical_range = 46,
+	physical_power = 0.095,
 	move_spread = 1,
 	name        = "Rocket Launcher",
 	secondary   = false,
@@ -913,6 +917,160 @@ WEAPON_CHARGE_RIFLE := Weapon {
 	view_kick = {0.065, 0, 0, 0.1},
 }
 
+// Browser weapon 15: the secondary shotgun also supports surface boosting.
+WEAPON_SAWED_OFF := Weapon {
+	name = "Sawed Off",
+	src = "weapon_16",
+	icon = "icon_16",
+	sound = "weapon_16",
+	secondary = true,
+	no_auto = true,
+	ammo = 3,
+	swap_time = 0.2,
+	reload_time = 1.1,
+	aim_speed = 0.1,
+	speed_mlt = 1,
+	damage = 12,
+	headshot_mlt = 1.5,
+	damage_drop = 12,
+	range = 210,
+	rate = 0.4,
+	inaccuracy = 110,
+	spread = 120,
+	min_spread = 20,
+	move_spread = 1,
+	shots = 5,
+	custom_spread = []Vec2{
+		{0.03, 0.05}, {-0.27, -0.02}, {-0.03, 0.31}, {0.3, -0.01}, {0.01, -0.28},
+		{0.01, 0.05}, {-0.17, -0.22}, {-0.3, 0.31}, {0.32, 0.28}, {0.3, -0.2},
+	},
+	physical_range = 36,
+	physical_power = 0.1,
+	zoom = 1.25,
+	recoil = 20,
+	recoil_r = 0.015,
+	recover = 0.99,
+	recover_f = 0.97,
+	recoil_z = 2.1,
+	recoil_z_mlt = 0.32,
+	aim_recoil_mlt = 0.3,
+	recoil_y_mlt = 1,
+	view_kick_time = 0.34,
+	view_kick = {0.35, 0, 0, 0},
+	scale = 1,
+	hold_width = 1,
+	jump_y_mlt = 0.2,
+	jump_bob_y_mlt = 0.5,
+	lean_mlt = 1.6,
+	inspect_rotation = 0.1,
+	inspect_mlt = 1.9,
+	crouch_lean = 0.2,
+	crouch_rotation = 0.2,
+	crouch_drop = 0.1,
+	origin = {0, -0.3, -2.8},
+	offset = {0.95, -0.65, -3.8},
+	left_hold = {0, -0.5, 0.4},
+	right_hold = {0.1, -0.6, -1.5},
+}
+
+// Browser weapon 16: automatic secondary, separate from Techy-9.
+WEAPON_AUTO_PISTOL := Weapon {
+	name = "Auto Pistol",
+	src = "weapon_17",
+	icon = "icon_17",
+	sound = "weapon_17",
+	secondary = true,
+	ammo = 15,
+	swap_time = 0.2,
+	reload_time = 1,
+	aim_speed = 0.1,
+	speed_mlt = 1,
+	damage = 16,
+	headshot_mlt = 1.1,
+	pierce = 0.95,
+	damage_drop = 2,
+	range = 700,
+	rate = 0.1,
+	spread = 150,
+	move_spread = 1,
+	zoom = 1.3,
+	recoil = 4,
+	recoil_r = 0.01,
+	recover = 0.98,
+	recover_y = 0.99,
+	recover_f = 0.98,
+	recoil_y_mlt = 0.2,
+	aim_recoil_mlt = 0.4,
+	recoil_z = 3.8,
+	recoil_z_mlt = -0.4,
+	view_kick_time = 0.2,
+	view_kick = {0.28, 0, 0, 0},
+	scale = 0.0003158947055276376,
+	hold_width = 1.35,
+	y_rotation = -0.005,
+	jump_y_mlt = 0.5,
+	lean_mlt = 1.6,
+	inspect_rotation = 0.35,
+	inspect_mlt = 0.9,
+	crouch_lean = 0.3,
+	crouch_rotation = 0.3,
+	origin = {0, -0.23, -3.9},
+	offset = {1.2, -0.6, -3.7},
+	left_hold = {0, -1.1, -0.3},
+	right_hold = {0.13, -0.62, -0.32},
+}
+
+// Browser weapon 21 (spelled "Tehchy-9" there): three-round burst secondary.
+WEAPON_TECHY_9 := Weapon {
+	name = "Techy-9",
+	src = "weapon_22",
+	icon = "icon_22",
+	sound = "weapon_22",
+	secondary = true,
+	no_auto = true,
+	burst = true,
+	burst_count = 3,
+	burst_rate = 0.09,
+	ammo = 15,
+	swap_time = 0.35,
+	reload_time = 1,
+	aim_speed = 0.1,
+	speed_mlt = 1,
+	damage = 23,
+	headshot_mlt = 1.25,
+	pierce = 0.95,
+	damage_drop = 2,
+	range = 700,
+	rate = 0.38,
+	spread = 150,
+	move_spread = 1,
+	zoom = 1.3,
+	recoil = 4,
+	recoil_r = 0.01,
+	recover = 0.98,
+	recover_y = 0.99,
+	recover_f = 0.98,
+	recoil_y_mlt = 0.2,
+	aim_recoil_mlt = 0.4,
+	recoil_z = 3.8,
+	recoil_z_mlt = -0.4,
+	view_kick_time = 0.2,
+	view_kick = {0.28, 0, 0, 0},
+	scale = 0.0003158947055276376,
+	hold_width = 1.35,
+	y_rotation = -0.005,
+	jump_y_mlt = 0.5,
+	lean_mlt = 1.6,
+	inspect_rotation = 0.35,
+	inspect_mlt = 0.9,
+	crouch_lean = 0.3,
+	crouch_rotation = 0.3,
+	origin = {0, -0.23, -3.9},
+	offset = {1.2, -0.6, -3.7},
+	left_hold = {0, -1.1, -0.3},
+	right_hold = {0.13, -0.62, -0.32},
+}
+
 // Weapon IDs follow the browser registry, including unimplemented slots.
 WEAPONS_LIST := [?]^Weapon{
 	&WEAPON_AWP,
@@ -930,13 +1088,13 @@ WEAPONS_LIST := [?]^Weapon{
 	&WEAPON_KNIFE,
 	&WEAPON_CROSSBOW, // 13: Bowman's primary
 	&WEAPON_FAMAS,
-	nil, // 15: Sawed Off
-	nil, // 16: Auto Pistol
+	&WEAPON_SAWED_OFF, // 15
+	&WEAPON_AUTO_PISTOL, // 16
 	nil, // 17: Bomb
 	&WEAPON_BLASTER, // 18: Trooper's primary
 	&WEAPON_BUILD_TOOL, // 19: Survivor's tool
 	nil, // 20
-	nil, // 21
+	&WEAPON_TECHY_9, // 21
 	nil, // 22
 	nil, // 23
 	nil, // 24

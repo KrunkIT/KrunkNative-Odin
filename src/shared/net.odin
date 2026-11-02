@@ -4,8 +4,8 @@ import "core:encoding/endian"
 
 PACKET_MAGIC :: 0x4B52554E // 'KRUN'
 PACKET_HEADER_SIZE :: 7
-PROTOCOL_VERSION :: 7
-PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 93
+PROTOCOL_VERSION :: 8
+PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 97
 PACKET_BULLET_IMPACT_PAYLOAD_SIZE :: 49
 MAX_PLAYERS_PER_MATCH :: 32
 // The server broadcasts one snapshot per N simulation ticks.
@@ -93,26 +93,34 @@ Packet_Player_Input :: struct {
 	flags:    u8,
 }
 
-packet_serialize_connect :: proc(buf: []byte, class_id: i32) -> int {
-	if len(buf) < PACKET_HEADER_SIZE + 6 {
+packet_serialize_connect :: proc(buf: []byte, class_id: i32, secondary_id: i32 = 2) -> int {
+	if len(buf) < PACKET_HEADER_SIZE + 10 {
 		return 0
 	}
 	endian.put_u32(buf[0:4], .Little, PACKET_MAGIC)
 	buf[4] = u8(Packet_Type.CONNECT)
-	endian.put_u16(buf[5:7], .Little, 6)
+	endian.put_u16(buf[5:7], .Little, 10)
 	endian.put_u16(buf[PACKET_HEADER_SIZE:PACKET_HEADER_SIZE + 2], .Little, PROTOCOL_VERSION)
 	endian.put_i32(buf[PACKET_HEADER_SIZE + 2:PACKET_HEADER_SIZE + 6], .Little, class_id)
-	return PACKET_HEADER_SIZE + 6
+	endian.put_i32(buf[PACKET_HEADER_SIZE + 6:PACKET_HEADER_SIZE + 10], .Little, secondary_id)
+	return PACKET_HEADER_SIZE + 10
 }
 
 packet_deserialize_connect :: proc(buf: []byte) -> (class_id: i32, version: u16, ok: bool) {
+	class_id, _, version, ok = packet_deserialize_loadout(buf)
+	return
+}
+
+packet_deserialize_loadout :: proc(buf: []byte) -> (class_id, secondary_id: i32, version: u16, ok: bool) {
 	header, header_ok := packet_deserialize_header(buf)
-	if !header_ok || header.packet_type != .CONNECT || header.payload_len != 6 || len(buf) != PACKET_HEADER_SIZE + 6 {
-		return 0, 0, false
+	if !header_ok || header.packet_type != .CONNECT || (header.payload_len != 10 && header.payload_len != 6) || len(buf) != PACKET_HEADER_SIZE + int(header.payload_len) {
+		return 0, 2, 0, false
 	}
 	version, _ = endian.get_u16(buf[PACKET_HEADER_SIZE:PACKET_HEADER_SIZE + 2], .Little)
 	class_id, _ = endian.get_i32(buf[PACKET_HEADER_SIZE + 2:PACKET_HEADER_SIZE + 6], .Little)
-	return class_id, version, true
+	secondary_id = 2
+	if header.payload_len == 10 { secondary_id, _ = endian.get_i32(buf[PACKET_HEADER_SIZE + 6:PACKET_HEADER_SIZE + 10], .Little) }
+	return class_id, secondary_id, version, header.payload_len == 10 || version < PROTOCOL_VERSION
 }
 
 // Matches the C Player snapshot layout used for GAME_STATE.
@@ -122,6 +130,7 @@ Packet_Player_State :: struct {
 	is_you:    bool,
 	team:      i32,
 	class_id:  i32,
+	secondary_id: i32,
 	position:  Vec3,
 	velocity:  Vec3,
 	x_dir:     f32,
@@ -360,6 +369,8 @@ packet_serialize_state :: proc(buf: []byte, state: ^Packet_Player_State) -> int 
 	offset += 4
 	endian.put_u32(buf[offset:offset + 4], .Little, state.projectile_shot_seq)
 	offset += 4
+	endian.put_i32(buf[offset:offset + 4], .Little, state.secondary_id)
+	offset += 4
 
 	return offset
 }
@@ -440,6 +451,8 @@ packet_deserialize_state :: proc(buf: []byte) -> (state: Packet_Player_State, ok
 	state.spread_plus, _ = endian.get_f32(buf[offset:offset + 4], .Little)
 	offset += 4
 	state.projectile_shot_seq, _ = endian.get_u32(buf[offset:offset + 4], .Little)
+	offset += 4
+	state.secondary_id, _ = endian.get_i32(buf[offset:offset + 4], .Little)
 
 	return state, true
 }

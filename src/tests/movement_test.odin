@@ -316,6 +316,10 @@ main :: proc() {
 		fmt.eprintln("Weapon spread tests failed")
 		os.exit(1)
 	}
+	if !test_weapon_impulses() || !test_weapon_impulse_map_flags() {
+		fmt.eprintln("Weapon impulse tests failed")
+		os.exit(1)
+	}
 	if !test_lighting_config() {
 		os.exit(1)
 	}

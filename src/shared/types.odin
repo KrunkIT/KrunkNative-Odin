@@ -138,11 +138,15 @@ Object :: struct {
 	trigger:        bool,
 	kill:           bool,
 	objective:      bool,
+	objective_id:   i32,
 	bomb_site:      bool,
 	spawnable:      bool,
 	crouch:         bool,
 	ladder:         bool,
 	wall_jumpable:  bool,
+	no_shoot:       bool,
+	no_impulse:     bool,
+	no_player_collision: bool,
 	direction:      u8,
 	team:           u32,
 	score_points:   u32,
@@ -236,6 +240,8 @@ Input :: struct {
 	crouch:   bool,
 	reload:   bool,
 	swap:     u8,
+	// Client-only replay metadata; never encoded into network input packets.
+	predicted_weapon_impulse: Vec3,
 }
 
 Player_Skins :: struct {
@@ -360,6 +366,8 @@ Player :: struct {
 	noclip:                          bool,
 	god_mode:                        bool,
 	unlimited_ammo:                  bool,
+	frozen:                          bool,
+	speed_boost:                     f32,
 	force_hide:                      bool,
 	interpolate:                     bool,
 	inspecting:                      bool,
@@ -396,6 +404,7 @@ Player :: struct {
 	respawn_timer:                   f32,
 	team:                            i32,
 	class_index:                     i32,
+	secondary_id:                    i32,
 	scale:                           f32,
 	height:                          f32,
 	speed:                           f32,
@@ -533,6 +542,9 @@ Bullet_Impact :: struct {
 }
 
 Projectile :: struct {
+	networked: bool,
+	network_id: i32,
+	predicted_id: u32,
 	owner_uid: i32,
 	weapon_id: i32,
 	position: Vec3,

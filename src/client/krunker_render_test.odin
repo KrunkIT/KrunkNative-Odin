@@ -1,6 +1,8 @@
 package main
 
 import "core:math"
+import "core:encoding/json"
+import "core:fmt"
 import "core:testing"
 import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
@@ -8,6 +10,38 @@ import shared "../shared"
 import kproto "../krunker"
 
 when ODIN_TEST {
+	@(test)
+	billboard_textures_use_browser_registry_bounds :: proc(t: ^testing.T) {
+		if !testing.expect(t, bool(glfw.Init())) do return
+		defer glfw.Terminate()
+		glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
+		glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 5)
+		window := glfw.CreateWindow(320, 180, "Billboard texture regression", nil, nil)
+		if !testing.expect(t, window != nil) do return
+		defer glfw.DestroyWindow(window)
+		glfw.MakeContextCurrent(window)
+		gl.load_up_to(4, 5, glfw.gl_set_proc_address)
+		defer resource_cache_fini()
+		raw := make(json.Object)
+		defer delete(raw)
+		for pair in ([?][2]int{{-1,1}, {0,1}, {1,1}, {2,2}, {6,6}, {7,6}, {999,6}}) {
+			raw["bb"] = json.Integer(pair[0])
+			object := shared.Object{prefab=.BILLBOARD, scale={10,1,5}}
+			mesh := prefab_init(&object, nil, raw)
+			if !testing.expect(t, mesh != nil) do return
+			path := shared.concat(shared.assets_path(), fmt.tprintf("textures/pubs/b_%d.png", pair[1]))
+			expected := load_texture(path)
+			delete(path)
+			material := cast(^Basic_Material)mesh.material
+			testing.expect(t, expected != 0 && material.texture == expected,
+				"billboards must clamp to the browser's six images rather than displaying a wall texture")
+			texture_release(expected)
+			mesh_fini(mesh)
+		}
+	}
+
 	@(test)
 	prefab_texture_registry :: proc(t: ^testing.T) {
 		testing.expect(t, len(prefab_textures) > 5, "prefab texture registry is missing the default slot")
@@ -203,6 +237,21 @@ when ODIN_TEST {
 		kproto.krunker_world_apply_packet(&client.krunker_world, []kproto.Krunker_Msgpack_Value{i64(0), roster[:]})
 		krunker_client_sync_world(&client)
 		testing.expect(t, peer.active && peer.health == 170 && peer.mesh != nil && client.scene.mesh_count == before_death, "same-class respawn must restore a full-health remote model without duplicate meshes")
+		// START must not hand the camera back to the previous death position.
+		gameplay_packet(&client.krunker_world, "3", i64(7), i64(1))
+		krunker_client_sync_world(&client)
+		client.selected_class, client.spawn_pending = 3, true
+		gameplay_packet(&client.krunker_world, "start", "3:00", i64(2))
+		krunker_client_sync_world(&client)
+		testing.expect(t, !client.in_game && !client.me.active && client.spawn_pending && !client.mouse_state.locked,
+			"the lobby must remain open until this life's coordinates arrive")
+		roster[1], roster[9], roster[2] = i64(7), i64(2), i64(-100)
+		gameplay_packet(&client.krunker_world, i64(0), roster[:])
+		krunker_client_sync_world(&client)
+		testing.expect(t, client.in_game && !client.spawn_pending && client.me.position == shared.Vec3{-100,30,-80} && client.mouse_state.locked,
+			"fresh spawn coordinates must move the camera directly to the new life")
+		testing.expect(t, krunker_client_render_sample(&client).position == client.me.position && len(client.predicted_inputs) == 0,
+			"respawning must not interpolate or replay inputs from the death position")
 		// Render the map and player view model once to catch GL/resource issues.
 		client.camera.position = client.me.position
 		client.camera.position.y += client.me.height - shared.GAME_CONSTANTS.camera_height

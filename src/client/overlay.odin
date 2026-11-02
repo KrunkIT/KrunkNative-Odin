@@ -1,7 +1,9 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import gl "vendor:OpenGL"
+import glfw "vendor:glfw"
 import shared "../shared"
 
 ammo_icon: u32
@@ -54,6 +56,53 @@ overlay_numeric_baseline :: proc(top, height, text_size: f32) -> f32 {
 		text_height = glyph.h_bearing.y * text_size / 100.0
 	}
 	return top + (height + text_height) * 0.5
+}
+
+// Round wins belong at the center; objective points stay below the match clock.
+// Neither depends on resolving a server objective UID to a local map object.
+overlay_match_render :: proc(client: ^Client) {
+	match := &client.game.match
+	if client.game.mode == nil || !client.game.mode.objective { return }
+	ui := client.ui
+	s := ui.scale
+	white := shared.Vec4{1, 1, 1, 1}
+	muted := shared.Vec4{0.85, 0.85, 0.85, 1}
+	panel := shared.Vec4{0, 0, 0, 0.5}
+	colors := [2]shared.Vec4{{0.93, 0.22, 0.27, 1}, {0.25, 0.55, 1, 1}}
+	// Equal-sized totals with numerals centered in each box.
+	point_width := max(180*s, max(ui_measure_text(ui, fmt.tprintf("%d", match.team_scores[1]), 52*s), ui_measure_text(ui, fmt.tprintf("%d", match.team_scores[2]), 52*s))+116*s)
+	for color, i in colors {
+		value := fmt.tprintf("%d", match.team_scores[i+1])
+		y := (104 + f32(i)*64)*s
+		ui_fill_rect(ui, panel, 20*s, y, point_width, 56*s)
+		ui_fill_rect(ui, color, 32*s, y+14*s, 28*s, 28*s)
+		ui_fill_text(ui, white, value, 20*s+(point_width-ui_measure_text(ui, value, 52*s))*0.5, overlay_numeric_baseline(y, 56*s, 52*s), 52*s)
+	}
+
+	total := max(u32(1), match.rounds_to_win)*2-1
+	if client.krunker.connected { total = max(u32(1), client.krunker_world.rounds_total) }
+	round := fmt.tprintf("%d/%d", clamp(match.round_current, 1, total), total)
+	center_width := max(104*s, ui_measure_text(ui, round, 42*s)+24*s)
+	score_width := max(80*s, max(ui_measure_text(ui, fmt.tprintf("%d", match.round_wins[1]), 60*s), ui_measure_text(ui, fmt.tprintf("%d", match.round_wins[2]), 60*s))+24*s)
+	width := score_width*2 + center_width + 8*s
+	x, y := (ui.width-width)*0.5, 20*s
+	ui_fill_rect(ui, panel, x+score_width+4*s, y, center_width, 84*s)
+	ui_fill_text(ui, white, round, (ui.width-ui_measure_text(ui, round, 42*s))*0.5, y+42*s, 42*s)
+	label := "Round"
+	ui_fill_text(ui, muted, label, (ui.width-ui_measure_text(ui, label, 24*s))*0.5, y+70*s, 24*s)
+	for color, i in colors {
+		left := x + f32(i)*(score_width+center_width+8*s)
+		ui_fill_rect(ui, panel, left, y, score_width, 84*s)
+		ui_fill_rect(ui, color, left, y+80*s, score_width, 4*s)
+		value := fmt.tprintf("%d", match.round_wins[i+1])
+		ui_fill_text(ui, white, value, left+(score_width-ui_measure_text(ui, value, 60*s))*0.5, overlay_numeric_baseline(y, 80*s, 60*s), 60*s)
+	}
+	seconds := max(0, int(math.ceil(match.objective.rotation_remaining)))
+	rotation := fmt.tprintf("Next objective %02d:%02d", seconds/60, seconds%60)
+	if match.phase == .WARMUP { rotation = fmt.tprintf("Match starts in %.0fs", math.ceil(match.phase_remaining)) }
+	if countdown := krunker_client_countdown_label(client, glfw.GetTime()); len(countdown) > 0 { rotation = countdown }
+	ui_fill_rect(ui, panel, x, y+88*s, width, 32*s)
+	ui_fill_text(ui, white, rotation, (ui.width-ui_measure_text(ui, rotation, 24*s))*0.5, overlay_numeric_baseline(y+88*s, 32*s, 24*s), 24*s)
 }
 
 overlay_loadout_render :: proc(client: ^Client, right, bottom: f32) {
@@ -246,6 +295,26 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		ui_fill_rect(client.ui, color, client.ui.width * 0.5 - 5.0 * client.ui.scale, client.ui.height * 0.5 - 1.0 * client.ui.scale, 10.0 * client.ui.scale, 2.0 * client.ui.scale)
 	}
 
+	if color, visible := krunker_client_hit_color(client, glfw.GetTime()); visible {
+		// A compact confirmation ring. Damage is still owned by the server.
+		s := client.ui.scale
+		cx, cy := client.ui.width*0.5, client.ui.height*0.5
+		for sign in ([2]f32{-1, 1}) {
+			ui_fill_rect(client.ui, color, cx + sign*10*s-2*s, cy-12*s, 4*s, 7*s)
+			ui_fill_rect(client.ui, color, cx + sign*10*s-2*s, cy+5*s, 4*s, 7*s)
+		}
+	}
+	if client.krunker.connected {
+		progress := client.krunker_world.interact_progress
+		if client.krunker_world.interact_manual_visible { progress = client.krunker_world.interact_manual_progress }
+		if progress > 0 {
+			w, h := 180*client.ui.scale, 8*client.ui.scale
+			x, y := (client.ui.width-w)*0.5, client.ui.height*0.6
+			ui_fill_rect(client.ui, background_color, x, y, w, h)
+			ui_fill_rect(client.ui, white, x, y, w*progress, h)
+		}
+	}
+
 	// Bottom right HUD: current loadout and ammo.
 	overlay_ammo_render(client)
 
@@ -261,8 +330,7 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		}
 
 		if timer_icon != 0 {
-			remaining := max(0, int(client.game.match.time_remaining + 0.999))
-			timer := fmt.tprintf("%02d:%02d", remaining / 60, remaining % 60)
+			timer := krunker_client_timer_label(client)
 			timer_width := ui_measure_text(client.ui, timer, HUD_TIMER_TEXT_SIZE * client.ui.scale)
 			baseline := overlay_numeric_baseline(anchor.y, 76.0 * client.ui.scale, HUD_TIMER_TEXT_SIZE * client.ui.scale)
 
@@ -272,34 +340,7 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		}
 	}
 
-	// top-center objective scoreboard
-	if client.game.match.objective.active_zone >= 0 {
-		state := &client.game.match.objective
-		zone_name := fmt.tprintf("POINT %c", rune('A' + state.active_zone))
-		status := "NEUTRAL"
-		status_color := shared.Vec4{0.85, 0.88, 0.9, 1.0}
-		if state.contested {
-			status = "CONTESTED"
-			status_color = shared.Vec4{1.0, 0.72, 0.15, 1.0}
-		} else if state.owner_team == 1 {
-			status = client.game.config.team1_name
-			status_color = shared.Vec4{0.25, 0.55, 1.0, 1.0}
-		} else if state.owner_team == 2 {
-			status = client.game.config.team2_name
-			status_color = shared.Vec4{1.0, 0.3, 0.3, 1.0}
-		}
-
-		score := fmt.tprintf("%d   %s   %d", client.game.match.team_scores[1], zone_name, client.game.match.team_scores[2])
-		rotation := fmt.tprintf("%s  |  rotates in %.0fs", status, state.rotation_remaining)
-		text_size := 30.0 * client.ui.scale
-		sub_size := 18.75 * client.ui.scale
-		width := max(ui_measure_text(client.ui, score, text_size), ui_measure_text(client.ui, rotation, sub_size)) + 50.0 * client.ui.scale
-		x := (client.ui.width - width) * 0.5
-		y := 20.0 * client.ui.scale
-		ui_round_rect(client.ui, background_color, x, y, width, 72.0 * client.ui.scale, 8.0 * client.ui.scale)
-		ui_fill_text(client.ui, white, score, x + (width - ui_measure_text(client.ui, score, text_size)) * 0.5, y + 31.0 * client.ui.scale, text_size)
-		ui_fill_text(client.ui, status_color, rotation, x + (width - ui_measure_text(client.ui, rotation, sub_size)) * 0.5, y + 57.0 * client.ui.scale, sub_size)
-	}
+	overlay_match_render(client)
 }
 
 overlay_fini :: proc() {
