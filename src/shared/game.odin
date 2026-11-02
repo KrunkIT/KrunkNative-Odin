@@ -3,6 +3,7 @@ package shared
 import "core:math/rand"
 
 game_clear_players :: proc(game: ^Game) {
+	clear(&game.projectiles)
 	delete(game.players)
 	game.players = nil
 	game.player_count = 0
@@ -13,6 +14,7 @@ game_is_authority :: proc(game: ^Game) -> bool {
 }
 
 game_init_match :: proc(game: ^Game) {
+	clear(&game.projectiles)
 	delete(game.objective_indices)
 	game.objective_indices = nil
 	game.match = {}
@@ -330,6 +332,7 @@ game_tick :: proc(game: ^Game, now, delta: f32) {
 			player_kill(player, nil, nil, false)
 		}
 	}
+	game_tick_projectiles(game, delta * game.config.delta_mlt)
 }
 
 game_players_add :: proc(game: ^Game, player: ^Player) {
@@ -354,6 +357,7 @@ game_destroy :: proc(game: ^Game) {
 
 	game_clear_players(game)
 	delete(game.impacts)
+	delete(game.projectiles)
 	delete(game.objective_indices)
 
 	if game.mode != nil {

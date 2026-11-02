@@ -4,8 +4,9 @@
 # tables. The section key determines which built-in weapon/class is being
 # configured (weapon indices are preserved internally).
 #
-# Any field omitted keeps the hard-coded default from src/shared. Asset paths
-# (model/texture/sound) are resolved relative to the assets directory; set a
+# Omitted fields keep the built-in defaults (classes come from the JSON export).
+# Weapon models and rigs inherit the current browser defaults; override them explicitly if needed.
+# Asset paths (model/texture/sound) are resolved relative to the assets directory; set a
 # section-scoped directory with `weapons-dir` / `classes-dir` if desired.
 
 [game]
@@ -26,8 +27,6 @@ respawn_delay = 3.0
 
 [weapons.awp]
 name = "Sniper Rifle"
-src = "weapon_1"
-icon = "icon_1"
 no_auto = true
 ammo = 3
 swap_time = 0.3
@@ -43,9 +42,6 @@ damage_drop = 30.0
 rate = 0.9
 spread = 260.0
 zoom = 2.7
-crouch_lean = 0.2
-crouch_rotation = 0.2
-crouch_drop = 0.1
 recoil = 9.0
 recover = 0.993
 recover_y = 0.997
@@ -54,8 +50,6 @@ animate_while_aiming = true
 
 [weapons.ak47]
 name = "Assault Rifle"
-src = "weapon_2"
-icon = "icon_2"
 ammo = 30
 swap_time = 0.3
 reload_time = 1.4
@@ -74,32 +68,9 @@ recoil = 3.0
 recover = 0.978
 recover_y = 0.995
 recover_f = 0.975
-recoil_y_mlt = 0.6
-recoil_z = 4.3
-recoil_z_mlt = -0.04
-z_rotation = 1.0
-y_rotation = 0.0018
-rotation_offset = -0.08
-rotation_offset_aim = -0.035
-jump_y_mlt = 0.3
-aim_recoil_mlt = 0.65
-lean_mlt = 1.5
-inspect_rotation = 0.1
-inspect_mlt = 1.5
-crouch_lean = 0.2
-crouch_rotation = 0.1
-crouch_drop = 0.1
-hold_width = 0.8
-scale = 0.00095745145728643
-origin = [0.0, -0.59, -2.14]
-offset = [0.7, -0.87, -3.33]
-right_hold = [0.0, -0.6, -1.2]
-left_hold = [0.0, -0.41, 0.5]
 
 [weapons.famas]
 name = "Famas"
-src = "weapon_15"
-icon = "icon_15"
 no_auto = true
 burst = true
 burst_count = 3
@@ -122,33 +93,9 @@ recoil = 3.0
 recover = 0.978
 recover_y = 0.995
 recover_f = 0.975
-recoil_y_mlt = 0.6
-recoil_z = 4.3
-recoil_z_mlt = -0.04
-z_rotation = 1.0
-y_rotation = 0.0018
-rotation_offset = 0.0
-rotation_offset_aim = 0.0
-jump_y_mlt = 0.3
-aim_recoil_mlt = 0.65
-lean_mlt = 1.5
-inspect_rotation = 0.1
-inspect_mlt = 1.5
-crouch_lean = 0.2
-crouch_rotation = 0.2
-crouch_drop = 0.1
-# v3 Famas viewmodel placement, including the carrying handle's ADS height.
-hold_width = 1.0
-scale = 0.0008858419597989991
-origin = [0.0, -1.14, -2.0]
-offset = [1.0, -0.86, -3.0]
-right_hold = [0.0, -0.5, -0.75]
-left_hold = [0.0, -0.45, 0.72]
 
 [weapons.pistol]
 name = "Pistol"
-src = "weapon_3"
-icon = "icon_3"
 secondary = true
 no_auto = true
 ammo = 10
@@ -168,26 +115,9 @@ recoil = 6.0
 recover = 0.98
 recover_y = 0.99
 recover_f = 0.98
-recoil_y_mlt = 0.2
-recoil_z = 3.8
-recoil_z_mlt = -0.4
-aim_recoil_mlt = 0.4
-crouch_lean = 0.3
-crouch_rotation = 0.3
-lean_mlt = 1.0
-inspect_rotation = 0.3
-inspect_mlt = 0.8
-scale = 0.0003158947055276376
-hold_width = 1.3
-origin = [0.0, -0.23, -3.9]
-offset = [1.2, -0.6, -3.7]
-right_hold = [0.13, -0.62, -0.32]
-left_hold = [0.0, -1.1, -0.3]
 
 [weapons.smg]
 name = "Submachine Gun"
-src = "weapon_4"
-icon = "icon_4"
 ammo = 34
 swap_time = 0.3
 reload_time = 1.0
@@ -202,9 +132,6 @@ rate = 0.09
 spread = 70.0
 min_spread = 5.0
 zoom = 1.65
-crouch_lean = 0.16
-crouch_rotation = 0.18
-crouch_drop = 0.0
 recoil = 3.4
 recover = 0.975
 recover_y = 0.996
@@ -212,8 +139,6 @@ recover_f = 0.975
 
 [weapons.revolver]
 name = "Revolver"
-src = "weapon_5"
-icon = "icon_5"
 no_auto = true
 ammo = 6
 swap_time = 0.2
@@ -228,9 +153,6 @@ damage_drop = 10.0
 rate = 0.39
 spread = 100.0
 zoom = 1.45
-crouch_lean = 0.2
-crouch_rotation = 0.1
-crouch_drop = 0.1
 recoil = 13.0
 recover = 0.982
 recover_y = 0.992
@@ -238,8 +160,6 @@ recover_f = 0.98
 
 [weapons.shotgun]
 name = "Shotgun"
-src = "weapon_6"
-icon = "icon_6"
 no_auto = true
 ammo = 2
 swap_time = 0.3
@@ -255,9 +175,6 @@ rate = 0.45
 spread = 180.0
 min_spread = 20.0
 zoom = 1.25
-crouch_lean = 0.2
-crouch_rotation = 0.2
-crouch_drop = 0.1
 recoil = 20.0
 recover = 0.99
 recover_y = 0.99
@@ -278,8 +195,6 @@ custom_spread = [
 
 [weapons.lmg]
 name = "Machine Gun"
-src = "weapon-7"
-icon = "icon_7"
 ammo = 60
 swap_time = 0.7
 reload_time = 3.5
@@ -295,9 +210,6 @@ rate = 0.13
 spread = 300.0
 min_spread = 10.0
 zoom = 1.3
-crouch_lean = 0.1
-crouch_rotation = 0.1
-crouch_drop = 0.1
 recoil = 3.2
 recover = 0.98
 recover_y = 0.9975
@@ -305,8 +217,6 @@ recover_f = 0.975
 
 [weapons.semi]
 name = "Semi Auto"
-src = "weapon_8"
-icon = "icon_8"
 no_auto = true
 ammo = 8
 swap_time = 0.3
@@ -321,9 +231,6 @@ damage_drop = 0.0
 rate = 0.12
 spread = 250.0
 zoom = 2.1
-crouch_lean = 0.2
-crouch_rotation = 0.2
-crouch_drop = 0.1
 recoil = 10.0
 recover = 0.98
 recover_y = 0.994
@@ -331,8 +238,6 @@ recover_f = 0.975
 
 [weapons.rpg]
 name = "Rocket Launcher"
-src = "weapon_9"
-icon = "icon_9"
 no_auto = true
 ammo = 3
 swap_time = 0.4
@@ -345,9 +250,6 @@ rate = 0.35
 spread = 120.0
 min_spread = 15.0
 zoom = 1.5
-crouch_lean = 0.2
-crouch_rotation = 0.2
-crouch_drop = 0.1
 recoil = 8.0
 recover = 0.99
 recover_y = 0.998
@@ -355,8 +257,6 @@ recover_f = 0.975
 
 [weapons.akimbo]
 name = "Akimbo Uzi"
-src = "weapon_10"
-icon = "icon_10"
 akimbo = true
 no_aim = true
 ammo = 18
@@ -377,20 +277,9 @@ recover = 0.978
 recover_y = 0.996
 recover_f = 0.975
 zoom = 1.5
-crouch_lean = 0.1
-crouch_rotation = 0.1
-crouch_drop = 0.2
-scale = 0.9
-hold_width = 1.3
-origin = [0.0, -0.62, -2.5]
-offset = [1.5, -0.95, -3.3]
-left_hold = [-0.1, -0.55, 0.2]
-right_hold = [-0.1, -0.55, 0.2]
 
 [weapons.deagle]
 name = "Desert Eagle"
-src = "weapon_11"
-icon = "icon_11"
 secondary = true
 no_auto = true
 ammo = 6
@@ -410,14 +299,9 @@ recover = 0.982
 recover_y = 0.995
 recover_f = 0.98
 zoom = 1.4
-crouch_lean = 0.3
-crouch_rotation = 0.3
-crouch_drop = 0.0
 
 [weapons.alien]
 name = "Alien Blaster"
-src = "weapon_12"
-icon = "icon_12"
 secondary = true
 no_auto = true
 ammo = 4
@@ -437,13 +321,9 @@ recover = 0.98
 recover_y = 0.99
 recover_f = 0.98
 zoom = 1.4
-crouch_lean = 0.2
-crouch_rotation = 0.2
-crouch_drop = 0.0
 
 [weapons.knife]
 name = "Combat Knife"
-icon = "icon_0"
 can_throw = true
 melee = true
 swap_time = 0.25
@@ -457,184 +337,6 @@ recoil = 0.006
 recover = 0.98
 recover_f = 0.98
 zoom = 1.2
-z_rotation_mlt = 0.35
-origin = [0.0001, -0.6, -3.6]
-offset = [0.0, -0.6, -3.6]
-left_hold = [1.5, -0.82, -0.5]
-right_hold = [-1.5, -0.82, -0.5]
 
-[classes]
-# classes-dir = "mods/classes/"
-
-[classes.triggerman]
-name = "Triggerman"
-icon_index = 0
-loadout = ["ak47"]
-secondary = true
-wall_jump = false
-colors = [0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x6C5042, 0xBFBFBF]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.05
-
-[classes.hunter]
-name = "Hunter"
-icon_index = 1
-loadout = ["awp"]
-secondary = true
-wall_jump = false
-colors = [0xA77860, 0x7B573D, 0x634732, 0x282828, 0x634732, 0x3D2B1D]
-health = 60
-health_segments = 5
-regen = 0.1
-speed = 1.05
-
-[classes.run_n_gun]
-name = "Run N Gun"
-icon_index = 2
-loadout = ["smg"]
-secondary = false
-wall_jump = true
-colors = [0xA77860, 0x3E6382, 0x2F4B63, 0x282828, 0x634732, 0x1A2B3A]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.18
-
-[classes.spray_n_pray]
-name = "Spray N Pray"
-icon_index = 3
-texts = ["Calling in the Big Guns?", "Remember - No Russian.", "Pesky Snipers..."]
-loadout = ["lmg"]
-secondary = false
-wall_jump = false
-colors = [0xA77860, 0x586849, 0x49563C, 0x282828, 0x282828, 3160103]
-health = 170
-health_segments = 7
-regen = 0.05
-speed = 0.95
-
-[classes.vince]
-name = "Vince"
-icon_index = 4
-texts = ["..."]
-loadout = ["shotgun"]
-secondary = true
-wall_jump = false
-colors = [8412234, 5526119, 4144461, 0x282828, 0x282828, 2697267]
-health = 90
-health_segments = 6
-regen = 0.1
-speed = 1.0
-
-[classes.detective]
-name = "Detective"
-icon_index = 5
-texts = ["I'm onto something"]
-loadout = ["revolver"]
-secondary = false
-wall_jump = false
-colors = [0xA77860, 7360054, 4410462, 0x282828, 0x634732, 4140062]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.0
-
-[classes.marksman]
-name = "Marksman"
-icon_index = 6
-loadout = ["semi"]
-secondary = true
-wall_jump = false
-colors = [0xA77860, 0x586849, 0x49563C, 0x282828, 0x282828, 2699298]
-health = 90
-health_segments = 6
-regen = 0.1
-speed = 1.0
-
-[classes.rocketeer]
-name = "Rocketeer"
-icon_index = 7
-texts = ["..."]
-loadout = ["rpg"]
-secondary = false
-wall_jump = false
-colors = [0xA77860, 0x586849, 0x49563C, 0x282828, 0x6C5042, 0x2B3324]
-health = 130
-health_segments = 7
-regen = 0.1
-speed = 0.86
-
-[classes.agent]
-name = "Agent"
-icon_index = 8
-loadout = ["akimbo"]
-secondary = false
-wall_jump = true
-colors = [0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x282828, 0xBFBFBF]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.2
-
-[classes.runner]
-name = "Runner"
-icon_index = 9
-texts = ["You sure about this?", "...", "Oh boy", "I don't know about this...", "Not me again..."]
-loadout = ["knife"]
-secondary = false
-wall_jump = true
-colors = [0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x282828, 0x232323]
-health = 120
-health_segments = 6
-regen = 0.2
-speed = 1.0
-
-[classes.deagler]
-name = "Deagler"
-icon_index = 10
-loadout = ["deagle"]
-secondary = false
-wall_jump = false
-colors = [0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x282828, 0x232323]
-health = 60
-health_segments = 5
-regen = 0.1
-speed = 1.0
-
-[classes.bowman]
-name = "Bowman"
-icon_index = 11
-loadout = ["crossbow"]
-secondary = true
-wall_jump = false
-colors = [0xA77860, 0x916C52, 0x6043E2, 0x282828, 0x282828, 0x473527]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.0
-
-[classes.commando]
-name = "Commando"
-icon_index = 12
-loadout = ["famas"]
-secondary = true
-wall_jump = false
-colors = [0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x995C2C, 0x171717]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.0
-
-[classes.trooper]
-name = "Trooper"
-icon_index = 13
-loadout = ["blaster"]
-secondary = false
-wall_jump = false
-colors = [0xA77860, 0xBDC2C9, 0xBDC2C9, 0x2E2E2E, 0x282828, 0x2E2E2E]
-health = 100
-health_segments = 6
-regen = 0.1
-speed = 1.0
+# Class defaults come from krunker-configs/class-configs.json.
+# Add [classes.<name>] sections here only for intentional custom overrides.

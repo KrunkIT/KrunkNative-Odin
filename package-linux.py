@@ -2,7 +2,7 @@
 """Assemble the Linux client/server release zip.
 
 Works like package-windows.ps1: extracts the base asset archive, overlays the
-freshly built binaries plus the repo-tracked config and Famas model/texture,
+freshly built binaries, config and every supported weapon's current assets,
 then re-zips everything into a single distributable archive.
 
 Uses only the Python standard library, so it runs on any Linux box with
@@ -92,9 +92,14 @@ def main() -> int:
             (client_bin, "krunknative_client"),
             (server_bin, "krunknative_server"),
             (os.path.join(ROOT, "assets/config/game.toml"), "assets/config/game.toml"),
-            (os.path.join(ROOT, "assets/models/weapons/weapon_15.obj"), "assets/models/weapons/weapon_15.obj"),
-            (os.path.join(ROOT, "assets/textures/weapons/weapon_15.png"), "assets/textures/weapons/weapon_15.png"),
         ]
+        # The archive seed can contain old files under the same model names.
+        with open(os.path.join(ROOT, "assets/config/weapon-assets.txt"), encoding="utf-8") as fh:
+            for line in fh:
+                asset = line.strip()
+                if asset and not asset.startswith("#"):
+                    rel = "assets/" + asset
+                    overlays.append((os.path.join(ROOT, rel), rel))
         for source, rel in overlays:
             if not os.path.isfile(source):
                 print(f"error: missing package input: {source}", file=sys.stderr)

@@ -3,6 +3,8 @@ package main
 import "core:fmt"
 import "core:encoding/endian"
 import "core:math"
+import "core:os"
+import "core:strings"
 
 import shared "../shared"
 
@@ -92,6 +94,58 @@ test_snapshot_interpolation :: proc() -> bool {
 test_gameplay_config :: proc() -> bool {
 	config := shared.config_load_gameplay()
 	defer shared.config_destroy_gameplay(config)
+	// Packaged installs and direct game_configure callers must receive the same
+	// modern data even when no runtime export or TOML file is available.
+	embedded := shared.config_load_gameplay("", "")
+	defer shared.config_destroy_gameplay(embedded)
+	if embedded.classes[13].speed != 0.9 || embedded.classes[13].slide_time != 1.1 ||
+		embedded.classes[3].slide_accel != 0.98 || embedded.classes[9].throw_charge != 600 ||
+		embedded.classes[9].wall_jump_mlt != 100 || !embedded.classes[10].hidden ||
+		embedded.classes[6].colors[1] != 4605741 || len(embedded.classes[15].colors) != 7 ||
+		embedded.classes[15].colors[6] != 10066329 || len(embedded.classes[4].texts) != 3 ||
+		embedded.classes[4].texts[1] != "Don't ever call me Shotgunner" {
+		fmt.eprintln("Embedded modern class defaults test failed")
+		return false
+	}
+	// A renamed display label must retain its browser ID. Removing an optional
+	// flag in a complete export must clear it instead of inheriting stale data.
+	modified, _ := strings.replace_all(shared.CLASS_CONFIG_SOURCE, `"Triggerman"`, `"Renamed"`, context.temp_allocator)
+	modified, _ = strings.replace_all(modified, `"hide": true,`, "", context.temp_allocator)
+	registry, registry_ok := shared.config_parse_class_json(modified, context.temp_allocator)
+	if !registry_ok || registry[0].name != "Renamed" || registry[0].icon_index != 0 ||
+		registry[10].hidden || registry[14].hidden {
+		fmt.eprintln("Class registry stable IDs and replacement test failed")
+		return false
+	}
+
+	// Load through the startup path so a future change cannot put JSON after
+	// explicit custom overrides again. The fixture is removed on exit.
+	override_path := fmt.tprintf("%sbin/class_overrides_test.toml", project_root())
+	overrides := "[classes.trooper]\nspeed = 1.25\nname = \"Custom Trooper\"\n"
+	if os.write_entire_file(override_path, transmute([]u8)overrides) != nil { return false }
+	defer os.remove(override_path)
+	custom := shared.config_load_gameplay(override_path)
+	defer shared.config_destroy_gameplay(custom)
+	if custom.classes[13].speed != 1.25 || custom.classes[13].name != "Custom Trooper" ||
+		custom.classes[13].slide_time != 1.1 || custom.classes[13].face != 4556 {
+		fmt.eprintln("Class config startup override precedence test failed")
+		return false
+	}
+	// Reject the whole runtime registry if a later class is invalid: earlier
+	// entries must not partially overwrite the current configuration.
+	invalid, _ := strings.replace_all(modified, `"Infiltrator"`, `""`, context.temp_allocator)
+	if os.write_entire_file(override_path, transmute([]u8)invalid) != nil { return false }
+	if shared.config_load_class_json_file(custom, override_path) || custom.classes[0].name != "Triggerman" ||
+		custom.classes[13].name != "Custom Trooper" {
+		fmt.eprintln("Invalid class registry atomicity test failed")
+		return false
+	}
+	// Color arrays are owned by each config, including the extra accessory slot.
+	custom.classes[15].colors[6] = 0
+	if embedded.classes[15].colors[6] != 10066329 || shared.CLASSES_LIST[15].colors[6] != 10066329 {
+		fmt.eprintln("Class color ownership test failed")
+		return false
+	}
 
 	defaults_ok :=
 		len(config.weapons) == len(shared.WEAPONS_LIST) &&
@@ -107,9 +161,7 @@ test_gameplay_config :: proc() -> bool {
 	}
 	spray_index := shared.class_config_index("spray_n_pray")
 
-	// When the current browser export is present, compact JSON keys must be
-	// translated into the shared class registry (including classes that were
-	// absent from the old 14-class TOML snapshot).
+	// Compact JSON keys supply the shared class registry, including hidden classes.
 	survivor_index := shared.class_config_index("survivor")
 	infiltrator_index := shared.class_config_index("infiltrator")
 	latest_classes_ok :=
@@ -119,6 +171,7 @@ test_gameplay_config :: proc() -> bool {
 		config.classes[shared.class_config_index("rocketeer")].secondary &&
 		config.classes[shared.class_config_index("agent")].health == 105 &&
 		config.classes[shared.class_config_index("trooper")].wall_jump &&
+		config.classes[shared.class_config_index("trooper")].speed == 0.9 &&
 		config.classes[survivor_index].hidden &&
 		config.classes[survivor_index].no_mobile &&
 		config.classes[infiltrator_index].face == 5234

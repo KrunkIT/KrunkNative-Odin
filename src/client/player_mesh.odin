@@ -9,6 +9,32 @@ MELEE_ROT_X :: -math.PI / 3.5
 MELEE_ROT_Y :: 0.3
 MELEE_ROT_Z :: -math.PI * 0.9
 
+REFLEX_SIGHT_AIM_OFFSET_Y :: 0.16
+
+generate_weapon_attachment :: proc(weapon: ^shared.Weapon, parent: ^Mesh_Transform) -> ^Mesh {
+	model_path := shared.concat(shared.assets_path(), "models/attach/attach_0.obj")
+	texture_path := shared.concat(shared.assets_path(), "textures/attach/attach_0.png")
+	defer delete(model_path)
+	defer delete(texture_path)
+	geometry := load_obj_model(model_path, false)
+	if geometry == nil { return nil }
+	texture := load_texture(texture_path)
+	material := basic_material_init()
+	if material == nil {
+		geometry_release(geometry)
+		texture_release(texture)
+		return nil
+	}
+	material.texture = texture
+	material.transparent = true
+	mesh := mesh_init(geometry, &material.base)
+	mesh.transform.parent = parent
+	mesh.transform.position = {0, -weapon.origin.y + weapon.attach_y_offset, -weapon.attach_z_offset}
+	mesh.transform.rotation.y = math.PI / 2
+	mesh.transform.scale = {1.2, 1.2, 1.2}
+	return mesh
+}
+
 Color_Cube_Segment :: struct {
 	color:  i32,
 	height: f32,
@@ -53,7 +79,7 @@ generate_arm :: proc(x, y: f32, weapon: ^shared.Weapon, is_left, third_person, l
 	hold := shared.Vec3{
 		(is_left ? weapon.left_hold.x : weapon.right_hold.x) * left_handed_mlt,
 		is_left ? weapon.left_hold.y : weapon.right_hold.y,
-		is_left ? weapon.left_hold.z : weapon.right_hold.z,
+		(is_left ? weapon.left_hold.z : weapon.right_hold.z) + (third_person ? 0.0 : weapon.hold_distance_offset),
 	}
 
 	arm_scale := shared.GAME_CONSTANTS.arm_scale * (third_person ? 1.0 : 0.68)
@@ -129,7 +155,7 @@ generate_arm :: proc(x, y: f32, weapon: ^shared.Weapon, is_left, third_person, l
 
 	arm.anchor.position.x = x - weapon.offset.x * left_handed_mlt
 	arm.anchor.position.y = y - weapon.offset.y
-	arm.anchor.position.z = -weapon.offset.z
+	arm.anchor.position.z = -weapon.offset.z + (third_person ? 0.0 : weapon.hold_distance_offset)
 	arm.anchor.scale = shared.Vec3{1.0, 1.0, 1.0}
 
 	arm.anchor.rotation.x = -arm_angles[1] + math.atan2(weapon.offset.y + hold.y - y, -(weapon.offset.z - hold.z))
@@ -148,8 +174,6 @@ generate_arms :: proc(weapon: ^shared.Weapon, third_person, left_handed: bool, s
 
 	arms.left = generate_arm(offset, shared.GAME_CONSTANTS.arm_offset, weapon, !left_handed, third_person, left_handed, shirt_color, sleeve_color, skin_color)
 	arms.right = generate_arm(-offset, shared.GAME_CONSTANTS.arm_offset, weapon, left_handed, third_person, left_handed, shirt_color, sleeve_color, skin_color)
-
-	arms.anchor.position.z += third_person ? 0.0 : weapon.hold_distance_offset
 
 	arms.anchor.scale = shared.Vec3{1.0, 1.0, 1.0}
 	arms.left.pivot.parent = &arms.anchor
@@ -413,9 +437,8 @@ player_generate_meshes :: proc(player: ^shared.Player, render_you: bool) {
 					weapon_mesh.transform.position.y = 0.0
 					weapon_mesh.transform.position.z = 0.0
 
-					weapon_mesh.transform.scale.x = weapon.scale
-					weapon_mesh.transform.scale.y = weapon.scale
-					weapon_mesh.transform.scale.z = weapon.scale
+					model_scale := weapon.scale != 0 ? weapon.scale : 1.0
+					weapon_mesh.transform.scale = {model_scale, model_scale, model_scale}
 
 					weapon_mesh.transform.rotation.y = weapon.rotation != 0 ? weapon.rotation : math.PI * 0.5
 					weapon_mesh.transform.parent = &arms.anchor
@@ -430,6 +453,10 @@ player_generate_meshes :: proc(player: ^shared.Player, render_you: bool) {
 						break
 					}
 				}
+			}
+			// Krunker adds the selected sight only to first-person/preview rigs.
+			if weapon.has_attachment && (render_you || player.uid == -1) {
+				arms.attachment = generate_weapon_attachment(weapon, &arms.anchor)
 			}
 		}
 	}
@@ -466,12 +493,12 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	aim_mlt: f32 = player.weapon.animate_while_aiming ? 0.0 : aim_val_mlt
 	anim_mlt := (1.0 - (1.0 - shared.GAME_CONSTANTS.aim_anim_mlt) * aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt * weapon_bobbing_mlt
 	anim_mlt_crouch := 1.0 - player.crouch_val * 0.8
-	anim_mlt_lean := player.render_you ? 1.0 - aim_val_mlt * shared.GAME_CONSTANTS.anim_mlt : 0.0
-	recoil_y_mlt := 1.0 - (player.weapon.recoil_y_mlt != 0 ? player.weapon.recoil_y_mlt : 1.0) * shared.GAME_CONSTANTS.anim_mlt
+	anim_mlt_lean := player.render_you ? (1.0 - aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt : 0.0
+	recoil_y_mlt := (1.0 - aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt
 	recoil_z_mlt := 1.0 - (player.weapon.recoil_z_mlt != 0 ? player.weapon.recoil_z_mlt : 0.5) * aim_mlt
 	anim_rotate_mlt := (1.0 - (player.weapon.z_rotation != 0 ? player.weapon.z_rotation : 0.3) * aim_mlt) * (player.weapon.z_rotation_mlt != 0 ? player.weapon.z_rotation_mlt : 1.0) * weapon_bobbing_mlt
 	anim_y_mlt := 1.0 - (player.weapon.jump_y_mlt != 0 ? player.weapon.jump_y_mlt : 1.0) * aim_mlt
-	lean_aim_mlt := 1.0 * aim_mlt * 0.45
+	lean_aim_mlt := 1.0 - aim_mlt * 0.45
 	bob_anim_y := player.bob_anim.y * 0.9 * anim_y_mlt * anim_mlt_lean * weapon_bobbing_mlt
 	land_bob_y := (player.land_bob_y * (player.weapon.land_bob != 0 ? player.weapon.land_bob : 1.0) * 0.6) * (1.0 - aim_mlt * 0.75) * weapon_bobbing_mlt
 
@@ -487,8 +514,8 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		player.jump_rotate_mlt += (jump_rotate - player.jump_rotate_mlt) * 0.08
 	}
 
-	jump_bob_y := player.jump_bob_y * (player.weapon.jump_y_mlt != 0 ? player.weapon.jump_y_mlt : 1.0) * anim_mlt_lean * bob_crouch_mlt * weapon_bobbing_mlt
-	recoil_aim_mlt := 1.0 - aim_mlt * 0.89
+	jump_bob_y := player.jump_bob_y * (player.weapon.jump_bob_y_mlt != 0 ? player.weapon.jump_bob_y_mlt : 1.0) * anim_mlt_lean * bob_crouch_mlt * weapon_bobbing_mlt
+	recoil_aim_mlt := 1.0 - aim_mlt * 0.75
 	recoil_mlt := 1.0 - (player.weapon.aim_recoil_mlt != 0 ? player.weapon.aim_recoil_mlt : 1.0) * aim_mlt
 	step_mlt := is_preview ? 0.05 : shared.GAME_CONSTANTS.step_anim
 	step_anim := math.sin(player.step_val) * step_mlt
@@ -496,7 +523,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	step_anim_rotate := -math.sin(player.step_chase) * step_mlt
 	step_half_rotate := -math.cos(2.0 * player.step_chase) * 0.5 * step_mlt
 	aim_val := third_person ? 0.0 : aim_val_mlt
-	aim_lean := (aim_val <= 0.5 ? aim_val : 0.5 - (aim_val - 0.5)) * 0.5
+	aim_lean := (aim_val <= 0.5 ? aim_val : 0.5 - (aim_val - 0.5)) * (player.weapon.aim_lean != 0 ? player.weapon.aim_lean : 0.5)
 	swap_anim := player.swap_timer / player.weapon.swap_time
 	left_hand_mlt: f32 = player.left_handed ? -1.0 : 1.0
 
@@ -562,6 +589,9 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		if arms.weapon_left != nil {
 			arms.weapon_left.visible = visible
 		}
+		if arms.attachment != nil {
+			arms.attachment.visible = visible
+		}
 
 		arm_meshes := [2]^Player_Arm_Mesh{arms.left, arms.right}
 		for arm in arm_meshes {
@@ -604,6 +634,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 
 	arms := player_mesh.arms[player.loadout_index]
 	arm_anchor := &arms.anchor
+	aim_offset_y := player.weapon.has_attachment ? REFLEX_SIGHT_AIM_OFFSET_Y + player.weapon.aim_offset_y : 0.0
 
 	arm_anchor.rotation.x = -math.cos(player.idle_anim) * bob_crouch_mlt * 0.01 * idle_anim +
 		player.weapon.rotation_offset * anim_mlt_lean + player.weapon.rotation_offset_aim * (1.0 - anim_mlt_lean) -
@@ -632,7 +663,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		jump_bob_y + land_bob_y * 0.5 - bob_anim_y * 1.5 -
 		(player.weapon.bomb ? player.interact_progress * 3.0 : 0.0) +
 		(step_half * 0.85 - player.weapon.crouch_drop * player.crouch_val * anim_mlt_lean) * anim_mlt +
-		weapon_offset.y - (weapon_offset.y - player.weapon.origin.y) * aim_val
+		weapon_offset.y - (weapon_offset.y - player.weapon.origin.y + aim_offset_y) * aim_val
 
 	arm_anchor.position.z = weapon_offset.z - (weapon_offset.z - player.weapon.origin.z) * aim_val +
 		player.view_kick[3] +
@@ -761,6 +792,9 @@ player_meshes_fini :: proc(player: ^shared.Player) {
 		}
 		if arms.weapon_left != nil {
 			mesh_fini(arms.weapon_left)
+		}
+		if arms.attachment != nil {
+			mesh_fini(arms.attachment)
 		}
 
 		for j in 0 ..< 2 {

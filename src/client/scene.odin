@@ -55,6 +55,9 @@ scene_add_player_mesh :: proc(scene: ^Scene, player_mesh: ^Player_Mesh, loadout_
 		if arms.weapon_left != nil {
 			scene_add_mesh(scene, arms.weapon_left)
 		}
+		if arms.attachment != nil {
+			scene_add_mesh(scene, arms.attachment)
+		}
 
 		for j in 0 ..< 2 {
 			arm := arms.left if j == 1 else arms.right
@@ -136,6 +139,9 @@ scene_remove_player_mesh :: proc(scene: ^Scene, player_mesh: ^Player_Mesh, loado
 		}
 		if arms.weapon_left != nil {
 			scene_remove_mesh(scene, arms.weapon_left)
+		}
+		if arms.attachment != nil {
+			scene_remove_mesh(scene, arms.attachment)
 		}
 
 		for j in 0 ..< 2 {

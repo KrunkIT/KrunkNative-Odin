@@ -308,6 +308,10 @@ main :: proc() {
 	if !test_gameplay_config() {
 		os.exit(1)
 	}
+	if !test_trooper_blaster() {
+		fmt.eprintln("Trooper Blaster tests failed")
+		os.exit(1)
+	}
 	if !test_lighting_config() {
 		os.exit(1)
 	}

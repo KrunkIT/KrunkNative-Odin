@@ -32,7 +32,8 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	}
 
 	// Resolve stats from the configured classes when available (the game's list
-	// is built from game.toml by the client/server), falling back to defaults.
+	// is built from the class JSON plus optional TOML overrides), falling back
+	// to the same JSON-derived defaults.
 	class: Class_Config
 	if player.game != nil && class_index >= 0 && class_index < i32(len(player.game.classes)) {
 		class = player.game.classes[class_index]
@@ -1235,6 +1236,7 @@ player_shoot :: proc(player: ^Player) {
 
 		shot_angles.x = player.direction.x + player.recoil_anim_y * GAME_CONSTANTS.recoil_mlt + spread
 		shot_angles.y = player.direction.y + spread
+		projectile_spawn(player, shot_angles)
 	}
 
 	if !is_projectile || player.weapon.physical_power != 0 {

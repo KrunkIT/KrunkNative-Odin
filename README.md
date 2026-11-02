@@ -108,7 +108,9 @@ To build the client and server and package them with the minimum curated runtime
 ```
 
 The packager uses `KrunkNative-Windows.zip` as its asset seed, then adds the current binaries,
-configuration, and Famas assets. Use `-SkipBuild` to package existing binaries or `-AssetArchive`
+configuration, and current models, textures, icons and sights for every supported weapon.
+Both packagers use `assets/config/weapon-assets.txt` to refresh weapon assets from your installed pack.
+Use `-SkipBuild` to package existing binaries or `-AssetArchive`
 to provide another curated runtime archive.
 
 With no target, the script builds both binaries. The other targets build the client or server,
@@ -240,9 +242,13 @@ walls for this ability.
 
 ## Gameplay configuration
 
-Weapons, classes, and match rules are data-driven from
-[`assets/config/game.toml`](assets/config/game.toml). Named sections apply partial overrides over
-the built-in defaults:
+Class defaults come from [`krunker-configs/class-configs.json`](krunker-configs/class-configs.json).
+The client and server embed that registry at build time and read the runtime copy when present,
+so packaged builds use the same class data even without the JSON file beside them.
+
+Weapons and match rules are configured in [`assets/config/game.toml`](assets/config/game.toml).
+Named sections apply partial overrides, including optional custom class settings, after the JSON
+defaults:
 
 ```toml
 [game]

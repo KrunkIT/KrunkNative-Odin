@@ -77,6 +77,7 @@ Client :: struct {
 	me:   ^shared.Player,
 	impact_markers: [dynamic]Impact_Marker,
 	tracer_markers: [dynamic]Tracer_Marker,
+	projectile_meshes: [dynamic]^Mesh,
 	show_fps:       bool,
 	fps_value:      u32,
 	fps_frames:     u32,
@@ -325,6 +326,7 @@ client_find_player :: proc(client: ^Client, uid: i32) -> ^shared.Player {
 }
 
 client_clear_players :: proc(client: ^Client) {
+	client_clear_projectiles(client)
 	for player in client.game.players {
 		if player.mesh != nil {
 			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
@@ -576,6 +578,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		} else {
 			shared.player_apply_recoil(player)
 			shared.player_start_view_kick(player)
+			shared.projectile_spawn(player, player.direction)
 		}
 	}
 
@@ -853,6 +856,7 @@ client_tick_impacts :: proc(client: ^Client, delta: f32) {
 }
 
 client_clear_impacts :: proc(client: ^Client) {
+	client_clear_projectiles(client)
 	for marker in client.impact_markers {
 		scene_remove_mesh(client.scene, marker.mesh)
 		mesh_fini(marker.mesh)
@@ -1125,6 +1129,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 				}
 			}
 		}
+		shared.game_tick_projectiles(&client.game, delta * client.game.config.delta_mlt)
 	}
 	client_update_objective_visuals(client, now)
 
@@ -1151,6 +1156,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		}
 	}
 	client_tick_impacts(client, delta)
+	client_tick_projectiles(client)
 
 	client_tick_textures(client, now)
 
@@ -1158,7 +1164,8 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	scene_render(client.scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height))
 
 	gl.Clear(gl.DEPTH_BUFFER_BIT)
-	scene_render(client.fps_scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height))
+	weapon_camera := camera_for_viewmodel(&client.camera)
+	scene_render(client.fps_scene, &weapon_camera, f32(client.viewport_width), f32(client.viewport_height))
 
 	ui_update(client.ui, f32(client.viewport_width), f32(client.viewport_height))
 

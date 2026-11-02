@@ -17,16 +17,14 @@ Gameplay_Config :: struct {
 }
 
 CONFIG_GAME_PATH :: "assets/config/game.toml"
-// The browser's current class registry is exported as JSON.  Keep the older
-// TOML file as the portable baseline and apply this file afterward when it is
-// present, so installations without the export still use built-in defaults.
+// Optional runtime copy of the same JSON embedded in CLASSES_LIST.
 CONFIG_CLASS_PATH :: "krunker-configs/class-configs.json"
 
 // Section names map config keys to stable weapon indices (WEAPONS_LIST order).
 weapon_config_names := [?]string{
 	"awp", "ak47", "pistol", "smg", "revolver", "shotgun",
 	"lmg", "semi", "rpg", "akimbo", "deagle", "alien", "knife",
-	"", "famas",
+	"", "famas", "", "", "", "blaster",
 }
 
 // Section names map config keys to stable class indices (CLASSES_LIST order).
@@ -70,7 +68,7 @@ class_config_name_count :: proc() -> int {
 
 // config_load_gameplay returns an owned registry. Its weapon pointers remain stable
 // until config_destroy_gameplay is called.
-config_load_gameplay :: proc(config_path := CONFIG_GAME_PATH) -> ^Gameplay_Config {
+config_load_gameplay :: proc(config_path := CONFIG_GAME_PATH, class_path := CONFIG_CLASS_PATH) -> ^Gameplay_Config {
 	config := new(Gameplay_Config)
 	config.game = DEFAULT_GAME_CONFIG
 	mem.dynamic_arena_init(&config.arena)
@@ -91,65 +89,51 @@ config_load_gameplay :: proc(config_path := CONFIG_GAME_PATH) -> ^Gameplay_Confi
 		config.classes[id] = config_clone_class(default_class, allocator)
 	}
 
+	// Read live edits when the export is present; otherwise the embedded copy
+	// supplies the same modern defaults. Explicit local overrides apply last.
+	config_load_class_json_file(config, class_path)
 	if len(config_path) > 0 {
 		config_load_toml_file(config, config_path)
 	}
-	// The JSON export contains the live game's complete class registry (including
-	// hidden classes absent from the legacy TOML). It is intentionally optional.
-	config_load_class_json_file(config, CONFIG_CLASS_PATH)
 
 	return config
 }
 
-// config_load_class_json_file applies the current browser class registry. The
-// source is an array of objects with compact keys (throwChrg, wallJM, ...),
-// matching the names in game.deob.js. Unknown/malformed fields are ignored and
-// the already-loaded TOML/default value is retained.
-config_load_class_json_file :: proc(config: ^Gameplay_Config, path: string) -> bool {
-	if config == nil || len(path) == 0 do return false
-	data, err := os.read_entire_file_from_path(path, context.temp_allocator)
-	if err != nil {
-		// This file is an optional developer export; don't make normal installs
-		// noisy when it is not copied beside the executable.
-		return false
-	}
-	value, parse_err := json.parse_string(string(data), parse_integers = true)
-	if parse_err != .None {
-		fmt.eprintf("config: failed to parse class JSON %s: %v\n", path, parse_err)
-		return false
-	}
+// Parse a complete registry in browser order: array indices are stable class IDs.
+// Never merge with another class snapshot or match IDs by a mutable display name.
+config_parse_class_json :: proc(source: string, allocator: mem.Allocator) -> (classes: [len(class_config_names)]Class_Config, ok: bool) {
+	value, parse_err := json.parse_string(source, parse_integers = true)
+	if parse_err != .None { return classes, false }
 	defer json.destroy_value(value)
-	entries, ok := value.(json.Array)
+	entries, array_ok := value.(json.Array)
+	if !array_ok || len(entries) != len(classes) { return classes, false }
+	for entry, id in entries {
+		object, object_ok := entry.(json.Object)
+		if !object_ok { return classes, false }
+		class := &classes[id]
+		class.icon_index = i32(id)
+		config_apply_class_json(object, class, allocator)
+		if len(class.name) == 0 || len(class.loadout) == 0 || len(class.colors) < 6 ||
+			class.health <= 0 || class.health_segments <= 0 || class.speed <= 0 {
+			return classes, false
+		}
+	}
+	return classes, true
+}
+
+// A missing runtime export uses embedded defaults. A malformed export must not
+// partially replace the registry or alter the stable IDs.
+config_load_class_json_file :: proc(config: ^Gameplay_Config, path: string) -> bool {
+	if config == nil || len(path) == 0 { return false }
+	data, err := os.read_entire_file_from_path(path, context.temp_allocator)
+	if err != nil { return false }
+	allocator := mem.dynamic_arena_allocator(&config.arena)
+	classes, ok := config_parse_class_json(string(data), allocator)
 	if !ok {
-		fmt.eprintf("config: class JSON %s must contain an array\n", path)
+		fmt.eprintf("config: invalid class registry %s; keeping current classes\n", path)
 		return false
 	}
-
-	for entry, ordinal in entries {
-		object, object_ok := entry.(json.Object)
-		if !object_ok {
-			continue
-		}
-		id := -1
-		if raw_name, has_name := object["name"]; has_name {
-			if name, name_ok := raw_name.(json.String); name_ok {
-				for class, candidate in config.classes {
-					if class.name == string(name) {
-						id = candidate
-						break
-					}
-				}
-			}
-		}
-		// Preserve the stable browser ordering as a fallback for a renamed class.
-		if id < 0 && ordinal < len(config.classes) {
-			id = ordinal
-		}
-		if id < 0 || id >= len(config.classes) {
-			continue
-		}
-		config_apply_class_json(object, &config.classes[id], id, mem.dynamic_arena_allocator(&config.arena))
-	}
+	copy(config.classes, classes[:])
 	return true
 }
 
@@ -267,6 +251,8 @@ config_clone_class :: proc(source: Class_Config, allocator: mem.Allocator) -> Cl
 	}
 	result.loadout = make([]i32, len(source.loadout), allocator)
 	copy(result.loadout, source.loadout)
+	result.colors = make([]i32, len(source.colors), allocator)
+	copy(result.colors, source.colors)
 	return result
 }
 
@@ -406,13 +392,13 @@ config_apply_weapon_loadout :: proc(
 	destination^ = result
 }
 
-config_apply_colors :: proc(table: ^Toml_Table, id: int, destination: ^[6]i32) {
+config_apply_colors :: proc(table: ^Toml_Table, id: int, destination: ^[]i32, allocator: mem.Allocator) {
 	array, ok := toml_get_array(table, "colors")
-	if !ok || len(array) != 6 {
+	if !ok || len(array) < 6 {
 		return
 	}
 
-	result: [6]i32
+	result := make([]i32, len(array), allocator)
 	for item, i in array {
 		if color, color_ok := item.(i64); color_ok && color >= i64(min(i32)) && color <= i64(max(i32)) {
 			result[i] = i32(color)
@@ -447,6 +433,13 @@ config_apply_weapon :: proc(
 	config_apply_bool(table, "burst", "weapon", id, &weapon.burst)
 	config_apply_bool(table, "projectile", "weapon", id, &weapon.projectile)
 	config_apply_bool(table, "projectile_disable", "weapon", id, &weapon.projectile_disable)
+	config_apply_bool(table, "has_attachment", "weapon", id, &weapon.has_attachment)
+	config_apply_f32(table, "projectile_speed", "weapon", id, &weapon.projectile_speed)
+	config_apply_f32(table, "projectile_damage", "weapon", id, &weapon.projectile_damage)
+	config_apply_f32(table, "projectile_range", "weapon", id, &weapon.projectile_range)
+	config_apply_i32(table, "projectile_color", "weapon", id, &weapon.projectile_color)
+	config_apply_f32(table, "projectile_scale", "weapon", id, &weapon.projectile_scale)
+	config_apply_f32(table, "projectile_length", "weapon", id, &weapon.projectile_length)
 	config_apply_bool(table, "animate_while_aiming", "weapon", id, &weapon.animate_while_aiming)
 
 	config_apply_u32(table, "burst_count", "weapon", id, &weapon.burst_count)
@@ -488,7 +481,12 @@ config_apply_weapon :: proc(
 	config_apply_f32(table, "y_rotation", "weapon", id, &weapon.y_rotation)
 	config_apply_f32(table, "rotation_offset", "weapon", id, &weapon.rotation_offset)
 	config_apply_f32(table, "rotation_offset_aim", "weapon", id, &weapon.rotation_offset_aim)
+	config_apply_f32(table, "aim_offset_y", "weapon", id, &weapon.aim_offset_y)
+	config_apply_f32(table, "attach_y_offset", "weapon", id, &weapon.attach_y_offset)
+	config_apply_f32(table, "attach_z_offset", "weapon", id, &weapon.attach_z_offset)
 	config_apply_f32(table, "jump_y_mlt", "weapon", id, &weapon.jump_y_mlt)
+	config_apply_f32(table, "jump_bob_y_mlt", "weapon", id, &weapon.jump_bob_y_mlt)
+	config_apply_f32(table, "aim_lean", "weapon", id, &weapon.aim_lean)
 	config_apply_f32(table, "land_bob", "weapon", id, &weapon.land_bob)
 	config_apply_f32(table, "aim_recoil_mlt", "weapon", id, &weapon.aim_recoil_mlt)
 	config_apply_f32(table, "lean_mlt", "weapon", id, &weapon.lean_mlt)
@@ -520,7 +518,7 @@ config_apply_class :: proc(
 	config_apply_weapon_loadout(table, id, &class.loadout, allocator)
 	config_apply_bool(table, "secondary", "class", id, &class.secondary)
 	config_apply_bool(table, "wall_jump", "class", id, &class.wall_jump)
-	config_apply_colors(table, id, &class.colors)
+	config_apply_colors(table, id, &class.colors, allocator)
 	config_apply_i32(table, "health", "class", id, &class.health)
 	config_apply_i32(table, "health_segments", "class", id, &class.health_segments)
 	config_apply_f32(table, "regen", "class", id, &class.regen)
@@ -561,32 +559,24 @@ config_json_bool :: proc(object: json.Object, key: string, destination: ^bool) {
 	}
 }
 
-config_json_colors :: proc(object: json.Object, destination: ^[6]i32) {
+config_json_colors :: proc(object: json.Object, destination: ^[]i32, allocator: mem.Allocator) {
 	value, ok := object["colors"]
 	array, array_ok := value.(json.Array)
-	// The current export may append accessory colours for newer classes. The
-	// renderer currently consumes the six body/weapon slots, so preserve those
-	// slots whenever at least six values are present.
-	if !ok || !array_ok || len(array) < 6 do return
-	for item, i in array[:6] {
-		#partial switch number in item {
-		case json.Integer:
-			if number >= i64(min(i32)) && number <= i64(max(i32)) {
-				destination[i] = i32(number)
-			}
-		case json.Float:
-			destination[i] = i32(number)
-		}
+	if !ok || !array_ok || len(array) < 6 { return }
+	colors := make([]i32, len(array), allocator)
+	for item, i in array {
+		number, number_ok := item.(json.Integer)
+		if !number_ok || number < 0 || number > 0xffffff { return }
+		colors[i] = i32(number)
 	}
+	destination^ = colors
 }
 
-config_apply_class_json :: proc(object: json.Object, class: ^Class_Config, id: int, allocator: mem.Allocator) {
+config_apply_class_json :: proc(object: json.Object, class: ^Class_Config, allocator: mem.Allocator) {
 	if class == nil do return
 	if value, ok := object["name"]; ok {
 		if name, name_ok := value.(json.String); name_ok {
-			// The config arena owns the original class name. JSON names are only
-			// used for matching; retain the stable built-in string here.
-			_ = name
+			class.name = strings.clone(string(name), allocator)
 		}
 	}
 	config_json_i32(object, "icon", &class.icon_index)
@@ -612,7 +602,7 @@ config_apply_class_json :: proc(object: json.Object, class: ^Class_Config, id: i
 	config_json_i32(object, "health_segments", &class.health_segments)
 	config_json_f32(object, "regen", &class.regen)
 	config_json_f32(object, "speed", &class.speed)
-	config_json_colors(object, &class.colors)
+	config_json_colors(object, &class.colors, allocator)
 
 	if value, ok := object["loadout"]; ok {
 		if array, array_ok := value.(json.Array); array_ok {
@@ -653,5 +643,4 @@ config_apply_class_json :: proc(object: json.Object, class: ^Class_Config, id: i
 			class.texts = texts[:text_count]
 		}
 	}
-	_ = id
 }

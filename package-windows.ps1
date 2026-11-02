@@ -45,8 +45,16 @@ try {
         $clientBinary = (Join-Path $stage "krunknative_client.exe")
         $serverBinary = (Join-Path $stage "krunknative_server.exe")
         (Join-Path $root "assets\config\game.toml") = (Join-Path $stage "assets\config\game.toml")
-        (Join-Path $root "assets\models\weapons\weapon_15.obj") = (Join-Path $stage "assets\models\weapons\weapon_15.obj")
-        (Join-Path $root "assets\textures\weapons\weapon_15.png") = (Join-Path $stage "assets\textures\weapons\weapon_15.png")
+    }
+
+    # Replace every supported default weapon from the installed modern pack;
+    # the archive seed may contain an older generation of these same filenames.
+    $weaponAssets = Get-Content -LiteralPath (Join-Path $root "assets\config\weapon-assets.txt")
+    foreach ($asset in $weaponAssets) {
+        $asset = $asset.Trim()
+        if (-not $asset -or $asset.StartsWith("#")) { continue }
+        $relative = Join-Path "assets" $asset
+        $copies[(Join-Path $root $relative)] = Join-Path $stage $relative
     }
 
     foreach ($source in $copies.Keys) {

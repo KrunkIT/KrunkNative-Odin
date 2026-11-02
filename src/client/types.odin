@@ -129,6 +129,7 @@ Player_Arms :: struct {
 	right:  ^Player_Arm_Mesh,
 	weapon_left:  ^Mesh,
 	weapon_right: ^Mesh,
+	attachment:   ^Mesh,
 }
 
 Player_Mesh :: struct {

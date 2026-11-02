@@ -14,6 +14,11 @@ under the SIL Open Font License in `css/fonts/Rajdhani-OFL.txt`.
 > The client has been checked against the current `mod.zip` used by the latest
 > Krunker build. Older packs may omit models or textures referenced by v3 maps.
 
+Weapon rigs use the current browser model scales, grips and sight mounts.
+The AK, SMG, LMG, Semi Auto, Famas and Blaster include their reflex sights.
+Both release packagers refresh all supported weapons from the unpacked pack,
+including textures and HUD icons, using `config/weapon-assets.txt`.
+
 > [!CAUTION]
 > Do not delete the pre-existing assets (files that are already in this folder).
 
