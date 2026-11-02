@@ -4,9 +4,9 @@ import "core:encoding/endian"
 
 PACKET_MAGIC :: 0x4B52554E // 'KRUN'
 PACKET_HEADER_SIZE :: 7
-PROTOCOL_VERSION :: 6
-PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 85
-PACKET_BULLET_IMPACT_PAYLOAD_SIZE :: 37
+PROTOCOL_VERSION :: 7
+PACKET_PLAYER_STATE_PAYLOAD_SIZE :: 93
+PACKET_BULLET_IMPACT_PAYLOAD_SIZE :: 49
 MAX_PLAYERS_PER_MATCH :: 32
 // The server broadcasts one snapshot per N simulation ticks.
 SNAPSHOT_RATE_DIVISOR :: 2
@@ -143,6 +143,8 @@ Packet_Player_State :: struct {
 	active_ammo: u32,
 	shot_seq:   u32,
 	ack_seq:   i32,
+	spread_plus: f32,
+	projectile_shot_seq: u32,
 }
 
 packet_serialize_disconnect :: proc(buf: []byte) -> int {
@@ -352,6 +354,10 @@ packet_serialize_state :: proc(buf: []byte, state: ^Packet_Player_State) -> int 
 	offset += 4
 	endian.put_i32(buf[offset:offset + 4], .Little, state.ack_seq)
 	offset += 4
+	endian.put_f32(buf[offset:offset + 4], .Little, state.spread_plus)
+	offset += 4
+	endian.put_u32(buf[offset:offset + 4], .Little, state.projectile_shot_seq)
+	offset += 4
 
 	return offset
 }
@@ -428,6 +434,10 @@ packet_deserialize_state :: proc(buf: []byte) -> (state: Packet_Player_State, ok
 	state.shot_seq, _ = endian.get_u32(buf[offset:offset + 4], .Little)
 	offset += 4
 	state.ack_seq, _ = endian.get_i32(buf[offset:offset + 4], .Little)
+	offset += 4
+	state.spread_plus, _ = endian.get_f32(buf[offset:offset + 4], .Little)
+	offset += 4
+	state.projectile_shot_seq, _ = endian.get_u32(buf[offset:offset + 4], .Little)
 
 	return state, true
 }
@@ -455,7 +465,10 @@ packet_serialize_bullet_impact :: proc(buf: []byte, impact: ^Bullet_Impact) -> i
 	endian.put_f32(buf[offset + 4:offset + 8], .Little, impact.normal.y)
 	endian.put_f32(buf[offset + 8:offset + 12], .Little, impact.normal.z)
 	offset += 12
-	buf[offset] = impact.hit ? 1 : 0
+	buf[offset] = u8(impact.kind)
+	endian.put_u32(buf[offset + 1:offset + 5], .Little, transmute(u32)impact.shooter_uid)
+	endian.put_u32(buf[offset + 5:offset + 9], .Little, transmute(u32)impact.weapon_id)
+	endian.put_u32(buf[offset + 9:offset + 13], .Little, transmute(u32)impact.object_index)
 
 	return PACKET_HEADER_SIZE + payload_size
 }
@@ -482,7 +495,22 @@ packet_deserialize_bullet_impact :: proc(buf: []byte) -> (impact: Bullet_Impact,
 	impact.normal.y, _ = endian.get_f32(buf[offset + 4:offset + 8], .Little)
 	impact.normal.z, _ = endian.get_f32(buf[offset + 8:offset + 12], .Little)
 	offset += 12
-	impact.hit = buf[offset] != 0
+	if buf[offset] > u8(Bullet_Hit_Kind.Player) { return {}, false }
+	impact.kind = Bullet_Hit_Kind(buf[offset])
+	impact.hit = impact.kind != .Miss
+	shooter, _ := endian.get_u32(buf[offset + 1:offset + 5], .Little)
+	weapon, _ := endian.get_u32(buf[offset + 5:offset + 9], .Little)
+	object, _ := endian.get_u32(buf[offset + 9:offset + 13], .Little)
+	impact.shooter_uid = transmute(i32)shooter
+	impact.weapon_id = transmute(i32)weapon
+	impact.object_index = transmute(i32)object
+	if impact.weapon_id < 0 || int(impact.weapon_id) >= len(WEAPONS_LIST) || WEAPONS_LIST[impact.weapon_id] == nil ||
+	   impact.shooter_uid < 0 || (impact.kind == .World ? impact.object_index < 0 : impact.object_index != -1) {
+		return {}, false
+	}
+	for vector in ([3]Vec3{impact.origin, impact.position, impact.normal}) {
+		for value in vector { if !(value >= -1e8 && value <= 1e8) { return {}, false } }
+	}
 
 	return impact, true
 }

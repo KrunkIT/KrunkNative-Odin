@@ -12,6 +12,7 @@ uniform bool use_face_tex_scaling;
 uniform int face_mask;
 uniform float texture_scale;
 uniform bool unlit;
+uniform bool no_fog;
 uniform float world_uv_scale;
 uniform vec3 face_scale;
 
@@ -93,6 +94,6 @@ void main() {
     // strength flag before they can be added without brightening every mesh.
     vec3 lit_rgb = frag_color.rgb * (unlit ? vec3(1.0) : lighting);
     float fog_span = max(0.001, uFogFar - uFogNear);
-    float fog_amount = clamp((length(world_pos - uCameraPosition) - uFogNear) / fog_span, 0.0, 1.0);
+    float fog_amount = no_fog ? 0.0 : clamp((length(world_pos - uCameraPosition) - uFogNear) / fog_span, 0.0, 1.0);
     frag_color = vec4(mix(lit_rgb, uFogColor, fog_amount), frag_color.a);
 }

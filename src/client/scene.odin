@@ -242,6 +242,38 @@ scene_draw_mesh :: proc(mesh: ^Mesh, camera: ^Camera) {
 	gl.DrawElements(gl.TRIANGLES, mesh.geometry.index_count, gl.UNSIGNED_INT, nil)
 }
 
+// Stable merge sort keeps equal-depth effects in scene order and bounds the
+// cost when camera turns reverse the order of many transparent surfaces.
+// Scratch storage is reused across frames; there are no per-frame allocations
+// once the scene's largest transparent set has been seen.
+scene_sort_transparent :: proc(scene: ^Scene) {
+	count := len(scene.transparent_meshes)
+	if count < 2 { return }
+	resize(&scene.transparent_sort_scratch, count)
+	source := scene.transparent_meshes[:]
+	destination := scene.transparent_sort_scratch[:]
+	for width := 1; width < count; width *= 2 {
+		for start := 0; start < count; start += width * 2 {
+			middle := min(start + width, count)
+			end := min(start + width * 2, count)
+			left, right := start, middle
+			for output in start..<end {
+				if left < middle && (right >= end || source[left].camera_space_matrix[2, 3] <= source[right].camera_space_matrix[2, 3]) {
+					destination[output] = source[left]
+					left += 1
+				} else {
+					destination[output] = source[right]
+					right += 1
+				}
+			}
+		}
+		source, destination = destination, source
+	}
+	if raw_data(source) != raw_data(scene.transparent_meshes) {
+		copy(scene.transparent_meshes[:], source)
+	}
+}
+
 scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32) {
 	aspect := viewport_h > 0 ? viewport_w / viewport_h : (16.0 / 9.0)
 
@@ -279,17 +311,8 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 	// Draw sorted transparent meshes
 	trans_count := len(scene.transparent_meshes)
 	if trans_count > 0 {
-		// Sort transparent meshes back-to-front (largest camera-space depth first)
-		for i in 1 ..< trans_count {
-			key := scene.transparent_meshes[i]
-			key_depth := key.camera_space_matrix[2, 3]
-			j := i - 1
-			for j >= 0 && scene.transparent_meshes[j].camera_space_matrix[2, 3] > key_depth {
-				scene.transparent_meshes[j + 1] = scene.transparent_meshes[j]
-				j -= 1
-			}
-			scene.transparent_meshes[j + 1] = key
-		}
+		// Visible points have negative camera Z: most negative draws first.
+		scene_sort_transparent(scene)
 
 		for i in 0 ..< trans_count {
 			scene_draw_mesh(scene.transparent_meshes[i], camera)
@@ -303,6 +326,6 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 scene_fini :: proc(scene: ^Scene) {
 	delete(scene.meshes)
 	delete(scene.transparent_meshes)
-	delete(scene.sort_indices)
+	delete(scene.transparent_sort_scratch)
 	free(scene)
 }

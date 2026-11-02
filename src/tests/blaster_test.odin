@@ -30,8 +30,10 @@ test_trooper_blaster :: proc() -> bool {
 	shooter.position = {0, 0, 0}
 	shooter.direction = {0, -math.PI / 2}
 	shooter.swap_timer = 0
+	// Aim the collision fixture so hip-fire accuracy does not miss the target.
+	shooter.aim_val = 1
 	target.position = {100, 0, 0}
-	input := shared.Input{delta = 0.001, move_dir = -1, y_dir = shooter.direction.y, shoot = true}
+	input := shared.Input{delta = 0.001, move_dir = -1, y_dir = shooter.direction.y, shoot = true, scope = true}
 	shared.player_proc_input(shooter, &input, false, false)
 	if shooter.ammo[0] != 15 || shooter.shot_seq != 1 || len(game.projectiles) != 1 || len(game.impacts) != 0 || target.health != 100 {
 		fmt.eprintln("Blaster must emit a bolt instead of instant hitscan damage")

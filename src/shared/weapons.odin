@@ -1,6 +1,7 @@
 package shared
 
 WEAPON_AWP := Weapon {
+	move_spread = 1,
 	name          = "Sniper Rifle",
 	secondary     = false,
 	no_auto       = true,
@@ -47,6 +48,7 @@ WEAPON_AWP := Weapon {
 }
 
 WEAPON_AK47 := Weapon {
+	move_spread = 1,
 	name                = "Assault Rifle",
 	secondary           = false,
 	ammo                = 30,
@@ -101,6 +103,7 @@ WEAPON_AK47 := Weapon {
 }
 
 WEAPON_FAMAS := Weapon {
+	move_spread = 1,
 	name                = "Famas",
 	secondary           = false,
 	no_auto             = true,
@@ -156,6 +159,7 @@ WEAPON_FAMAS := Weapon {
 }
 
 WEAPON_PISTOL := Weapon {
+	move_spread = 1,
 	name            = "Pistol",
 	secondary       = true,
 	no_auto         = true,
@@ -201,6 +205,7 @@ WEAPON_PISTOL := Weapon {
 }
 
 WEAPON_SMG := Weapon {
+	move_spread = 1,
 	name        = "Submachine Gun",
 	secondary   = false,
 	ammo        = 34,
@@ -249,6 +254,7 @@ WEAPON_SMG := Weapon {
 }
 
 WEAPON_REVOLVER := Weapon {
+	move_spread = 1,
 	name        = "Revolver",
 	secondary   = false,
 	no_auto     = true,
@@ -296,6 +302,7 @@ WEAPON_REVOLVER := Weapon {
 }
 
 WEAPON_SHOTGUN := Weapon {
+	move_spread = 1,
 	name        = "Shotgun",
 	secondary   = false,
 	no_auto     = true,
@@ -356,6 +363,7 @@ WEAPON_SHOTGUN := Weapon {
 }
 
 WEAPON_LMG := Weapon {
+	move_spread = 1,
 	name        = "Machine Gun",
 	secondary   = false,
 	ammo        = 60,
@@ -408,6 +416,7 @@ WEAPON_LMG := Weapon {
 }
 
 WEAPON_SEMI_AUTO := Weapon {
+	move_spread = 1,
 	name        = "Semi Auto",
 	secondary   = false,
 	no_auto     = true,
@@ -458,6 +467,7 @@ WEAPON_SEMI_AUTO := Weapon {
 }
 
 WEAPON_RPG := Weapon {
+	move_spread = 1,
 	name        = "Rocket Launcher",
 	secondary   = false,
 	no_auto     = true,
@@ -518,6 +528,7 @@ WEAPON_AKIMBO := Weapon {
 	rate        = 0.07,
 	spread      = 40.0,
 	min_spread  = 10.0,
+	move_spread = 0.01,
 	recoil      = 0.0034,
 	view_kick = {0.01, 0, 0, 0},
 	recover     = 0.978,
@@ -543,6 +554,7 @@ WEAPON_AKIMBO := Weapon {
 }
 
 WEAPON_DEAGLE := Weapon {
+	move_spread = 1,
 	name        = "Desert Eagle",
 	secondary   = true,
 	no_auto     = true,
@@ -587,6 +599,7 @@ WEAPON_DEAGLE := Weapon {
 }
 
 WEAPON_ALIEN_BLASTER := Weapon {
+	move_spread = 1,
 	name        = "Alien Blaster",
 	secondary   = true,
 	no_auto     = true,
@@ -632,6 +645,7 @@ WEAPON_ALIEN_BLASTER := Weapon {
 }
 
 WEAPON_KNIFE := Weapon {
+	move_spread = 1,
 	name          = "Combat Knife",
 	secondary     = false,
 	can_throw     = true,
@@ -660,6 +674,7 @@ WEAPON_KNIFE := Weapon {
 
 // Current browser weapon 18. Timings and recoil use seconds in the native game.
 WEAPON_BLASTER := Weapon {
+	move_spread = 1,
 	name = "Blaster",
 	sound = "weapon_19",
 	projectile = true,

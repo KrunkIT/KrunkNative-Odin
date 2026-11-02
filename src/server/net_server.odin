@@ -295,6 +295,8 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 				active_ammo = active_ammo,
 				shot_seq = player.shot_seq,
 				ack_seq = player.input_seq,
+				spread_plus = player.spread_plus,
+				projectile_shot_seq = player.projectile_shot_seq,
 			}
 			state_size := shared.packet_serialize_state(player_buf[:], &player_state)
 			if state_size > 0 {

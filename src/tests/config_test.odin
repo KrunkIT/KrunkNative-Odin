@@ -491,6 +491,8 @@ test_shot_feedback :: proc() -> bool {
 	impact_ok :=
 		len(game.impacts) == 1 &&
 		game.impacts[0].hit &&
+		game.impacts[0].kind == .World && game.impacts[0].object_index == 0 &&
+		game.impacts[0].weapon_id == player.loadout[player.loadout_index] && game.impacts[0].shooter_uid == player.uid &&
 		game.impacts[0].origin.x == player.position.x &&
 		game.impacts[0].normal == shared.Vec3{-1, 0, 0}
 	if !shot_ok || !recoil_ok || !impact_ok {
@@ -526,8 +528,40 @@ test_shot_feedback :: proc() -> bool {
 		trace_delta := game.impacts[0].position - game.impacts[0].origin
 		miss_distance = math.sqrt(trace_delta.x * trace_delta.x + trace_delta.y * trace_delta.y + trace_delta.z * trace_delta.z)
 	}
-	if len(game.impacts) != 1 || game.impacts[0].hit || miss_distance < player.weapon.range * 0.99 {
+	if len(game.impacts) != 1 || game.impacts[0].hit || game.impacts[0].kind != .Miss || game.impacts[0].object_index != -1 || miss_distance < player.weapon.range * 0.99 {
 		fmt.eprintln("Missed-shot tracer event test failed")
+		return false
+	}
+
+	// A player closer than a wall must clear the wall normal and object ID.
+	clear(&game.impacts)
+	target := shared.player_init(&game)
+	shared.game_players_add(&game, target)
+	shared.player_spawn(target)
+	target.position = {10, 0, 0}
+	player.direction = {0, -math.PI / 2}
+	player.spread = 0
+	player.recoil_anim_y = 0
+	shared.player_shoot(player)
+	if len(game.impacts) != 1 || game.impacts[0].kind != .Player || !game.impacts[0].hit || game.impacts[0].normal != (shared.Vec3{}) || game.impacts[0].object_index != -1 {
+		fmt.eprintln("Player shot must not carry wall decal metadata")
+		return false
+	}
+	clear(&game.impacts)
+	player.weapon = game.weapons[12]
+	shared.player_melee(player)
+	if len(game.impacts) != 0 {
+		fmt.eprintln("Melee must never emit a bullet trail or wall decal")
+		return false
+	}
+	// Physical-power traces apply knockback/damage without an extra bullet.
+	physical_weapon := game.weapons[1]^
+	physical_weapon.physical_power = 1
+	physical_weapon.physical_range = 15
+	player.weapon = &physical_weapon
+	shared.player_shoot(player)
+	if len(game.impacts) != 1 {
+		fmt.eprintln("Physical trace emitted an extra bullet event")
 		return false
 	}
 
@@ -695,13 +729,17 @@ test_objective_combat_state :: proc() -> bool {
 		active_ammo = 5,
 		shot_seq = 17,
 		ack_seq = 42,
+		spread_plus = 123.5,
+		projectile_shot_seq = 23,
 	}
 	player_packet_size := shared.packet_serialize_state(buf[:], &player_state)
 	header_payload_size, _ := endian.get_u16(buf[5:7], .Little)
 	wire_ammo, _ := endian.get_u32(buf[80:84], .Little)
 	wire_shot_seq, _ := endian.get_u32(buf[84:88], .Little)
 	wire_ack, _ := endian.get_i32(buf[88:92], .Little)
-	if player_packet_size != 92 || header_payload_size != shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE || buf[79] != player_state.weapon_id || wire_ammo != player_state.active_ammo || wire_shot_seq != player_state.shot_seq || wire_ack != player_state.ack_seq {
+	wire_spread_plus, _ := endian.get_f32(buf[92:96], .Little)
+	wire_projectile_seq, _ := endian.get_u32(buf[96:100], .Little)
+	if player_packet_size != 100 || header_payload_size != shared.PACKET_PLAYER_STATE_PAYLOAD_SIZE || buf[79] != player_state.weapon_id || wire_ammo != player_state.active_ammo || wire_shot_seq != player_state.shot_seq || wire_ack != player_state.ack_seq || wire_spread_plus != player_state.spread_plus || wire_projectile_seq != player_state.projectile_shot_seq {
 		fmt.eprintln("Player-state fixed wire layout test failed")
 		return false
 	}
@@ -720,6 +758,10 @@ test_objective_combat_state :: proc() -> bool {
 		position = {1.25, -2.5, 3.75},
 		normal = {0, 0, 1},
 		hit = true,
+		kind = .World,
+		object_index = 5,
+		weapon_id = 1,
+		shooter_uid = 7,
 	}
 	impact_packet_size := shared.packet_serialize_bullet_impact(buf[:], &impact)
 	decoded_impact, decoded_impact_ok := shared.packet_deserialize_bullet_impact(buf[:impact_packet_size])
@@ -731,6 +773,12 @@ test_objective_combat_state :: proc() -> bool {
 	}
 	if _, malformed_impact_ok := shared.packet_deserialize_bullet_impact(buf[:impact_packet_size - 1]); malformed_impact_ok {
 		fmt.eprintln("Truncated bullet-impact rejection test failed")
+		return false
+	}
+
+	buf[shared.PACKET_HEADER_SIZE + 36] = 255
+	if _, malformed_ok := shared.packet_deserialize_bullet_impact(buf[:impact_packet_size]); malformed_ok {
+		fmt.eprintln("Invalid bullet-hit kind rejection failed")
 		return false
 	}
 

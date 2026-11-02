@@ -312,6 +312,10 @@ main :: proc() {
 		fmt.eprintln("Trooper Blaster tests failed")
 		os.exit(1)
 	}
+	if !test_weapon_spread() {
+		fmt.eprintln("Weapon spread tests failed")
+		os.exit(1)
+	}
 	if !test_lighting_config() {
 		os.exit(1)
 	}

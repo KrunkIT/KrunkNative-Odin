@@ -260,6 +260,7 @@ Weapon :: struct {
 	sound:                 string,
 	secondary:             bool,
 	no_spread:             bool,
+	no_projectile_spread:  bool,
 	akimbo:                bool,
 	no_aim:                bool,
 	has_attachment:        bool,
@@ -297,6 +298,8 @@ Weapon :: struct {
 	rate:                  f32,
 	spread:                f32,
 	min_spread:            f32,
+	move_spread:           f32,
+	aim_spread:            f32,
 	recoil:                f32,
 	recoil_y:              f32,
 	recoil_r:              f32,
@@ -393,6 +396,8 @@ Player :: struct {
 	height:                          f32,
 	speed:                           f32,
 	spread:                          f32,
+	spread_plus:                     f32,
+	projectile_shot_seq:             u32,
 	crouch_val:                      f32,
 	aim_val:                         f32,
 	aim_time:                        f32,
@@ -508,11 +513,17 @@ Player_Kill_Info :: struct {
 	weapon_id: i32,
 }
 
+Bullet_Hit_Kind :: enum u8 { Miss, World, Player }
+
 Bullet_Impact :: struct {
 	origin:   Vec3,
 	position: Vec3,
 	normal:   Vec3,
 	hit:      bool,
+	kind: Bullet_Hit_Kind,
+	object_index: i32,
+	weapon_id: i32,
+	shooter_uid: i32,
 }
 
 Projectile :: struct {

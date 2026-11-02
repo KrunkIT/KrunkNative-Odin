@@ -77,6 +77,7 @@ Client :: struct {
 	me:   ^shared.Player,
 	impact_markers: [dynamic]Impact_Marker,
 	tracer_markers: [dynamic]Tracer_Marker,
+	bullet_trails: [dynamic]Bullet_Trail,
 	projectile_meshes: [dynamic]^Mesh,
 	show_fps:       bool,
 	fps_value:      u32,
@@ -360,6 +361,8 @@ client_apply_movement_state :: proc(player: ^shared.Player, state: ^shared.Packe
 	player.on_wall = state.on_wall
 	player.crouch_val = state.crouch_val
 	player.aim_val = state.aim_val
+	player.spread_plus = state.spread_plus
+	shared.player_update_spread(player, 0, 0, 0)
 	player.slide_timer = state.slide_timer
 	player.jump_timer = state.jump_timer
 	shared.player_update_height(player)
@@ -561,6 +564,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		fmt.eprintf("[Net Client] Rejected weapon %d outside player %d loadout\n", state.weapon_id, state.player_id)
 		return
 	}
+	shared.player_update_spread(player, 0, 0, 0)
 	new_shots: u32
 	if was_active && state.active && state.shot_seq > previous_shot_seq {
 		// Cap a pathological jump while still preserving the authoritative
@@ -568,7 +572,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		new_shots = min(state.shot_seq - previous_shot_seq, u32(16))
 	}
 	player.shot_seq = state.shot_seq
-	for _ in 0 ..< int(new_shots) {
+	for shot_index in 0 ..< int(new_shots) {
 		if player.weapon.melee {
 			is_throw := player.can_throw && player.aim_val >= 1 && player.game.config.throwable_melees
 			shared.player_start_melee_animation(player, is_throw ? 3 : player.can_throw ? 1 : 2)
@@ -578,9 +582,15 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		} else {
 			shared.player_apply_recoil(player)
 			shared.player_start_view_kick(player)
-			shared.projectile_spawn(player, player.direction)
+			if player.weapon.projectile && (!player.weapon.projectile_disable || player.game.config.bullet_drop) {
+				remaining := new_shots - u32(shot_index) - 1
+				player.projectile_shot_seq = state.projectile_shot_seq >= remaining ? state.projectile_shot_seq - remaining : 0
+				shared.projectile_spawn(player, shared.player_projectile_angles(player))
+			}
 		}
 	}
+
+	player.projectile_shot_seq = state.projectile_shot_seq
 
 	if state.active && (!was_active || player.mesh == nil) {
 		if player.mesh == nil {
@@ -728,145 +738,20 @@ client_update_objective_visuals :: proc(client: ^Client, now: f32) {
 	}
 }
 
-client_update_impact_billboard :: proc(marker: ^Impact_Marker, camera: ^Camera) {
-	to_camera := camera.position - marker.position
-	distance := math.sqrt(to_camera.x * to_camera.x + to_camera.y * to_camera.y + to_camera.z * to_camera.z)
-	if distance <= 0.0001 {
-		return
-	}
-
-	facing := to_camera / distance
-	depth_offset := clamp(distance * distance * 0.000001, 0.04, 0.5)
-	marker.mesh.transform.position = marker.position + facing * depth_offset
-	marker.mesh.transform.rotation_order = .EXTRINSIC
-	// The shared plane faces +Y, so rotate +Y onto the camera direction.
-	marker.mesh.transform.rotation.x = math.atan2(math.sqrt(facing.x * facing.x + facing.z * facing.z), facing.y)
-	marker.mesh.transform.rotation.y = math.atan2(facing.x, facing.z)
-	marker.mesh.transform.rotation.z = 0
-}
-
-client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
-	direction := impact.position - impact.origin
-	length := math.sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
-	if length <= 0.01 {
-		return
-	}
-	direction /= length
-
-	start_offset := min(1.2, length * 0.15)
-	visible_length := length - start_offset
-	if visible_length <= 0.01 {
-		return
-	}
-
-	fade_time: f32 = 0.08
-
-	material := basic_material_init()
-	if material == nil {
-		return
-	}
-	material.base.transparent = true
-	material.color = shared.Vec4{1.0, 0.78, 0.20, 0.95}
-	material.emissive = shared.Vec4{0.6, 0.4, 0.1, 1.0}
-
-	mesh := mesh_init(create_cube_geo(), &material.base)
-	start_position := impact.origin + direction * start_offset
-	mesh.transform.position = start_position
-	mesh.transform.scale = shared.Vec3{0.045, visible_length, 0.045}
-	mesh.transform.rotation_order = .EXTRINSIC
-	mesh.transform.rotation.x = math.atan2(math.sqrt(direction.x * direction.x + direction.z * direction.z), direction.y)
-	mesh.transform.rotation.y = math.atan2(direction.x, direction.z)
-	mesh.transform.rotation.z = 0
-
-	if len(client.tracer_markers) >= 256 {
-		oldest := client.tracer_markers[0]
-		scene_remove_mesh(client.scene, oldest.mesh)
-		mesh_fini(oldest.mesh)
-		ordered_remove(&client.tracer_markers, 0)
-	}
-
-	scene_add_mesh(client.scene, mesh)
-	append(&client.tracer_markers, Tracer_Marker{
-		mesh = mesh,
-		direction = direction,
-		start_position = start_position,
-		travel_distance = visible_length,
-		distance = visible_length,
-		segment_length = visible_length,
-		speed = 0,
-		lifetime = fade_time,
-		total_lifetime = fade_time,
-		fade_lifetime = fade_time,
-	})
-}
-
 client_tick_impacts :: proc(client: ^Client, delta: f32) {
 	for &impact in client.game.impacts {
 		client_add_tracer(client, &impact)
-		if !impact.hit {
-			continue
-		}
-
-		material := basic_material_init()
-		if material == nil {
-			continue
-		}
-
-		material.base.transparent = true
-		material.color = shared.Vec4{1.0, 1.0, 1.0, 1.0}
-		material.texture = impact_texture_get()
-
-		mesh := mesh_init(create_plane_geo(), &material.base)
-		mesh.transform.position = impact.position
-		mesh.transform.scale = shared.Vec3{0.32, 0.01, 0.32}
-
-		scene_add_mesh(client.scene, mesh)
-		append(&client.impact_markers, Impact_Marker{
-			mesh = mesh,
-			position = impact.position,
-			lifetime = 8.0,
-		})
+		client_add_bullet_hole(client, &impact)
 	}
 	clear(&client.game.impacts)
-
-	for i := len(client.impact_markers) - 1; i >= 0; i -= 1 {
-		marker := &client.impact_markers[i]
-		client_update_impact_billboard(marker, &client.camera)
-		marker.lifetime -= delta
-
-		if marker.lifetime <= 0 {
-			scene_remove_mesh(client.scene, marker.mesh)
-			mesh_fini(marker.mesh)
-			unordered_remove(&client.impact_markers, i)
-		}
-	}
-
-	for i := len(client.tracer_markers) - 1; i >= 0; i -= 1 {
-		tracer := &client.tracer_markers[i]
-		tracer.lifetime -= delta
-		material := cast(^Basic_Material)tracer.mesh.material
-		material.color.w = clamp(tracer.lifetime / tracer.fade_lifetime, 0.0, 1.0) * 0.95
-
-		if tracer.lifetime <= 0 {
-			scene_remove_mesh(client.scene, tracer.mesh)
-			mesh_fini(tracer.mesh)
-			unordered_remove(&client.tracer_markers, i)
-		}
-	}
+	client_tick_bullet_holes(client, delta)
+	client_tick_tracers(client, delta)
 }
 
 client_clear_impacts :: proc(client: ^Client) {
 	client_clear_projectiles(client)
-	for marker in client.impact_markers {
-		scene_remove_mesh(client.scene, marker.mesh)
-		mesh_fini(marker.mesh)
-	}
-	delete(client.impact_markers)
-	for tracer in client.tracer_markers {
-		scene_remove_mesh(client.scene, tracer.mesh)
-		mesh_fini(tracer.mesh)
-	}
-	delete(client.tracer_markers)
+	client_clear_bullet_holes(client)
+	client_clear_tracers(client)
 	clear(&client.game.impacts)
 }
 
@@ -1030,6 +915,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 		mouse_delta.x = f32(x) - client.mouse_state.last_pos.x
 		mouse_delta.y = f32(y) - client.mouse_state.last_pos.y
+		mouse_delta = client_mouse_delta(mouse_delta)
 
 		input.move_dir = -1
 		input.delta = delta
@@ -1243,6 +1129,10 @@ main :: proc() {
 	if bool(glfw.RawMouseMotionSupported()) {
 		glfw.SetInputMode(client.window, glfw.RAW_MOUSE_MOTION, 1)
 	}
+	if client_mouse_init(client.window) {
+		fmt.println("[Input] Buffered Windows raw mouse enabled")
+	}
+	defer client_mouse_fini()
 
 	gl.load_up_to(4, 5, glfw.gl_set_proc_address)
 
@@ -1312,7 +1202,7 @@ main :: proc() {
 
 		client_tick(client, now, delta)
 		glfw.SwapBuffers(client.window)
-		glfw.PollEvents()
+		client_poll_events()
 		free_all(context.temp_allocator)
 	}
 

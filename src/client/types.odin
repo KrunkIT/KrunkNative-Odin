@@ -73,6 +73,7 @@ Basic_Material :: struct {
 	face_mask: u32,
 	texture_scale: f32,
 	unlit: bool,
+	no_fog: bool,
 	color: shared.Vec4,
 	emissive: shared.Vec4,
 	alpha_test: f32,
@@ -147,7 +148,7 @@ Scene :: struct {
 	mesh_count:         i32,
 	meshes:             [dynamic]^Mesh,
 	transparent_meshes: [dynamic]^Mesh,
-	sort_indices:       [dynamic]int,
+	transparent_sort_scratch: [dynamic]^Mesh,
 }
 
 Camera :: struct {
@@ -180,6 +181,7 @@ Glyph_Cache_Entry :: struct {
 }
 
 Impact_Marker :: struct {
+	object_index: i32,
 	mesh:     ^Mesh,
 	position: shared.Vec3,
 	lifetime: f32,

@@ -23,6 +23,7 @@ Shader_Uniforms :: struct {
 	face_mask:            i32,
 	texture_scale:        i32,
 	unlit:                i32,
+	no_fog:               i32,
 	world_uv_scale:       i32,
 	face_scale:           i32,
 	color:                i32,
@@ -66,6 +67,7 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.face_mask = gl.GetUniformLocation(program, "face_mask")
 	u.texture_scale = gl.GetUniformLocation(program, "texture_scale")
 	u.unlit = gl.GetUniformLocation(program, "unlit")
+	u.no_fog = gl.GetUniformLocation(program, "no_fog")
 	u.world_uv_scale = gl.GetUniformLocation(program, "world_uv_scale")
 	u.face_scale = gl.GetUniformLocation(program, "face_scale")
 	u.color = gl.GetUniformLocation(program, "color")
@@ -113,6 +115,7 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform1i(u_basic.face_mask, i32(material.face_mask))
 	gl.Uniform1f(u_basic.texture_scale, material.texture_scale)
 	gl.Uniform1i(u_basic.unlit, i32(material.unlit))
+	gl.Uniform1i(u_basic.no_fog, i32(material.no_fog))
 	gl.Uniform1f(world_uv_scale, shared.GAME_CONSTANTS.world_uv_scale)
 	gl.Uniform3f(face_scale, material.face_scale.x, material.face_scale.y, material.face_scale.z)
 

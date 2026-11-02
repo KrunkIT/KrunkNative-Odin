@@ -741,6 +741,13 @@ resource_cache_fini :: proc() {
 	delete(g_texture_cache)
 	delete(g_texture_by_id)
 	delete(g_geometry_cache)
+	g_texture_cache = nil
+	g_texture_by_id = nil
+	g_geometry_cache = nil
+	// Contexts can be destroyed and recreated by renderer tests. Cached GL
+	// bindings from the old context must never suppress binds in the new one.
+	g_active_texture = 0
+	g_active_shader = 0
 
 	if g_cube_geometry != nil {
 		geometry_destroy(g_cube_geometry)

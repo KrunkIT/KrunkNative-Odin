@@ -422,6 +422,7 @@ config_apply_weapon :: proc(
 
 	config_apply_bool(table, "secondary", "weapon", id, &weapon.secondary)
 	config_apply_bool(table, "no_spread", "weapon", id, &weapon.no_spread)
+	config_apply_bool(table, "no_projectile_spread", "weapon", id, &weapon.no_projectile_spread)
 	config_apply_bool(table, "akimbo", "weapon", id, &weapon.akimbo)
 	config_apply_bool(table, "no_aim", "weapon", id, &weapon.no_aim)
 	config_apply_bool(table, "no_auto", "weapon", id, &weapon.no_auto)
@@ -461,6 +462,8 @@ config_apply_weapon :: proc(
 	config_apply_f32(table, "rate", "weapon", id, &weapon.rate)
 	config_apply_f32(table, "spread", "weapon", id, &weapon.spread)
 	config_apply_f32(table, "min_spread", "weapon", id, &weapon.min_spread)
+	config_apply_f32(table, "move_spread", "weapon", id, &weapon.move_spread)
+	config_apply_f32(table, "aim_spread", "weapon", id, &weapon.aim_spread)
 	config_apply_f32(table, "recoil", "weapon", id, &weapon.recoil)
 	config_apply_f32(table, "recoil_y", "weapon", id, &weapon.recoil_y)
 	config_apply_f32(table, "recoil_r", "weapon", id, &weapon.recoil_r)

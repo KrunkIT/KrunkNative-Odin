@@ -110,6 +110,8 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 	player.velocity = Vec3{0, 0, 0}
 	player.crouch_val = 0.0
 	player.aim_val = 0.0
+	player.spread_plus = 0
+	player.projectile_shot_seq = 0
 	player.recoil = {}
 	player.recoil_force = 0.0
 	player.recoil_anim = 0.0
@@ -143,6 +145,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 
 	player_update_height(player)
 	player_swap_weapon(player, 0, true, false, false)
+	player_update_spread(player, 0, 0, 0)
 
 	if player.game != nil && player.game.map_inst != nil && len(player.game.map_inst.spawns) > 0 {
 		eligible: [dynamic]^Spawn
@@ -1005,6 +1008,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 	delta_pos2D := math.sqrt((player.position.x - player.last_position.x) * (player.position.x - player.last_position.x) + (player.position.z - player.last_position.z) * (player.position.z - player.last_position.z))
 	player.covered_distance += delta_pos2D
+	player_update_spread(player, delta_pos2D, player.position.y - player.last_position.y, delta)
 	if (!recon || predict_effects) && player.game.map_inst.config.model != .SPRITE {
 		// Cadence follows actual displacement, including slopes and ladders.
 		delta_y := player.position.y - player.last_position.y
@@ -1137,7 +1141,6 @@ player_melee :: proc(player: ^Player) {
 		}
 
 		nearest_t: f32 = 2.0
-		nearest_normal := Vec3{}
 		nearest_player: ^Player
 
 		if player.game != nil && player.game.map_inst != nil {
@@ -1145,10 +1148,9 @@ player_melee :: proc(player: ^Player) {
 				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
 					continue
 				}
-				t, normal, hit := ray_box_hit(shot_origin, shot_dir, object.position, object.scale)
+				t, _, hit := ray_box_hit(shot_origin, shot_dir, object.position, object.scale)
 				if hit && t < nearest_t {
 					nearest_t = t
-					nearest_normal = normal
 				}
 			}
 
@@ -1187,21 +1189,6 @@ player_melee :: proc(player: ^Player) {
 			damage := player.weapon.damage > 0 ? player.weapon.damage : 50.0
 			player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], false)
 		}
-
-		trace_hit := nearest_t <= 1.0
-		impact := Bullet_Impact{
-			origin   = shot_origin,
-			position = shot_origin + shot_dir * (trace_hit ? nearest_t : 1.0),
-			normal   = nearest_normal,
-			hit      = trace_hit,
-		}
-
-		if player.game != nil {
-			if len(player.game.impacts) >= 256 {
-				ordered_remove(&player.game.impacts, 0)
-			}
-			append(&player.game.impacts, impact)
-		}
 	}
 }
 
@@ -1231,11 +1218,8 @@ player_shoot :: proc(player: ^Player) {
 	shot_angles := Vec2{0, 0}
 
 	if is_projectile {
-		projectile_spread: f32 = 0.0
-		spread := (player.spread + player.weapon.inaccuracy) * GAME_CONSTANTS.spread_adjustment * projectile_spread
-
-		shot_angles.x = player.direction.x + player.recoil_anim_y * GAME_CONSTANTS.recoil_mlt + spread
-		shot_angles.y = player.direction.y + spread
+		player.projectile_shot_seq += 1
+		shot_angles = player_projectile_angles(player)
 		projectile_spawn(player, shot_angles)
 	}
 
@@ -1244,26 +1228,7 @@ player_shoot :: proc(player: ^Player) {
 
 		start: i32 = player.weapon.physical_power != 0 ? -1 : 0
 		for i := start; i < i32(shots); i += 1 {
-			if player.weapon.custom_spread != nil && i >= 0 {
-				offset := player.ammo[player.loadout_index] * player.weapon.shots
-
-				spread := player.weapon.custom_spread[offset + u32(i)]
-				spread_mlt := rand.float32() * 0.02 + 0.3
-
-				shot_angles.x = player.direction.x + spread.y * spread_mlt
-				shot_angles.y = player.direction.y + spread.x * spread_mlt
-			} else {
-				spread_range := i >= 0 ? (player.spread + player.weapon.inaccuracy) * GAME_CONSTANTS.spread_adjustment : 0.0
-				spread := Vec2{
-					(rand.float32() - 0.5) * 2.0 * spread_range,
-					(rand.float32() - 0.5) * 2.0 * spread_range,
-				}
-
-				shot_angles.x = player.direction.x + spread.x
-				shot_angles.y = player.direction.y + spread.y
-			}
-
-			shot_angles.x += player.recoil_anim_y * GAME_CONSTANTS.recoil_mlt
+			shot_angles = player_hitscan_angles(player, i)
 
 			range := i < 0 ? player.weapon.physical_range : player.weapon.range
 
@@ -1276,10 +1241,11 @@ player_shoot :: proc(player: ^Player) {
 
 			nearest_t: f32 = 2.0
 			nearest_normal := Vec3{}
+			nearest_object_index: i32 = -1
 			nearest_player: ^Player
 			headshot := false
 
-			for object in player.game.map_inst.objects {
+			for object, object_index in player.game.map_inst.objects {
 				if !object.active || object.collision_type == .NONE || object.score_zone || object.objective || object.team_zone || object.bomb_site || object.flag || object.trigger || object.premium || object.verified || object.teleporter || object.checkpoint || object.pickup {
 					continue
 				}
@@ -1287,6 +1253,7 @@ player_shoot :: proc(player: ^Player) {
 				if hit && t < nearest_t {
 					nearest_t = t
 					nearest_normal = normal
+					nearest_object_index = i32(object_index)
 				}
 			}
 
@@ -1317,6 +1284,8 @@ player_shoot :: proc(player: ^Player) {
 				if hit_t < nearest_t {
 					nearest_t = hit_t
 					nearest_player = target
+					nearest_normal = {}
+					nearest_object_index = -1
 					headshot = is_head
 				}
 			}
@@ -1334,16 +1303,21 @@ player_shoot :: proc(player: ^Player) {
 				player_apply_damage(nearest_player, player, damage, player.loadout[player.loadout_index], headshot)
 			}
 
+			// The physical-power pass applies damage without a bullet effect.
+			if i < 0 { continue }
 			trace_hit := nearest_t <= 1.0
 			impact := Bullet_Impact{
 				origin   = shot_origin,
 				position = shot_origin + shot_dir * (trace_hit ? nearest_t : 1.0),
 				normal   = nearest_normal,
 				hit      = trace_hit,
+				kind = !trace_hit ? .Miss : nearest_player != nil ? .Player : .World,
+				object_index = nearest_object_index,
+				weapon_id = player.loadout[player.loadout_index],
+				shooter_uid = player.uid,
 			}
 
-			// Every hitscan shot emits a bounded event. Clients use the full path
-			// for tracers and only render an impact decal when hit is true.
+			// Every bullet emits a bounded path event with its hit surface.
 			if len(player.game.impacts) >= 256 {
 				ordered_remove(&player.game.impacts, 0)
 			}
