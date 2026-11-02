@@ -12,6 +12,8 @@ assets/css/fonts/*
 !assets/css/fonts/Rajdhani-OFL.txt
 !assets/models/custom/
 !assets/textures/custom/
+!assets/textures/objective_4.png
+!assets/textures/objective_5.png
 !assets/models/custom/2412.obj
 !assets/textures/custom/2412.png
 !assets/models/custom/158.obj

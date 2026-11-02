@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:net"
+import "core:strings"
 import shared "../shared"
 
 Net_Client_State :: struct {
@@ -10,6 +11,8 @@ Net_Client_State :: struct {
 	recv_buffer: [4096]byte,
 	recv_len: int,
 	match_state_received: bool,
+	lobby_received: bool,
+	lobby: shared.Lobby_State,
 	send_queue: shared.Net_Send_Queue,
 }
 
@@ -128,6 +131,19 @@ net_client_poll :: proc(client: ^Client) {
 			}
 			packet := nc.recv_buffer[:packet_size]
 			#partial switch header.packet_type {
+			case .LOBBY_STATE:
+				if lobby, valid := shared.packet_deserialize_lobby(packet); valid {
+					for name in nc.lobby.team_names { delete(name) }
+					nc.lobby = lobby
+					for &name in nc.lobby.team_names { name = strings.clone(name) }
+					nc.lobby_received = true
+					client.lobby_team = lobby.team
+					if client.team_pending && lobby.team_result != 0 {
+						client.team_pending = false
+						client.requested_team = lobby.team
+						client_selection_status(client, lobby.team_result == 1 ? "Team confirmed by server." : "Team change rejected: team full or selection disabled.")
+					}
+				}
 			case .GAME_STATE:
 				if state, state_ok := shared.packet_deserialize_state(packet); state_ok {
 					client_apply_player_state(client, &state)
@@ -160,7 +176,16 @@ net_client_poll :: proc(client: ^Client) {
 	}
 }
 
+net_client_send_team :: proc(nc: ^Net_Client_State, team: i32) -> bool {
+	buf: [11]byte
+	size := shared.packet_serialize_team_request(buf[:], team)
+	return size > 0 && net_client_send(nc, buf[:size])
+}
+
 net_client_disconnect :: proc(nc: ^Net_Client_State) {
+	for name in nc.lobby.team_names { delete(name) }
+	nc.lobby = {}
+	nc.lobby_received = false
 	if nc.connected {
 		buf: [shared.PACKET_HEADER_SIZE]byte
 		if size := shared.packet_serialize_disconnect(buf[:]); size > 0 {

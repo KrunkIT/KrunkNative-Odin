@@ -113,6 +113,10 @@ when ODIN_TEST {
 		testing.expect(t, !client.game.is_local, "live session must not run offline simulation")
 		testing.expect(t, client.game.config.fixed_movement, "server movement settings must reach the actual prediction game")
 		testing.expect(t, client.me == nil && !client.krunker.spawned, "player position alone must not manufacture a server start")
+		// An explicit entry request and completed bootstrap must precede handoff.
+		client.selected_class = 2
+		client.spawn_pending = true
+		client.krunker.bootstrapped = true
 		client.krunker_world.in_game = true
 		krunker_client_sync_world(&client)
 		if !testing.expect(t, client.me != nil, "server start must attach the local player") do return

@@ -4,10 +4,10 @@ import clay "../third_party/clay"
 
 WHITE :: clay.Color{242, 246, 248, 255}
 MUTED :: clay.Color{155, 170, 182, 255}
-ACCENT :: clay.Color{155, 230, 80, 255}
-PANEL :: clay.Color{16, 22, 29, 240}
-SURFACE :: clay.Color{28, 37, 46, 255}
-SELECTED :: clay.Color{46, 64, 40, 255}
+ACCENT :: clay.Color{236, 239, 244, 255}
+PANEL :: clay.Color{18, 21, 27, 210}
+SURFACE :: clay.Color{34, 38, 46, 240}
+SELECTED :: clay.Color{48, 54, 65, 240}
 
 text :: proc(label: string, size, scale: f32, color: clay.Color = WHITE) {
 	// Rajdhani needs larger type to keep labels comfortable to read.
@@ -29,7 +29,7 @@ button :: proc(state: ^State, label, id_label: string, action: Action, selected:
 		cornerRadius = clay.CornerRadiusAll(5 * state.scale),
 		border = {color = state.focus == id.id ? ACCENT : clay.Color{}, width = clay.BorderOutside(state.focus == id.id ? 1 : 0)},
 	}) {
-		text(label, 17, state.scale, label_color)
+		text(label, 20, state.scale, label_color)
 	}
 }
 

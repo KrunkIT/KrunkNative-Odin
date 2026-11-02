@@ -1,0 +1,270 @@
+package main
+
+import "core:fmt"
+import "core:strings"
+import "core:encoding/json"
+import "core:math"
+import glfw "vendor:glfw"
+import shared "../shared"
+import menuui "../menu"
+import clay "../third_party/clay"
+import kproto "../krunker"
+
+menu_portraits: map[i32]u32
+
+menu_character :: proc "c" (window: glfw.WindowHandle, codepoint: rune) {
+	if g_client == nil || g_client.mouse_state.locked || codepoint < 32 || codepoint >= 127 { return }
+	client := g_client
+	if client.menu_text_length < len(client.menu_text) {
+		client.menu_text[client.menu_text_length] = u8(codepoint)
+		client.menu_text_length += 1
+	}
+}
+
+client_selection_status :: proc(client: ^Client, value: string) {
+	delete(client.selection_status)
+	client.selection_status = strings.clone(value)
+}
+
+client_leave_session :: proc(client: ^Client, reset_map: bool = true) {
+	net_client_disconnect(&client.net)
+	krunker_ws_disconnect(&client.krunker)
+	kproto.krunker_world_reset(&client.krunker_world)
+	client_clear_players(client)
+	client.lobby_team = 0
+	client.requested_team = 0
+	client.team_pending = false
+	client.local_practice = false
+	client.has_life = false
+	client.join_queued = 0
+	client_selection_status(client, "")
+	glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+	client.mouse_state.locked = false
+	if reset_map {
+		client_unload_map(client)
+		shared.game_init(&client.game, 0, -1, true)
+		client_load_current_map(client)
+	}
+}
+
+client_lobby_tick :: proc(client: ^Client) {
+	if client.me != nil && !client.me.active && client.in_game {
+		client.in_game = false
+		client.krunker.spawned = false
+		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+		client.mouse_state.locked = false
+	}
+	if client.krunker.connected {
+		for player in client.krunker_world.lobby_players {
+			if player.id == client.krunker_world.local_connection_uid {
+				client.lobby_team = player.team
+				if client.team_pending && player.team == client.requested_team {
+					client.team_pending = false
+					client_selection_status(client, "Team confirmed by server.")
+				}
+			}
+		}
+		for player in client.krunker_world.players {
+			if player.sid == client.krunker_world.local_sid && len(client.krunker_world.lobby_players) == 0 {
+				client.lobby_team = player.team
+				if client.team_pending && player.team == client.requested_team {
+					client.team_pending = false
+					client_selection_status(client, "Team confirmed by server.")
+				}
+			}
+		}
+	}
+	if client.team_pending && glfw.GetTime() - client.team_request_time > 12 && !client.spawn_pending {
+		client.team_pending = false
+		client.requested_team = client.lobby_team
+		client_selection_status(client, "Team change was not confirmed. Try again.")
+	}
+	if client.spawn_pending && client.krunker.connected && glfw.GetTime() - client.team_request_time > 20 {
+		client.spawn_pending = false
+		client.team_pending = false
+		client_selection_status(client, "Entry was not confirmed. Check your team and try again.")
+	}
+	if !client.net.connected && !client.krunker.connected && !client.game.is_local {
+		client.spawn_pending = false
+		client.team_pending = false
+		client.in_game = false
+		if client.mouse_state.locked {
+			glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+			client.mouse_state.locked = false
+		}
+	}
+}
+
+menu_class_name :: proc(client: ^Client, id: i32) -> string {
+	if id >= 0 && int(id) < len(client.game.classes) { return client.game.classes[id].name }
+	return "Choosing class"
+}
+
+menu_view :: proc(client: ^Client) -> menuui.View {
+	classes := make([]menuui.Class, len(client.game.classes), context.temp_allocator)
+	if menu_portraits == nil { menu_portraits = make(map[i32]u32) }
+	for class, i in client.game.classes {
+		weapon := "Melee"
+		if len(class.loadout) > 0 {
+			id := class.loadout[0]
+			if id >= 0 && int(id) < len(client.game.weapons) && client.game.weapons[id] != nil { weapon = client.game.weapons[id].name }
+		}
+		texture, cached := menu_portraits[class.icon_index]
+		if !cached {
+			path := shared.concat(shared.assets_path(), fmt.tprintf("textures/classes/icon_%d.png", class.icon_index))
+			texture = load_texture(path)
+			delete(path)
+			menu_portraits[class.icon_index] = texture
+		}
+		classes[i] = {id = i32(i), name = class.name, weapon = weapon, available = shared.class_is_in_rotation(i32(i)), portrait = rawptr(uintptr(texture))}
+		if !classes[i].available { classes[i].reason = "Outside this lobby's class rotation" }
+	}
+	players := make([dynamic]menuui.Player, 0, len(client.game.players), context.temp_allocator)
+	confirmed_class: i32 = -1
+	if client.krunker.connected {
+		for player in client.krunker_world.players {
+			is_you := player.sid == client.krunker_world.local_sid
+			if is_you { confirmed_class = player.class_index }
+			append(&players, menuui.Player{name = len(player.name) > 0 ? player.name : fmt.tprintf("Player %d", player.sid), class_name = menu_class_name(client, player.class_index), team = player.team, is_you = is_you})
+		}
+	} else {
+		for player in client.game.players {
+			if player.is_you { confirmed_class = player.class_index }
+			append(&players, menuui.Player{name = player.is_you ? "You" : fmt.tprintf("Player %d", player.uid), class_name = menu_class_name(client, player.class_index), team = player.team, is_you = player.is_you})
+		}
+	}
+	if client.local_practice && client.me == nil && client.lobby_team > 0 {
+		append(&players, menuui.Player{name = "You", class_name = "Choosing class", team = client.lobby_team, is_you = true})
+	}
+	map_name := g_map_name
+	if len(map_name) == 0 { map_name = "Current map" }
+	if client.game.map_inst != nil {
+		if root, ok := client.game.map_inst.raw_data.(json.Object); ok {
+			if name, valid := root["name"].(json.String); valid { map_name = string(name) }
+		}
+	}
+	mode := "Hardpoint"
+	if client.game.mode != nil && !client.game.mode.config.teams { mode = "Free for all" }
+	capacity := int((client.game.config.max_players + 1) / 2)
+	team_names := [2]string{"Alpha", "Bravo"}
+	if client.game.config.team1_name != "Team 1" && len(client.game.config.team1_name) > 0 { team_names[0] = client.game.config.team1_name }
+	if client.game.config.team2_name != "Team 2" && len(client.game.config.team2_name) > 0 { team_names[1] = client.game.config.team2_name }
+	online := client.krunker.connected || client.net.connected
+	team_selection := client.local_practice || client.krunker.connected && client.krunker_world.lobby_select_team
+	if client.krunker.connected {
+		capacity = int((client.krunker_world.lobby_capacity+1)/2)
+		for name, i in client.krunker_world.lobby_team_names { if len(name)>0 { team_names[i]=name } }
+	}
+	if client.net.connected { team_selection = client.net.lobby_received && client.net.lobby.select_team; capacity = int(client.net.lobby.capacity); team_names = client.net.lobby.team_names }
+	view := menuui.View{
+		classes = classes, selected_class = client.selected_class, confirmed_class = confirmed_class,
+		confirmed_team = client.lobby_team, requested_team = client.requested_team, team_pending = client.team_pending,
+		players = players[:], online = online, local_practice = client.local_practice,
+		active = (online || client.local_practice) && client.me != nil && client.me.active, class_pending = client.spawn_pending && confirmed_class != client.selected_class, has_life = client.has_life,
+		spawn_pending = client.spawn_pending, ready = client.krunker.connected ? client.krunker_world.ready && client.krunker.render_map_ready : client.game.ready && (!client.net.connected || client.net.match_state_received),
+		map_name = map_name, mode = mode, lobby_name = online ? (len(client.join_link.game_id) > 0 ? client.join_link.game_id : client.join_link.host) : "Local practice",
+		connecting = client.join_queued > 0, current_invite = client.join_link.raw, join_status = client.join_status, selection_status = client.selection_status,
+		display_mode = i32(client.display_mode), sensitivity = client.sensitivity, show_fps = client.show_fps,
+		resolution = fmt.tprintf("%d x %d", DISPLAY_RESOLUTIONS[client.resolution_index].width, DISPLAY_RESOLUTIONS[client.resolution_index].height),
+		match_status = client.game.move_lock ? "Waiting for match to start" : "Match in progress",
+	}
+	if !online && !client.local_practice { view.ready = false }
+	if team_selection && client.lobby_team == 0 && !(client.team_pending && client.requested_team > 0) { view.play_reason = "Choose a team to enter game" }
+	if client.team_pending && client.requested_team == 0 { view.play_reason = "Leaving team..." }
+	for i in 0..<2 {
+		view.teams[i] = {id = i32(i+1), name = team_names[i], capacity = capacity, available = team_selection, score = client.game.match.team_scores[i+1]}
+		if !team_selection { view.teams[i].reason = "Server assigns teams automatically" }
+	}
+	if client.krunker.connected && len(client.krunker_world.lobby_players) > 0 {
+		view.players = make([]menuui.Player, len(client.krunker_world.lobby_players), context.temp_allocator)
+		for player, i in client.krunker_world.lobby_players {
+			is_you := player.id == client.krunker_world.local_connection_uid
+			if is_you { view.confirmed_class = player.class_index }
+			view.players[i] = {name = len(player.name)>0 ? player.name : (is_you ? "You" : "Player"), class_name = menu_class_name(client, player.class_index), team = player.team, is_you = is_you}
+		}
+	}
+	if client.net.connected && client.net.lobby_received {
+		view.players = make([]menuui.Player, client.net.lobby.count, context.temp_allocator)
+		for record, i in client.net.lobby.players[:client.net.lobby.count] {
+			view.players[i] = {name = record.id == client.net.lobby.local_id ? "You" : fmt.tprintf("Player %d", record.id), class_name = menu_class_name(client, record.class_id), team = record.team, is_you = record.id == client.net.lobby.local_id}
+		}
+	}
+	return view
+}
+
+menu_apply_action :: proc(client: ^Client, action: menuui.Action) {
+	switch action.kind {
+	case .NONE, .EDIT_INVITE, .INSPECT_CLASS:
+	case .PASTE:
+		menuui.set_invite(&client.menu, glfw.GetClipboardString(client.window))
+		client.menu.focus = clay.ID("Invite").id
+	case .JOIN_LINK:
+		if client.join_queued > 0 { return }
+		client.join_queued = 2
+		krunker_ws_set_status(client, "Connecting to lobby...")
+		client.menu.page = .HOME
+	case .COPY_INVITE:
+		value := strings.clone_to_cstring(client.join_link.raw)
+		glfw.SetClipboardString(client.window, value)
+		delete(value)
+		krunker_ws_set_status(client, "Invite copied.")
+	case .LEAVE_SESSION:
+		client_leave_session(client)
+		client.menu.page = .HOME
+		krunker_ws_set_status(client, "Left session.")
+	case .LOCAL_PRACTICE:
+		client_leave_session(client)
+		client.local_practice = true
+	case .PLAY:
+		view := menu_view(client)
+		if len(menuui.play_reason(view)) > 0 { return }
+		if (client.krunker.connected || client.net.connected) && !view.active {
+			client.team_request_time = glfw.GetTime()
+			client_enter_game(client)
+			return
+		}
+		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+		client.mouse_state.locked = true
+		x, y := glfw.GetCursorPos(client.window)
+		client.mouse_state.last_pos = {f32(x), f32(y)}
+	case .SELECT_TEAM:
+		view := menu_view(client)
+		if client.team_pending || action.index < 0 || action.index > 2 { return }
+		team := action.index == 0 ? client.lobby_team : action.index
+		if team <= 0 || !view.teams[team-1].available { return }
+		client.requested_team = action.index
+		client.team_request_time = glfw.GetTime()
+		client_selection_status(client, "")
+		if client.local_practice {
+			client.lobby_team = action.index
+			if client.me != nil {
+				if client.me.mesh != nil { scene_remove_player_mesh(client.fps_scene, cast(^Player_Mesh)client.me.mesh, int(client.me.loadout_size)) }
+				client.me.team = action.index; client.me.active = false; client.in_game = false
+			}
+		} else if client.krunker.connected {
+			client.krunker.team = action.index
+			client.team_pending = true
+			if !krunker_ws_send(&client.krunker, "team") { client.team_pending = false; client_selection_status(client, "Could not send team request.") }
+		} else if client.net.connected {
+			client.team_pending = net_client_send_team(&client.net, action.index)
+		}
+	case .SELECT_CLASS:
+		view := menu_view(client)
+		for class in view.classes {
+			if class.id != action.index { continue }
+			if !class.available || class.limit > 0 && class.used >= class.limit { client_selection_status(client, class.reason); return }
+			client.selected_class = action.index
+			if client.krunker.connected {
+				client.krunker.class_index = action.index
+				if !krunker_ws_send(&client.krunker, "class") { client_selection_status(client, "Could not send class selection.") }
+			}
+		}
+	case .QUIT: glfw.SetWindowShouldClose(client.window, true)
+	case .DISPLAY_MODE: client_set_display_mode(client, Display_Mode(action.index))
+	case .RESOLUTION:
+		client.resolution_index = (client.resolution_index + action.index + i32(len(DISPLAY_RESOLUTIONS))) % i32(len(DISPLAY_RESOLUTIONS))
+		client_apply_display_settings(client)
+	case .SENSITIVITY: client.sensitivity = math.round(action.value * 100) / 100
+	case .FPS: client.show_fps = !client.show_fps
+	}
+}

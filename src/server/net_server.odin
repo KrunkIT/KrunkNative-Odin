@@ -9,6 +9,7 @@ Net_Client :: struct {
 	socket:     net.TCP_Socket,
 	active:     bool,
 	joined:     bool,
+	team_result: u8,
 	player:     ^shared.Player,
 	pending_input: shared.Input,
 	has_pending_input: bool,
@@ -165,6 +166,17 @@ net_server_poll :: proc(ns: ^Net_Server, game: ^shared.Game) {
 							fmt.printf("[Net Server] Client #%d protocol mismatch (client %d, server %d)\n", client.id, version, shared.PROTOCOL_VERSION)
 							client.active = false
 						}
+					case .TEAM_REQUEST:
+						if team, valid := shared.packet_deserialize_team_request(packet); valid {
+							count := 0
+							for other in ns.clients { if other != client && other.active && other.player != nil && other.player.team == team { count += 1 } }
+							allowed := game.config.select_team && (team == 0 || count < int((game.config.max_players+1)/2))
+							client.team_result = allowed ? 1 : 2
+							if allowed {
+								client.player.team = team
+								client.player.active = false
+							}
+						}
 					case .PLAYER_INPUT:
 						if input, input_ok := shared.packet_deserialize_input(packet); input_ok && client.player != nil && client.player.active {
 							pending_swap := client.pending_input.swap
@@ -243,11 +255,6 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 		if !client.active {
 			continue
 		}
-		if !client.joined {
-			if client.initial_match_sent {
-				continue
-			}
-		}
 		// Keep the match frame immutable across recipients. Player snapshots are
 		// recipient-specific (`is_you`) and use a separate serialization buffer.
 		if !net_server_send(client, match_buf[:match_size]) {
@@ -255,6 +262,16 @@ net_server_broadcast_match :: proc(ns: ^Net_Server, game: ^shared.Game) {
 			continue
 		}
 		client.initial_match_sent = true
+		lobby := shared.Lobby_State{local_id = client.id, team = client.player.team, capacity = (game.config.max_players+1)/2, select_team = game.config.select_team, team_result = client.team_result, team_names = {game.config.team1_name, game.config.team2_name}}
+		for other in ns.clients {
+			if !other.active || other.player == nil || lobby.count >= shared.MAX_PLAYERS_PER_MATCH { continue }
+			lobby.players[lobby.count] = {id = other.id, team = other.player.team, class_id = other.joined ? other.player.class_index : -1}
+			lobby.count += 1
+		}
+		lobby_buf: [512]byte
+		lobby_size := shared.packet_serialize_lobby(lobby_buf[:], &lobby)
+		if !net_server_send(client, lobby_buf[:lobby_size]) { client.active = false; continue }
+		client.team_result = 0
 		if !client.joined {
 			continue
 		}

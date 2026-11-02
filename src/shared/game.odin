@@ -134,12 +134,13 @@ game_update_objective :: proc(game: ^Game, delta: f32) {
 
 	state.owner_team = occupants[1] > 0 ? 1 : 2
 	state.score_accumulator += delta * max(0.0, game.config.objective_score_rate)
-	points := u32(state.score_accumulator)
-	if points == 0 {
+	scoring_ticks := u32(state.score_accumulator)
+	if scoring_ticks == 0 {
 		return
 	}
 
-	state.score_accumulator -= f32(points)
+	state.score_accumulator -= f32(scoring_ticks)
+	points := scoring_ticks * 10
 	game.match.team_scores[state.owner_team] += points
 	for player in game.players {
 		if player != nil && player.active && player.team == state.owner_team && player_collides(player, zone, 0.0) {

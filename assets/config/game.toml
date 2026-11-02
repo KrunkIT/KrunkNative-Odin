@@ -12,13 +12,14 @@
 [game]
 tick_rate = 64
 max_players = 8
+select_team = true
 game_time = 4
 warmup_time = 0.0
 auto_respawn = 1
 score_limit = 250
 health_regen = true
 objective_rotation_time = 60.0
-objective_score_rate = 1.0
+objective_score_rate = 1.0 # Scoring ticks per second, 10 points per tick.
 regen_delay = 5.0
 respawn_delay = 3.0
 

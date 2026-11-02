@@ -2,8 +2,6 @@ package main
 
 import "base:runtime"
 import "core:fmt"
-import "core:encoding/json"
-import "core:math"
 import "core:strings"
 import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
@@ -22,123 +20,58 @@ menu_scroll :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
 	if g_client != nil && !g_client.mouse_state.locked { g_client.menu_scroll += clay.Vector2{f32(x), f32(y)} }
 }
 
-menu_view :: proc(client: ^Client) -> menuui.View {
-	classes := make([]menuui.Class, len(client.game.classes), context.temp_allocator)
-	for class, i in client.game.classes {
-		weapon_name := "No primary weapon"
-		if len(class.loadout) > 0 {
-			id := class.loadout[0]
-			if id >= 0 && int(id) < len(client.game.weapons) && client.game.weapons[id] != nil { weapon_name = client.game.weapons[id].name }
-		}
-		classes[i] = {id = i32(i), name = class.name, weapon = weapon_name, health = class.health, speed = class.speed, wall_jump = class.wall_jump, available = shared.class_is_in_rotation(i32(i))}
-	}
-	map_name := "CURRENT MAP"
-	if client.game.map_inst != nil {
-		if root, ok := client.game.map_inst.raw_data.(json.Object); ok {
-			if name, name_ok := root["name"].(json.String); name_ok { map_name = string(name) }
-		}
-		if map_name == "CURRENT MAP" {
-			if len(g_map_name) > 0 { map_name = g_map_name }
-			else if client.game.current_map_index >= 0 && int(client.game.current_map_index) < len(shared.ROTATION_MAPS) { map_name = shared.DEFAULT_MAP_NAMES[shared.ROTATION_MAPS[client.game.current_map_index]] }
-		}
-	}
-	resolution := DISPLAY_RESOLUTIONS[client.resolution_index]
-	player_count := 0
-	for player in client.game.players { if player.active { player_count += 1 } }
-	if client.krunker.connected && len(client.krunker_world.players) > player_count { player_count = len(client.krunker_world.players) }
-	return {
-		classes = classes, selected_class = client.selected_class,
-		online = client.net.connected || client.krunker.connected, active = client.me != nil && client.me.active || client.krunker.spawned,
-		spawn_pending = client.spawn_pending, ready = (client.game.ready && (!client.net.connected || client.net.match_state_received)) || client.krunker.connected && client.krunker_world.ready,
-		map_name = map_name, mode = "HARDPOINT", player_count = player_count,
-		display_mode = i32(client.display_mode), sensitivity = client.sensitivity, show_fps = client.show_fps,
-		resolution = fmt.tprintf("%d x %d", resolution.width, resolution.height),
-		join_status = client.join_status,
-	}
-}
-
-client_join_from_clipboard :: proc(client: ^Client) {
+client_join_invite :: proc(client: ^Client, connect_live: proc(^Client, ^shared.Join_Link) -> bool = krunker_ws_connect) {
 	kproto.network_log_begin()
-	clipboard := glfw.GetClipboardString(client.window)
-	kproto.network_log("clipboard", fmt.tprintf("input bytes=%d link=%s", len(clipboard), clipboard))
-	if len(clipboard) == 0 {
-		kproto.network_log("invite", "ERROR clipboard is empty")
-		delete(client.join_status)
-		client.join_status = strings.clone("Clipboard is empty. Copy a lobby link first.")
+	invite := menuui.invite(&client.menu)
+	kproto.network_log("invite", fmt.tprintf("input bytes=%d link=%s", len(invite), invite))
+	if len(invite) == 0 {
+		kproto.network_log("invite", "ERROR invite is empty")
+		krunker_ws_set_status(client, "Enter or paste a lobby invite first.")
 		return
 	}
 
-	parsed, ok := shared.join_link_parse(clipboard)
+	parsed, ok := shared.join_link_parse(invite)
 	if !ok {
-		kproto.network_log("invite", "ERROR join_link_parse rejected the clipboard link")
-		delete(client.join_status)
-		client.join_status = strings.clone("That is not a supported Krunker lobby link.")
+		kproto.network_log("invite", "ERROR join_link_parse rejected the invite link")
+		krunker_ws_set_status(client, "That is not a supported Krunker lobby link.")
 		return
 	}
+	client_leave_session(client, false)
 	shared.join_link_free(&client.join_link)
 	client.join_link = parsed
 	kproto.krunker_world_reset(&client.krunker_world)
 
 	if parsed.scheme == "http" || parsed.scheme == "https" || parsed.scheme == "game" {
-		delete(client.join_status)
 		if len(parsed.game_id) == 0 {
 			kproto.network_log("invite", "ERROR browser invite is missing its game id")
-			client.join_status = strings.clone("The invite URL is missing its game id.")
+			krunker_ws_set_status(client, "The invite URL is missing its game id.")
 		} else {
 			net_client_disconnect(&client.net)
-			krunker_ws_connect(client, &client.join_link)
+			connect_live(client, &client.join_link)
 		}
 		return
 	}
 	if parsed.scheme == "ws" || parsed.scheme == "wss" {
 		net_client_disconnect(&client.net)
-		krunker_ws_connect(client, &client.join_link)
+		connect_live(client, &client.join_link)
 		return
 	}
 	if len(parsed.host) == 0 {
-		delete(client.join_status)
-		client.join_status = strings.clone("The lobby link does not contain a server host.")
+		krunker_ws_set_status(client, "The lobby link does not contain a server host.")
 		return
 	}
 
 	port := parsed.port
 	if port <= 0 { port = 21015 }
 	net_client_disconnect(&client.net)
+	client_clear_players(client)
+	client.game.is_local = false
 	new_net, connected := net_client_connect(parsed.host, int(port))
 	client.net = new_net
-	delete(client.join_status)
 	if connected {
-		client.join_status = strings.clone(fmt.tprintf("Connected to %s:%d.", parsed.host, port))
+		krunker_ws_set_status(client, fmt.tprintf("Connected to %s:%d.", parsed.host, port))
 	} else {
-		client.join_status = strings.clone(fmt.tprintf("Could not connect to %s:%d; staying offline.", parsed.host, port))
-	}
-}
-
-menu_apply_action :: proc(client: ^Client, action: menuui.Action) {
-	switch action.kind {
-	case .NONE:
-	case .JOIN_LINK:
-		client_join_from_clipboard(client)
-	case .PLAY:
-		if client.krunker.connected && (!client.krunker.spawned || client.me == nil) { return }
-		if (!client.game.ready && !(client.krunker.connected && client.krunker_world.ready)) || client.spawn_pending || client.net.connected && !client.net.match_state_received { return }
-		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-		client.mouse_state.locked = true
-		x, y := glfw.GetCursorPos(client.window)
-		client.mouse_state.last_pos = {f32(x), f32(y)}
-	case .QUIT:
-		glfw.SetWindowShouldClose(client.window, true)
-	case .SELECT_CLASS:
-		if shared.class_is_in_rotation(action.index) { client.selected_class = action.index }
-	case .DISPLAY_MODE:
-		client_set_display_mode(client, Display_Mode(action.index))
-	case .RESOLUTION:
-		client.resolution_index = (client.resolution_index + action.index + i32(len(DISPLAY_RESOLUTIONS))) % i32(len(DISPLAY_RESOLUTIONS))
-		client_apply_display_settings(client)
-	case .SENSITIVITY:
-		client.sensitivity = math.round(action.value * 100) / 100
-	case .FPS:
-		client.show_fps = !client.show_fps
+		krunker_ws_set_status(client, fmt.tprintf("Could not connect to %s:%d; staying offline.", parsed.host, port))
 	}
 }
 
@@ -189,7 +122,10 @@ menu_render_commands :: proc(ui: ^UI, commands: clay.ClayArray(clay.RenderComman
 			clip_count = max(0, clip_count - 1)
 			if clip_count == 0 { gl.Disable(gl.SCISSOR_TEST) }
 			else { menu_scissor(ui, clips[clip_count - 1]) }
-		case .None, .Image, .Custom, .OverlayColorStart, .OverlayColorEnd:
+		case .Image:
+			texture := u32(uintptr(command.renderData.image.imageData))
+			if texture != 0 { ui_draw_image(ui, texture, box.x, box.y, box.width, box.height) }
+		case .None, .Custom, .OverlayColorStart, .OverlayColorEnd:
 			// This prototype declares rectangles, borders, text and clips.
 		}
 	}
@@ -209,8 +145,13 @@ hud_render :: proc(client: ^Client, delta: f32) {
 		left = glfw.GetKey(client.window, glfw.KEY_LEFT) == glfw.PRESS,
 		right = glfw.GetKey(client.window, glfw.KEY_RIGHT) == glfw.PRESS,
 		scroll = client.menu_scroll,
+		text = string(client.menu_text[:client.menu_text_length]),
+		backspace = glfw.GetKey(client.window, glfw.KEY_BACKSPACE) == glfw.PRESS,
+		clear_text = glfw.GetKey(client.window, glfw.KEY_LEFT_CONTROL) == glfw.PRESS && glfw.GetKey(client.window, glfw.KEY_A) == glfw.PRESS,
+		paste = glfw.GetKey(client.window, glfw.KEY_LEFT_CONTROL) == glfw.PRESS && glfw.GetKey(client.window, glfw.KEY_V) == glfw.PRESS,
 	}
 	client.menu_scroll = {}
+	client.menu_text_length = 0
 	view := menu_view(client)
 	commands := menuui.build(&client.menu, view, input, client.ui.width, client.ui.height, delta)
 	ui_fill_rect(client.ui, {0.015, 0.025, 0.035, 0.55}, 0, 0, client.ui.width, client.ui.height)

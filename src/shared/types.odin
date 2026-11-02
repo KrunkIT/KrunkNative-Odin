@@ -504,7 +504,7 @@ Game_Config :: struct {
 	fire_rate:          f32,
 	reload_speed:       f32,
 	objective_rotation_time: f32,
-	objective_score_rate:    f32,
+	objective_score_rate:    f32, // Scoring ticks per second; each awards 10 points.
 	regen_delay:             f32,
 	respawn_delay:           f32,
 	maps:               []i32,

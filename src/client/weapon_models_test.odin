@@ -101,6 +101,23 @@ when ODIN_TEST {
 					gl.ClearColor(0, 0, 0, 1)
 					gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 					scene_render(scene, &camera, 640, 360)
+					if first_person && aim == 1 {
+						// Sight/weapon pose in camera space must remain stable when
+						// looking around; testing only straight ahead hides rig errors.
+						reference := camera.world_inverse_matrix * gun.transform_matrix * shared.Vec4{0, 0, 0, 1}
+						for direction in ([]shared.Vec2{{0.6, 1.4}, {-0.5, -2.8}}) {
+							player.direction = direction
+							camera.rotation = {direction.x, direction.y, 0}
+							player_update_meshes(player, false)
+							camera_update_world_inverse_matrix(&camera)
+							mesh_update_transform_matrix(gun)
+							actual := camera.world_inverse_matrix * gun.transform_matrix * shared.Vec4{0, 0, 0, 1}
+							testing.expect(t, abs(actual.x-reference.x) < 0.001 && abs(actual.y-reference.y) < 0.001 && abs(actual.z-reference.z) < 0.001,
+								fmt.tprintf("weapon %d ADS pose must follow the camera at any pitch/yaw", id))
+						}
+						player.direction, camera.rotation = {}, {}
+						player_update_meshes(player, false)
+					}
 					gl.ReadPixels(0, 0, 640, 360, gl.RGB, gl.UNSIGNED_BYTE, raw_data(pixels))
 					visible := 0
 					for i := 0; i < len(pixels); i += 3 {
@@ -109,12 +126,12 @@ when ODIN_TEST {
 					testing.expect(t, visible > 20 && visible < 640 * 360 * 0.8, fmt.tprintf("weapon %d %s must render at a sensible size (first person=%v aim=%v pixels=%d)", id, weapon.name, first_person, aim, visible))
 					testing.expect(t, gl.GetError() == gl.NO_ERROR, fmt.tprintf("weapon %d must render without OpenGL errors", id))
 					when #config(WEAPON_PREVIEW, false) {
-						if first_person && aim == 0 {
+						if first_person {
 							file := make([dynamic]u8)
 							defer delete(file)
 							append(&file, "P6\n640 360\n255\n")
 							for row := 359; row >= 0; row -= 1 { append(&file, ..pixels[row * 640 * 3:(row + 1) * 640 * 3]) }
-							testing.expect(t, os.write_entire_file(fmt.tprintf("bin/weapon_%02d.ppm", id), file[:]) == nil, "could not export weapon preview")
+							testing.expect(t, os.write_entire_file(fmt.tprintf("bin/weapon_%02d_aim_%.0f.ppm", id, aim), file[:]) == nil, "could not export weapon preview")
 						}
 					}
 				}

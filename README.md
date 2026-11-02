@@ -7,8 +7,9 @@ with Odin!
 ![KrunkNative running Littletown](doc/demo.png)
 
 > [!NOTE]
-> The Odin port is actively developed. The client starts in offline mode and exposes an explicit
-> **PASTE & JOIN LINK** action on the home screen for network experiments.
+> The Odin port is actively developed. The client starts on a connection screen and exposes an explicit
+> **Join** action beside an editable invite field. Paste a link, join the lobby,
+> choose a team and class, then select **Enter Game**. **Local practice** starts an offline session for network experiments.
 >
 > The native protocol is project-owned and intentionally targets only this native client and
 > dedicated server.

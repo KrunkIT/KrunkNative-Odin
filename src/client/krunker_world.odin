@@ -101,17 +101,21 @@ krunker_client_sync_world :: proc(client: ^Client) {
 		if player.mesh != nil { player_update_meshes(player, false) }
 		if is_you {
 			client.me = player
-			if !state.spawned && kproto.krunker_world_can_render_local(world) {
+			if !state.spawned && state.bootstrapped && client.spawn_pending && source.class_index == client.selected_class && (state.team == 0 || source.team == state.team) && kproto.krunker_world_can_render_local(world) {
 				state.spawned = true
 				client.in_game = true
+				client.has_life = true
 				client.spawn_pending = false
-				client.selected_class = source.class_index
-				glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-				client.mouse_state.locked = true
-				x, y := glfw.GetCursorPos(client.window)
-				client.mouse_state.last_pos = {f32(x), f32(y)}
+				client.lobby_team = source.team
+				client.team_pending = false
+				if client.menu.page == .HOME {
+					glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+					client.mouse_state.locked = true
+					x, y := glfw.GetCursorPos(client.window)
+					client.mouse_state.last_pos = {f32(x), f32(y)}
+				}
 				kproto.network_log("world-player", fmt.tprintf("LOCAL READY sid=%d class=%d team=%d position=%v mesh=%v", source.sid, source.class_index, source.team, source.position, player.mesh != nil))
-				krunker_ws_set_status(client, "Joined Krunker lobby: team 2, Run N Gun (SMG).")
+				krunker_ws_set_status(client, "Server confirmed entry.")
 			}
 		}
 	}

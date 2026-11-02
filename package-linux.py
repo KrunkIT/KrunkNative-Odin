@@ -93,6 +93,8 @@ def main() -> int:
             (server_bin, "krunknative_server"),
             (os.path.join(ROOT, "assets/config/game.toml"), "assets/config/game.toml"),
             (os.path.join(ROOT, "assets/shaders/basic.frag"), "assets/shaders/basic.frag"),
+            (os.path.join(ROOT, "assets/textures/objective_4.png"), "assets/textures/objective_4.png"),
+            (os.path.join(ROOT, "assets/textures/objective_5.png"), "assets/textures/objective_5.png"),
         ]
         # The archive seed can contain old files under the same model names.
         with open(os.path.join(ROOT, "assets/config/weapon-assets.txt"), encoding="utf-8") as fh:

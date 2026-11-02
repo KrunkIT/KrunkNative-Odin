@@ -483,20 +483,31 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 
 	if prefab_id == int(shared.Prefab.SCORE_ZONE) || prefab_id == int(shared.Prefab.OBJECTIVE) {
 		texture_release(texture_id)
-		geometry := create_plane_geo()
+		// The browser draws a five-unit perimeter, independent of the capture
+		// volume's height. Stretch the fade once per wall; leave the floor open.
+		geometry := create_cube_geo()
 		if geometry == nil {
 			return nil
 		}
 
 		material := basic_material_init()
 		mesh := mesh_init(geometry, &material.base)
+		mesh.visible = false // The active objective is selected by match state.
 		mesh.transform.position = object.position
-		mesh.transform.position.y += 0.08
-		mesh.transform.scale = shared.Vec3{object.scale.x, 0.01, object.scale.z}
+		mesh.transform.scale = shared.Vec3{object.scale.x, 5, object.scale.z}
 		material.base.transparent = true
-		material.color = shared.Vec4{0.4, 0.45, 0.5, 0.16}
-		material.emissive = shared.Vec4{0.05, 0.05, 0.05, 1.0}
-		material.face_scale = shared.Vec3{object.scale.x, object.scale.z, 1.0}
+		material.base.no_depth_write = true
+		material.unlit = true
+		material.face_mask = 0x0f
+		path := shared.concat(shared.assets_path(), "textures/objective_4.png")
+		material.texture = load_texture(path)
+		delete(path)
+		if material.texture == 0 {
+			// Use the borderless gradient if the bordered texture is unavailable.
+			path = shared.concat(shared.assets_path(), "textures/objective_5.png")
+			material.texture = load_texture(path)
+			delete(path)
+		}
 		return mesh
 	}
 

@@ -200,7 +200,7 @@ scene_uniforms :: proc(program: u32) -> ^Shader_Uniforms {
 // cannot leave this cache stale. Blend and polygon state start disabled/filled.
 Scene_Draw_State :: struct {
 	program, vao: u32,
-	blending, wireframe: bool,
+	blending, wireframe, no_depth_write: bool,
 }
 
 scene_update_pass_uniforms :: proc(program: u32, camera: ^Camera) {
@@ -219,6 +219,11 @@ scene_update_pass_uniforms :: proc(program: u32, camera: ^Camera) {
 scene_draw_mesh :: proc(mesh: ^Mesh, camera: ^Camera, state: ^Scene_Draw_State) {
 	if !mesh.visible {
 		return
+	}
+
+	if state.no_depth_write != mesh.material.no_depth_write {
+		gl.DepthMask(gl.FALSE if mesh.material.no_depth_write else gl.TRUE)
+		state.no_depth_write = mesh.material.no_depth_write
 	}
 
 	if state.blending != mesh.material.transparent {
@@ -342,6 +347,7 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 	}
 
 	// Rendering state must not leak into the HUD pass.
+	gl.DepthMask(gl.TRUE)
 	gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
 }
 

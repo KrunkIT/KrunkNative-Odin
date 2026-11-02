@@ -185,6 +185,9 @@ config_apply_toml :: proc(config: ^Gameplay_Config, source: string) -> bool {
 	if game_table, has := root.tables["game"]; has {
 		config_apply_i32(game_table, "tick_rate", "game", 0, &config.game.tick_rate)
 		config_apply_i32(game_table, "max_players", "game", 0, &config.game.max_players)
+		config_apply_bool(game_table, "select_team", "game", 0, &config.game.select_team)
+		if name, valid := toml_get_string(game_table, "team1_name"); valid { config.game.team1_name = strings.clone(name, allocator) }
+		if name, valid := toml_get_string(game_table, "team2_name"); valid { config.game.team2_name = strings.clone(name, allocator) }
 		config_apply_i32(game_table, "game_time", "game", 0, &config.game.game_time)
 		config_apply_f32(game_table, "warmup_time", "game", 0, &config.game.warmup_time)
 		config_apply_i32(game_table, "auto_respawn", "game", 0, &config.game.auto_respawn)

@@ -41,6 +41,7 @@ Material :: struct {
 	vtable:      ^Material_VTable,
 	wireframe:   bool,
 	transparent: bool,
+	no_depth_write: bool,
 	program:     u32,
 }
 

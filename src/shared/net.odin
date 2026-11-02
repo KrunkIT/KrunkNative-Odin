@@ -71,6 +71,8 @@ Packet_Type :: enum u8 {
 	CHAT         = 6,
 	MATCH_STATE  = 7,
 	BULLET_IMPACT = 8,
+	TEAM_REQUEST = 9,
+	LOBBY_STATE = 10,
 }
 
 Packet_Header :: struct {

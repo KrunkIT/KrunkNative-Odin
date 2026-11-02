@@ -98,6 +98,13 @@ test_gameplay_config :: proc() -> bool {
 	// modern data even when no runtime export or TOML file is available.
 	embedded := shared.config_load_gameplay("", "")
 	defer shared.config_destroy_gameplay(embedded)
+	if !shared.config_apply_toml(embedded, `[game]
+select_team = true
+team1_name = "Alpha custom"
+team2_name = "Bravo custom"
+`) || !embedded.game.select_team || embedded.game.team1_name != "Alpha custom" || embedded.game.team2_name != "Bravo custom" {
+		fmt.eprintln("Lobby config fields failed"); return false
+	}
 	if embedded.classes[13].speed != 0.9 || embedded.classes[13].slide_time != 1.1 ||
 		embedded.classes[3].slide_accel != 0.98 || embedded.classes[9].throw_charge != 600 ||
 		embedded.classes[9].wall_jump_mlt != 100 || !embedded.classes[10].hidden ||
@@ -643,15 +650,20 @@ test_objective_combat_state :: proc() -> bool {
 	player_one.position = {0, 0, 0}
 	player_two.position = {50, 0, 0}
 
-	shared.game_tick(&game, 0.5, 0.5)
-	if game.match.team_scores[1] != 1 || game.match.objective.owner_team != 1 || game.match.objective.contested {
+	shared.game_tick(&game, 0.25, 0.25)
+	if game.match.team_scores[1] != 0 || player_one.score != 0 {
+		fmt.eprintln("Objective must wait for a complete scoring tick")
+		return false
+	}
+	shared.game_tick(&game, 0.5, 0.25)
+	if game.match.team_scores[1] != 10 || player_one.score != 10 || player_two.score != 0 || game.match.objective.owner_team != 1 || game.match.objective.contested {
 		fmt.eprintln("Objective scoring test failed")
 		return false
 	}
 
 	player_two.position = {0, 0, 0}
 	shared.game_tick(&game, 1.0, 0.5)
-	if game.match.team_scores[1] != 1 || !game.match.objective.contested {
+	if game.match.team_scores[1] != 10 || player_one.score != 10 || player_two.score != 0 || !game.match.objective.contested {
 		fmt.eprintln("Objective contest test failed")
 		return false
 	}

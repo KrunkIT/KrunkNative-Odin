@@ -10,6 +10,7 @@ import "core:strings"
 // values are intentionally ignored instead of being guessed.
 Krunker_World_Player :: struct {
 	sid:        i32,
+	name: string,
 	team:       i32,
 	class_index: i32,
 	health:     f32,
@@ -62,15 +63,25 @@ Krunker_World_State :: struct {
 	received_at: f64,
 	local_sid:   i32,
 	local_socket_id: string,
+	local_connection_uid: string,
 	map_revision: u64,
 	players:     [dynamic]Krunker_World_Player,
+	lobby_players: [dynamic]Krunker_Lobby_Player,
+	lobby_capacity: i32,
+	lobby_select_team: bool,
+	lobby_team_names: [2]string,
 	shots:       [dynamic]Krunker_World_Shot,
 }
 
 krunker_world_reset :: proc(state: ^Krunker_World_State) {
+	for player in state.players { delete(player.name) }
 	delete(state.players)
+	krunker_lobby_clear(state)
+	delete(state.lobby_players)
+	for name in state.lobby_team_names { delete(name) }
 	delete(state.shots)
 	delete(state.local_socket_id)
+	delete(state.local_connection_uid)
 	state^ = {map_index = -1, mode_index = -1, event_index = -1, local_sid = -1}
 }
 
@@ -143,6 +154,7 @@ krunker_world_apply_init :: proc(state: ^Krunker_World_State, packet: []Krunker_
 	state.map_index = krunker_world_i32(packet[1], -1)
 	state.map_revision += 1
 	krunker_world_apply_game_config(state, packet)
+	for player in state.players { delete(player.name) }
 	clear(&state.players)
 	clear(&state.shots)
 	state.in_game = false
@@ -187,6 +199,7 @@ krunker_world_apply_add_players :: proc(state: ^Krunker_World_State, packet: []K
 		sid := krunker_world_i32(records[offset + 1], -1)
 		if sid < 0 { continue }
 		player := krunker_world_upsert_player(state, sid)
+		if name, named := records[offset+5].(string); named && name != player.name { delete(player.name); player.name = strings.clone(name) }
 		if socket_id, ok := records[offset].(string); ok && socket_id == state.local_socket_id && len(socket_id) > 0 { state.local_sid = sid }
 		player.position = {krunker_world_f32(records[offset + 2]), krunker_world_f32(records[offset + 3]), krunker_world_f32(records[offset + 4])}
 		player.has_position = true
@@ -299,6 +312,14 @@ krunker_world_apply_packet :: proc(state: ^Krunker_World_State, packet: []Krunke
 	}
 	opcode, ok := packet[0].(string); if !ok { return false }
 	switch opcode {
+	case "uid":
+		if len(packet) < 2 { return false }
+		uid, valid := packet[1].(string)
+		if !valid || len(uid) == 0 { return false }
+		delete(state.local_connection_uid)
+		state.local_connection_uid = strings.clone(uid)
+		return true
+	case "cd", "cda": return krunker_world_apply_lobby(state, packet)
 	case "io-init": return krunker_world_apply_io_init(state, packet)
 	case "init": return krunker_world_apply_init(state, packet)
 	case "ready": return krunker_world_apply_ready(state, packet)

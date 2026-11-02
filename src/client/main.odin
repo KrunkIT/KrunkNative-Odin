@@ -56,6 +56,16 @@ Client :: struct {
 	spawn_pending:     bool,
 	spawn_retry_timer: f32,
 	selected_class:    i32,
+	local_practice: bool,
+	has_life: bool,
+	lobby_team: i32,
+	requested_team: i32,
+	team_pending: bool,
+	team_request_time: f64,
+	selection_status: string,
+	menu_text: [128]u8,
+	menu_text_length: int,
+	join_queued: int,
 	menu:             menuui.State,
 	menu_scroll:      clay.Vector2,
 	display_mode:      Display_Mode,
@@ -605,6 +615,13 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		client.me = player
 		if state.active {
 			client.in_game = true
+			client.has_life = true
+			if client.spawn_pending && client.menu.page == .HOME {
+				glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+				client.mouse_state.locked = true
+				x, y := glfw.GetCursorPos(client.window)
+				client.mouse_state.last_pos = {f32(x), f32(y)}
+			}
 			client.spawn_pending = false
 			client.spawn_retry_timer = 0
 		}
@@ -701,7 +718,7 @@ client_tick_textures :: proc(client: ^Client, now: f32) {
 	}
 }
 
-client_update_objective_visuals :: proc(client: ^Client, now: f32) {
+client_update_objective_visuals :: proc(client: ^Client) {
 	if client.game.map_inst == nil {
 		return
 	}
@@ -713,28 +730,9 @@ client_update_objective_visuals :: proc(client: ^Client, now: f32) {
 		}
 
 		mesh := cast(^Mesh)object.mesh
-		material := cast(^Basic_Material)mesh.material
-		is_active := i32(index) == active
-		mesh.visible = is_active
-		if !is_active {
-			continue
-		}
-
-		pulse := 0.08 * (1.0 + math.sin(now * 4.0))
-		state := &client.game.match.objective
-		if state.contested {
-			material.color = shared.Vec4{1.0, 0.7, 0.1, 0.32 + pulse}
-			material.emissive = shared.Vec4{0.3, 0.16, 0.0, 1.0}
-		} else if state.owner_team == 1 {
-			material.color = shared.Vec4{0.15, 0.45, 1.0, 0.30 + pulse}
-			material.emissive = shared.Vec4{0.0, 0.12, 0.35, 1.0}
-		} else if state.owner_team == 2 {
-			material.color = shared.Vec4{1.0, 0.2, 0.2, 0.30 + pulse}
-			material.emissive = shared.Vec4{0.35, 0.02, 0.02, 1.0}
-		} else {
-			material.color = shared.Vec4{0.75, 0.8, 0.85, 0.20 + pulse}
-			material.emissive = shared.Vec4{0.08, 0.08, 0.08, 1.0}
-		}
+		// Keep the texture's original yellow and alpha gradient, as in the
+		// browser. Multiplying it by team colors destroys the intended tint.
+		mesh.visible = i32(index) == active
 	}
 }
 
@@ -789,17 +787,19 @@ client_update_freecam :: proc(client: ^Client, mouse_delta: shared.Vec2, delta: 
 }
 
 client_enter_game :: proc(client: ^Client) {
-	if (!client.game.ready && !(client.krunker.connected && client.krunker_world.ready)) || client.in_game || client.spawn_pending {
+	if (!client.game.ready && !(client.krunker.connected && client.krunker_world.ready)) || (client.me != nil && client.me.active) || client.spawn_pending {
 		return
 	}
 	if client.net.connected && !client.net.match_state_received {
 		return
 	}
 	if client.krunker.connected {
-		// The live adapter performs the Krunker player-entry handshake itself.
-		// Never fall through to the local simulation while that socket is active.
 		if !client.krunker.spawned {
+			client.krunker.class_index = client.selected_class
+			client.krunker.team = client.lobby_team
 			client.spawn_pending = true
+			client.krunker.bootstrapped = false
+			client.krunker.bootstrap_step = 0
 		}
 		return
 	}
@@ -817,7 +817,13 @@ client_enter_game :: proc(client: ^Client) {
 			shared.game_players_add(&client.game, client.me)
 		}
 
+		if client.me.mesh != nil {
+			scene_remove_player_mesh(client.fps_scene, cast(^Player_Mesh)client.me.mesh, int(client.me.loadout_size))
+			player_meshes_fini(client.me)
+		}
+		client.has_life = true
 		client.me.is_you = true
+		client.me.team = client.lobby_team
 		shared.player_spawn(client.me, client.selected_class)
 		player_generate_meshes(client.me, true)
 		shared.player_swap_weapon(client.me, 0, true, false, false)
@@ -830,6 +836,10 @@ client_enter_game :: proc(client: ^Client) {
 }
 
 client_tick :: proc(client: ^Client, now, delta: f32) {
+	if client.join_queued > 0 {
+		client.join_queued -= 1
+		if client.join_queued == 0 { client_join_invite(client) }
+	}
 	if client.net.connected {
 		net_client_poll(client)
 	}
@@ -840,6 +850,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		return
 	}
 
+	client_lobby_tick(client)
 	client_update_fps(client, delta)
 	if client.spawn_pending && client.net.connected {
 		client.spawn_retry_timer = max(0.0, client.spawn_retry_timer - delta)
@@ -903,8 +914,6 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 	if client.me == nil && client.game.map_inst != nil {
 		client.camera.position = client.game.map_inst.camera_position
-		client.camera.rotation.y += delta * 0.1
-		client.camera.rotation.y = math.mod(client.camera.rotation.y, 2.0 * math.PI)
 	}
 
 	noclip_key := glfw.GetKey(client.window, glfw.KEY_N) == glfw.PRESS
@@ -1015,7 +1024,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		}
 		shared.game_tick_projectiles(&client.game, delta * client.game.config.delta_mlt)
 	}
-	client_update_objective_visuals(client, now)
+	client_update_objective_visuals(client)
 
 	// Camera and view-model transforms must use the state produced by this
 	// frame's input, otherwise fast mouse movement makes the gun trail and jump.
@@ -1128,6 +1137,7 @@ main :: proc() {
 
 	glfw.SetFramebufferSizeCallback(client.window, resize_viewport)
 	glfw.SetScrollCallback(client.window, menu_scroll)
+	glfw.SetCharCallback(client.window, menu_character)
 	glfw.MakeContextCurrent(client.window)
 
 	if bool(glfw.RawMouseMotionSupported()) {
@@ -1215,6 +1225,7 @@ main :: proc() {
 	krunker_ws_disconnect(&client.krunker)
 	shared.join_link_free(&client.join_link)
 	delete(client.join_status)
+	delete(client.selection_status)
 	kproto.krunker_world_reset(&client.krunker_world)
 	client_clear_impacts(client)
 	client_clear_players(client)
@@ -1226,6 +1237,8 @@ main :: proc() {
 	overlay_fini()
 	ui_fini(client.ui)
 	resource_cache_fini()
+	delete(menu_portraits)
+	menu_portraits = nil
 	delete(client.predicted_inputs)
 }
 

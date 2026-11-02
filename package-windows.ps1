@@ -46,6 +46,8 @@ try {
         $serverBinary = (Join-Path $stage "krunknative_server.exe")
         (Join-Path $root "assets\config\game.toml") = (Join-Path $stage "assets\config\game.toml")
         (Join-Path $root "assets\shaders\basic.frag") = (Join-Path $stage "assets\shaders\basic.frag")
+        (Join-Path $root "assets\textures\objective_4.png") = (Join-Path $stage "assets\textures\objective_4.png")
+        (Join-Path $root "assets\textures\objective_5.png") = (Join-Path $stage "assets\textures\objective_5.png")
     }
 
     # Replace every supported default weapon from the installed modern pack;

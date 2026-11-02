@@ -48,7 +48,9 @@ join_link_clone :: proc(value: string) -> string {
 }
 
 join_link_query_value :: proc(query, key: string) -> string {
-	for field in strings.split(query, "&") {
+	fields := strings.split(query, "&")
+	defer delete(fields)
+	for field in fields {
 		eq := strings.index(field, "=")
 		if eq < 0 do continue
 		if field[:eq] == key {
@@ -76,7 +78,7 @@ join_link_parse :: proc(input: string) -> (link: Join_Link, ok: bool) {
 
 	separator := strings.index(value, "://")
 	if separator <= 0 do return
-	link.scheme = join_link_clone(strings.to_lower(value[:separator]))
+	link.scheme = strings.to_lower(value[:separator])
 	if link.scheme != "http" && link.scheme != "https" && link.scheme != "ws" && link.scheme != "wss" && link.scheme != "krunker" && link.scheme != "tcp" {
 		join_link_free(&link)
 		return

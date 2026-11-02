@@ -42,7 +42,6 @@ Krunker_WS_State :: struct {
 	local_ammo_revision: u64,
 	ready_received: bool,
 	bootstrap_step: int,
-	next_bootstrap: f64,
 	last_server_message: string,
 	input_elapsed: f64,
 	send_elapsed: f64,
@@ -236,7 +235,7 @@ krunker_ws_finish_packet :: proc(payload: [dynamic]byte, opcode: string, ah_num:
 	return out
 }
 
-krunker_ws_message :: proc(opcode: string, ah_num: ^u8, q_index: int) -> [dynamic]byte {
+krunker_ws_message :: proc(opcode: string, ah_num: ^u8, q_index: int, team: i32 = 0, class_index: i32 = 0) -> [dynamic]byte {
 	message: [dynamic]byte
 	switch opcode {
 	case "load":
@@ -248,7 +247,7 @@ krunker_ws_message :: proc(opcode: string, ah_num: ^u8, q_index: int) -> [dynami
 	case "en":
 		krunker_ws_pack_array(&message, 14); krunker_ws_pack_string(&message, "en")
 		krunker_ws_pack_array(&message, 34)
-		krunker_ws_pack_int(&message, 0); krunker_ws_pack_int(&message, 2482)
+		krunker_ws_pack_int(&message, class_index); krunker_ws_pack_int(&message, 2482)
 		krunker_ws_pack_array(&message, 2); krunker_ws_pack_int(&message, -1); krunker_ws_pack_int(&message, -1)
 		values := [?]i32{-1, -1, 2, 0, 0, 1, -1, -1, 1, 0, -1, -1, -1, -1, -1, -1, 0, -1, -1, 1, 1, 1, -1, -1, -1, 0}
 		for value in values { krunker_ws_pack_int(&message, value) }
@@ -258,9 +257,9 @@ krunker_ws_message :: proc(opcode: string, ah_num: ^u8, q_index: int) -> [dynami
 		for _ in 0 ..< 6 { append(&message, 0xC2) }
 		krunker_ws_pack_nil(&message); append(&message, 0xC2); append(&message, 0xC2); append(&message, 0xC2)
 	case "team":
-		krunker_ws_pack_array(&message, 3); krunker_ws_pack_string(&message, "cd"); krunker_ws_pack_string(&message, "t"); krunker_ws_pack_int(&message, 2)
+		krunker_ws_pack_array(&message, 3); krunker_ws_pack_string(&message, "cd"); krunker_ws_pack_string(&message, "t"); krunker_ws_pack_int(&message, team)
 	case "class":
-		krunker_ws_pack_array(&message, 3); krunker_ws_pack_string(&message, "cd"); krunker_ws_pack_string(&message, "c"); krunker_ws_pack_map(&message, 2); krunker_ws_pack_string(&message, "c"); krunker_ws_pack_int(&message, 2); krunker_ws_pack_string(&message, "s"); krunker_ws_pack_nil(&message)
+		krunker_ws_pack_array(&message, 3); krunker_ws_pack_string(&message, "cd"); krunker_ws_pack_string(&message, "c"); krunker_ws_pack_map(&message, 2); krunker_ws_pack_string(&message, "c"); krunker_ws_pack_int(&message, class_index); krunker_ws_pack_string(&message, "s"); krunker_ws_pack_nil(&message)
 	case "q":
 		switch q_index {
 		case 0:
@@ -283,7 +282,7 @@ krunker_ws_send_internal :: proc(state: ^Krunker_WS_State, opcode: string, queue
 	// Advance the shared counter only after a complete successful send.
 	// Retrying an unsent packet must reuse its counter, including across wrap.
 	next_counter := state.ah_num
-	packet := krunker_ws_message(opcode, &next_counter, state.q_index)
+	packet := krunker_ws_message(opcode, &next_counter, state.q_index, state.team, state.class_index)
 	defer delete(packet)
 	sent: c.size_t
 	code := curl.ws_send(state.handle, rawptr(&packet[0]), c.size_t(len(packet)), &sent, 0, curl.WS_BINARY)
@@ -319,19 +318,18 @@ krunker_ws_flush_pending :: proc(state: ^Krunker_WS_State) -> bool {
 	return true
 }
 
-// Entry ends with the class/team spawn request. Captured idle q packets used
-// to delay real input by three seconds after spawn; live commands replace them.
-KRUNKER_BOOTSTRAP_OPS := [?]string{"po", "en", "team", "class", "en"}
+// Team selection is already confirmed in the lobby. Send the current class
+// before one entry request, without delaying input after the server starts us.
+KRUNKER_BOOTSTRAP_OPS := [?]string{"po", "class", "en"}
 
-krunker_ws_bootstrap_tick :: proc(client: ^Client) {
+krunker_ws_bootstrap_tick :: proc(client: ^Client, send_control: proc(^Krunker_WS_State, string) -> bool = krunker_ws_send) {
 	state := &client.krunker
-	if !state.connected || !state.got_load || !state.ready_received || state.bootstrapped do return
-	now := time.duration_seconds(time.since(kproto.network_log_started))
-	if now < state.next_bootstrap do return
-	opcode := KRUNKER_BOOTSTRAP_OPS[state.bootstrap_step]
-	if !krunker_ws_send(state, opcode) { state.connected = false; krunker_ws_set_status(client, "Krunker lobby bootstrap send failed; see logs/krunker-network.log"); return }
-	state.bootstrap_step += 1
-	state.next_bootstrap = now + 0.5
+	if !state.connected || !state.got_load || !state.ready_received || state.bootstrapped || !client.spawn_pending do return
+	for state.bootstrap_step < len(KRUNKER_BOOTSTRAP_OPS) {
+		opcode := KRUNKER_BOOTSTRAP_OPS[state.bootstrap_step]
+		if !send_control(state, opcode) { state.connected = false; krunker_ws_set_status(client, "Krunker lobby bootstrap send failed; see logs/krunker-network.log"); return }
+		state.bootstrap_step += 1
+	}
 	if state.bootstrap_step == len(KRUNKER_BOOTSTRAP_OPS) {
 		state.bootstrapped = true
 		state.input_sequence = max(state.input_sequence, 13)
@@ -339,7 +337,7 @@ krunker_ws_bootstrap_tick :: proc(client: ^Client) {
 	}
 }
 
-krunker_ws_apply_world :: proc(client: ^Client, payload: []byte) {
+krunker_ws_apply_world :: proc(client: ^Client, payload: []byte, send_control: proc(^Krunker_WS_State, string) -> bool = krunker_ws_send) {
 	state := &client.krunker
 	messages, counter, error_text := kproto.krunker_msgpack_decode_packet(payload)
 	if len(error_text) != 0 {
@@ -363,18 +361,30 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte) {
 			case "load":
 				if !state.got_load {
 					state.got_load = true
-					if !krunker_ws_send(state, "load") { state.connected = false; return }
+					if !send_control(state, "load") { state.connected = false; return }
 					krunker_ws_set_status(client, "Krunker connected; loading lobby...")
 				}
 			case "io-init":
 				kproto.network_log("ownership", fmt.tprintf("socket identity accepted=%v string_id=%v (value redacted); waiting for numeric player SID", applied, len(client.krunker_world.local_socket_id) > 0))
+			case "uid":
+				kproto.network_log("ownership", fmt.tprintf("lobby connection identity accepted=%v (value redacted)", applied))
+			case "cd", "cda":
+				for player in client.krunker_world.lobby_players {
+					if player.id == client.krunker_world.local_connection_uid {
+						kproto.network_log("lobby-selection", fmt.tprintf("server team=%d class=%d requested_team=%d pending=%v", player.team, player.class_index, client.requested_team, client.team_pending))
+					}
+				}
+			case "pi":
+				// SOCKET_PING is answered with the application PING (po), even
+				// while the player is choosing a team/class in the lobby.
+				if !send_control(state, "po") { state.connected = false; return }
 			case "init":
 				state.spawned = false
 				kproto.network_log("world", fmt.tprintf("init map=%d mode=%d comp=%v ranked=%v", client.krunker_world.map_index, client.krunker_world.mode_index, client.krunker_world.is_comp, client.krunker_world.is_ranked))
 			case "ready":
 				state.ready_received = client.krunker_world.ready
 				if !state.ready_received { state.connected = false; krunker_ws_set_status(client, "Lobby sent ready(false); connection rejected."); return }
-				krunker_ws_set_status(client, "Lobby ready; selecting team 2 and SMG...")
+				krunker_ws_set_status(client, "Lobby ready. Choose a team and class, then enter game.")
 			case "start":
 				kproto.network_log("spawn", fmt.tprintf("server start received; local_sid=%d players=%d; waiting for renderer handoff", client.krunker_world.local_sid, len(client.krunker_world.players)))
 				state.input_sequence = max(state.input_sequence, 13)
@@ -385,11 +395,15 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte) {
 					kproto.network_log("server-sync", fmt.tprintf("local snapshot=%d live_inputs_sent=%d; responding with v", state.snapshots_received, state.input_logged))
 				}
 				// Browser answers each local snapshot, including l(0), with PONG.
-				if !krunker_ws_send(state, "v") { state.connected = false; return }
+				if !send_control(state, "v") { state.connected = false; return }
 			case "dc", "error":
 				kproto.network_log("server-error", fmt.tprintf("opcode=%s args=%v", opcode, packet[1:]))
 				reason := "Server did not supply a text reason"
 				if len(packet) > 1 { if text, ok := packet[1].(string); ok && len(text) > 0 { reason = text } }
+				client.team_pending = false
+				client.spawn_pending = false
+				client.requested_team = client.lobby_team
+				client_selection_status(client, reason)
 				delete(state.server_error)
 				state.server_error = strings.clone(reason)
 				krunker_ws_set_status(client, fmt.tprintf("Krunker %s: %s; see logs/krunker-network.log", opcode == "dc" ? "disconnected" : "error", reason))
@@ -405,7 +419,7 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte) {
 						kproto.network_log("server-message", fmt.tprintf("opcode=%s message=%s", opcode, message))
 						if !state.spawned {
 							if message == "wt" { krunker_ws_set_status(client, "Connected to lobby; server is waiting for players before spawning.") }
-							else if opcode == "fe" { krunker_ws_set_status(client, fmt.tprintf("Server entry response: %s; see logs/krunker-network.log", message)) }
+							else if opcode == "fe" { client.spawn_pending = false; client.team_pending = false; client.requested_team = client.lobby_team; client_selection_status(client, message); krunker_ws_set_status(client, fmt.tprintf("Server entry response: %s; see logs/krunker-network.log", message)) }
 							else if len(message) > 0 { krunker_ws_set_status(client, fmt.tprintf("Lobby: %s", message)) }
 						}
 					}
@@ -544,7 +558,7 @@ krunker_ws_connect :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
 		return false
 	}
 	defer delete(url)
-	kproto.network_log("websocket", fmt.tprintf("CONNECT %s team=2 class=2 (SMG) counter_increment=37", url))
+	kproto.network_log("websocket", fmt.tprintf("CONNECT %s; awaiting lobby selection", url))
 	handle := curl.easy_init()
 	if handle == nil { krunker_ws_set_status(client, "Could not allocate the Krunker WebSocket handle."); krunker_ws_disconnect(state); return false }
 	state.handle = handle
@@ -584,8 +598,8 @@ krunker_ws_connect :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
 	state.connected = true
 	client_clear_players(client)
 	client.game.is_local = false
-	state.team = 2
-	state.class_index = 2
+	state.team = 0
+	state.class_index = client.selected_class
 	krunker_ws_set_status(client, "Krunker WebSocket connected; waiting for server load…")
 	return true
 }

@@ -4,6 +4,7 @@ import "core:fmt"
 import menuui "../menu"
 import clay "../third_party/clay"
 import shared "../shared"
+import kproto "../krunker"
 
 menu_test_measure :: proc "c" (text: clay.StringSlice, config: ^clay.TextElementConfig, user: rawptr) -> clay.Dimensions {
 	return {f32(text.length) * f32(config.fontSize) * 0.65, f32(config.fontSize)}
@@ -28,73 +29,130 @@ test_menu :: proc() -> bool {
 	defer menuui.fini(&state)
 	classes: [len(shared.CLASSES_LIST)]menuui.Class
 	for class, i in shared.CLASSES_LIST {
-		weapon := "No primary weapon"
-		if len(class.loadout) > 0 && class.loadout[0] >= 0 && int(class.loadout[0]) < len(shared.WEAPONS_LIST) && shared.WEAPONS_LIST[class.loadout[0]] != nil {
-			weapon = shared.WEAPONS_LIST[class.loadout[0]].name
-		}
-		classes[i] = {id = i32(i), name = class.name, weapon = weapon, health = class.health, speed = class.speed, wall_jump = class.wall_jump, available = shared.class_is_in_rotation(i32(i))}
+		classes[i] = {id = i32(i), name = class.name, weapon = "Primary weapon", available = shared.class_is_in_rotation(i32(i)), reason = "Class restricted by server"}
 	}
-	view := menuui.View{classes = classes[:], ready = true, selected_class = 2, map_name = "Sandstorm", mode = "HARDPOINT", resolution = "1280 x 720", sensitivity = 1}
-	// Real Clay layout and linkage, at common and smaller window sizes.
-	sizes := [3][2]f32{{1280, 720}, {1920, 1080}, {960, 540}}
+	players := [?]menuui.Player{
+		{name = "A very long competitive player name that must fit", class_name = "Run N Gun", team = 1, is_you = true},
+		{name = "Opponent", class_name = "Hunter", team = 2},
+	}
+	view := menuui.View{classes = classes[:], players = players[:], online = true, ready = true, selected_class = 2, confirmed_class = 2, confirmed_team = 1, map_name = "Sandstorm", mode = "Hardpoint", lobby_name = "Competitive lobby", resolution = "1920 x 1080", sensitivity = 1,
+		teams = {{id=1, name="Alpha", capacity=4, available=true}, {id=2, name="Bravo", capacity=4, available=true}}}
+	sizes := [?][2]f32{{1280,720}, {1920,1080}, {2560,1600}}
 	for size in sizes {
 		for page in menuui.Page {
 			state.page = page
 			commands := menuui.build(&state, view, {}, size[0], size[1], PHYSICS_DT)
 			if commands.length == 0 || state.errors != 0 { fmt.eprintln("Menu layout/ABI test failed"); return false }
-			ids := [2]string{"Sidebar", "Page"}
+			ids := [?]string{"Header", "Page", "Footer"}
 			for id in ids {
-				data := clay.GetElementData(clay.ID(id))
-				box := data.boundingBox
-				if !data.found || box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 || box.x + box.width > size[0] + 1 || box.y + box.height > size[1] + 1 {
-					fmt.printf("Menu bounds test failed: page=%v size=%v element=%s box=%v\n", page, size, id, box)
-					return false
+				data := clay.GetElementData(clay.ID(id)); box := data.boundingBox
+				if !data.found || box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 || box.x+box.width > size[0]+1 || box.y+box.height > size[1]+1 {
+					fmt.printf("Menu bounds failed: %v %v %s %v\n", page, size, id, box); return false
 				}
+			}
+			if page != .HOME {
+				box := clay.GetElementData(clay.ID("Overlay")).boundingBox
+				if box.x < 0 || box.y < 0 || box.x+box.width > size[0]+1 || box.y+box.height > size[1]+1 { fmt.println("Modal bounds failed", box); return false }
 			}
 		}
 	}
 	state.page = .HOME
 	menu_test_frame(&state, view, {})
-	if menu_test_frame(&state, view, {pointer = {1270, 710}, down = true}).kind != .NONE || menu_test_frame(&state, view, {pointer = {1270, 710}}).kind != .NONE { return false }
-	// Release outside cancels; a complete click inside activates Play.
+	left := clay.GetElementData(clay.ID("Team",1)).boundingBox
+	right := clay.GetElementData(clay.ID("Team",2)).boundingBox
+	if abs(left.width-right.width)>1 || abs(left.y-right.y)>1 { return false }
 	box := clay.GetElementData(clay.ID("Play")).boundingBox
-	menu_test_frame(&state, view, {pointer = {box.x + 5, box.y + 5}, down = true})
-	if menu_test_frame(&state, view, {pointer = {1270, 710}}).kind != .NONE { return false }
-	if menu_test_click(&state, view, clay.ID("Play")).kind != .PLAY { fmt.eprintln("Menu play click failed"); return false }
-	// Invite links are available from the offline home screen. The client layer
-	// owns clipboard access and network setup; the menu emits a stable action.
-	if menu_test_click(&state, view, clay.ID("JoinLink")).kind != .JOIN_LINK { fmt.eprintln("Menu join-link click failed"); return false }
-	view.ready = false
+	menu_test_frame(&state, view, {pointer = {box.x+5,box.y+5}, down = true})
+	if menu_test_frame(&state, view, {pointer = {0,0}}).kind != .NONE { return false }
+	if menu_test_click(&state, view, clay.ID("Play")).kind != .PLAY { return false }
+	view.play_reason = "Choose a team"
 	menu_test_frame(&state, view, {})
 	if menu_test_click(&state, view, clay.ID("Play")).kind != .NONE { return false }
-	view.ready = true
+	view.play_reason = ""
 	menu_test_frame(&state, view, {})
-	menu_test_click(&state, view, clay.ID("NavClasses", u32(menuui.Page.CLASSES)))
+	if menu_test_click(&state, view, clay.ID("JoinTeam",2)).index != 2 { return false }
+	// The menu must not turn a pending request into confirmed membership.
+	view.team_pending = true; view.requested_team = 2
 	menu_test_frame(&state, view, {})
-	if state.page != .CLASSES || menu_test_click(&state, view, clay.ID("Class", 2)).index != 2 { return false }
-	menu_test_frame(&state, view, {escape = true})
-	if state.page != .HOME { return false }
-	// Tab/Enter navigation shares the same controls as mouse interaction.
+	if menu_test_click(&state, view, clay.ID("JoinTeam",2)).kind != .NONE || view.confirmed_team != 1 { return false }
+	view.team_pending = false
+	// Class selection lives on the lobby. Keyboard focus scrolls the strip.
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("Class",2)).index != 2 { return false }
+	state.focus = clay.ID("Class",4).id
+	if menu_test_frame(&state, view, {enter=true}).kind != .NONE { return false }
 	menu_test_frame(&state, view, {})
 	state.focus = clay.ID("Play").id
-	if menu_test_frame(&state, view, {enter = true}).kind != .PLAY { return false }
+	if menu_test_frame(&state, view, {enter=true}).kind != .PLAY { return false }
 	menu_test_frame(&state, view, {})
-	state.focus = 0
-	menu_test_frame(&state, view, {tab = true})
-	if state.focus == 0 { return false }
-	state.page = .SETTINGS
-	menu_test_frame(&state, view, {})
-	box = clay.GetElementData(clay.ID("Sensitivity")).boundingBox
-	input := menuui.Input{pointer = {box.x + box.width * 0.75, box.y + box.height / 2}, down = true}
-	value := menu_test_frame(&state, view, input)
-	if value.kind != .SENSITIVITY || abs(value.value - 1.525) > 0.001 { return false }
-	input.pointer[0] = box.x + box.width + 20
-	if menu_test_frame(&state, view, input).value != 2 { return false }
+	menu_test_click(&state, view, clay.ID("Settings",u32(menuui.Page.SETTINGS)))
 	menu_test_frame(&state, view, {})
 	if state.page != .SETTINGS { return false }
+	// Lobby controls cannot activate through an overlay.
+	if menu_test_click(&state, view, clay.ID("Play")).kind != .NONE { return false }
+	menu_test_frame(&state, view, {})
+	box = clay.GetElementData(clay.ID("Sensitivity")).boundingBox
+	input := menuui.Input{pointer={box.x+box.width*0.75,box.y+box.height/2},down=true}
+	value := menu_test_frame(&state, view, input)
+	if value.kind != .SENSITIVITY || abs(value.value-1.525)>0.001 { return false }
+	menu_test_frame(&state, view, {})
 	state.focus = clay.ID("Sensitivity").id
-	value = menu_test_frame(&state, view, {right = true})
-	if value.kind != .SENSITIVITY || abs(value.value - 1.05) > 0.001 { return false }
-	fmt.println("Clay menu layout/mouse/keyboard/slider tests OK")
-	return state.errors == 0
+	value = menu_test_frame(&state, view, {right=true})
+	if value.kind != .SENSITIVITY || abs(value.value-1.05)>0.001 { return false }
+	view.active = true
+	if menu_test_frame(&state, view, {escape=true}).kind != .NONE || state.page != .HOME { return false }
+	menu_test_frame(&state, view, {})
+	if menu_test_frame(&state, view, {escape=true}).kind != .PLAY { return false }
+	// Offline connection screen: editable invite, paste, join, and errors.
+	view.online=false; view.active=false; view.local_practice=false
+	view.join_status="Connection failed. Please check the invite and try again."
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("JoinLink")).kind != .NONE { return false }
+	menu_test_click(&state, view, clay.ID("Invite"))
+	menu_test_frame(&state, view, {text="krunk://localhost:21015"})
+	if menuui.invite(&state) != "krunk://localhost:21015" { return false }
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("JoinLink")).kind != .JOIN_LINK { return false }
+	// Opening session from the connection screen must not duplicate field IDs.
+	state.page=.SESSION
+	menu_test_frame(&state, view, {})
+	if state.errors != 0 { return false }
+	fmt.println("Competitive lobby layout, modal, selection, invite, mouse and keyboard tests OK")
+	return test_lobby_packets() && test_live_lobby_records()
+}
+
+test_lobby_packets :: proc() -> bool {
+	state := shared.Lobby_State{local_id=42, team=1, capacity=4, select_team=true, team_result=2, team_names={"Alpha with a long team name", "Bravo"}, count=shared.MAX_PLAYERS_PER_MATCH}
+	for &player, i in state.players { player = {id=u32(i+1), team=i32(i%2+1), class_id=i32(i%4)} }
+	buffer: [512]byte
+	size := shared.packet_serialize_lobby(buffer[:], &state)
+	decoded, ok := shared.packet_deserialize_lobby(buffer[:size])
+	if !ok || decoded.count != state.count || decoded.local_id != 42 || decoded.team_result != 2 || decoded.team_names != state.team_names || decoded.players != state.players { return false }
+	for end in 0..<size {
+		if _, valid := shared.packet_deserialize_lobby(buffer[:end]); valid { return false }
+	}
+	size = shared.packet_serialize_team_request(buffer[:], 2)
+	team, valid := shared.packet_deserialize_team_request(buffer[:size])
+	if !valid || team != 2 { return false }
+	size = shared.packet_serialize_team_request(buffer[:], 3)
+	if _, accepted := shared.packet_deserialize_team_request(buffer[:size]); accepted { return false }
+	fmt.println("Lobby roster and team request protocol tests OK")
+	return true
+}
+
+
+test_live_lobby_records :: proc() -> bool {
+	world: kproto.Krunker_World_State
+	defer kproto.krunker_world_reset(&world)
+	world.local_socket_id = ""
+	record := []kproto.Krunker_Msgpack_Map_Entry{{key="n",value="Player name"},{key="t",value=i64(1)},{key="c",value=i64(2)},{key="a",value=false}}
+	roster := []kproto.Krunker_Msgpack_Map_Entry{{key="socket-a",value=record}}
+	if !kproto.krunker_world_apply_packet(&world, []kproto.Krunker_Msgpack_Value{"cd",roster}) { return false }
+	if len(world.lobby_players)!=1 || world.lobby_players[0].team!=1 || world.lobby_players[0].name!="Player name" || world.lobby_players[0].class_index!=2 { return false }
+	change := []kproto.Krunker_Msgpack_Map_Entry{{key="n",value="Player name"},{key="t",value=i64(2)},{key="a",value=true}}
+	if !kproto.krunker_world_apply_packet(&world, []kproto.Krunker_Msgpack_Value{"cda","socket-a",change}) { return false }
+	if world.lobby_players[0].team!=2 || world.lobby_players[0].name!="Player name" || world.lobby_players[0].class_index != -1 { return false }
+	if !kproto.krunker_world_apply_packet(&world, []kproto.Krunker_Msgpack_Value{"cda","socket-a",kproto.Krunker_Msgpack_Nil{}}) || len(world.lobby_players) != 0 { return false }
+	fmt.println("Live pre-spawn lobby roster and assignment tests OK")
+	return true
 }
