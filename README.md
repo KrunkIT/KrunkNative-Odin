@@ -30,7 +30,9 @@ pack is not tracked. Before starting the client, unpack a compatible Krunker `mo
 - `assets/models/`
 - `assets/textures/`
 - `assets/sound/`
-- `assets/css/fonts/font2.ttf`
+
+HUD and menu text use the bundled Rajdhani SemiBold font; its license is included
+in `assets/css/fonts/Rajdhani-OFL.txt`.
 
 The current asset pack is recommended for the v3 map. Keep the files already present in `assets/`; see
 the [asset instructions](assets/README.md) for details.

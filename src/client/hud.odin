@@ -159,10 +159,11 @@ menu_render_commands :: proc(ui: ^UI, commands: clay.ClayArray(clay.RenderComman
 			if box.width > 0 && box.height > 0 { ui_round_rect(ui, menu_color(data.backgroundColor), box.x, box.y, box.width, box.height, data.cornerRadius.topLeft) }
 		case .Text:
 			data := command.renderData.text
-			// Existing text drawing takes a baseline; Clay supplies a text box.
+			// Clay already offsets each line for its configured line height.
+			// Add only the font ascent here, otherwise leading is applied twice.
 			ascent, descent, gap: i32
 			stb_font_metrics(&ascent, &descent, &gap)
-			baseline := box.y + f32(data.fontSize) * f32(ascent) / f32(ascent - descent) + max(0, (box.height - f32(data.fontSize)) * 0.5)
+			baseline := box.y + f32(data.fontSize) * f32(ascent) / f32(ascent - descent)
 			ui_fill_text(ui, menu_color(data.textColor), string(data.stringContents.chars[:data.stringContents.length]), box.x, baseline, f32(data.fontSize))
 		case .Border:
 			data := command.renderData.border

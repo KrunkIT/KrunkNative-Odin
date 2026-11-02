@@ -9,6 +9,9 @@ uniform bool is_ramp;
 uniform bool is_ladder;
 
 uniform bool use_face_tex_scaling;
+uniform int face_mask;
+uniform float texture_scale;
+uniform bool unlit;
 uniform float world_uv_scale;
 uniform vec3 face_scale;
 
@@ -29,6 +32,7 @@ uniform float uFogFar;
 uniform vec3 uCameraPosition;
 
 void main() {
+    if (face_idx < 6 && ((face_mask & (1 << face_idx)) == 0)) discard;
     vec2 scaled_tex_coord;
 
     if (use_face_tex_scaling) {
@@ -62,8 +66,9 @@ void main() {
             else scale = face_scale.xz;
         }
 
-        scaled_tex_coord = (1.0f / world_uv_scale) * scale * tex_coord;
-        scaled_tex_coord.x = 0.5f + scaled_tex_coord.x - scale.x * 0.5f;
+        vec2 repeat_scale = (scale / world_uv_scale) * texture_scale;
+        scaled_tex_coord = repeat_scale * tex_coord;
+        scaled_tex_coord.x += 0.5f - repeat_scale.x * 0.5f;
     } else {
         scaled_tex_coord = tex_coord;
     }
@@ -86,7 +91,7 @@ void main() {
     // The map loader uses white as the neutral/default emissive value. Keep
     // that default neutral; explicit emissive materials need a separate
     // strength flag before they can be added without brightening every mesh.
-    vec3 lit_rgb = frag_color.rgb * lighting;
+    vec3 lit_rgb = frag_color.rgb * (unlit ? vec3(1.0) : lighting);
     float fog_span = max(0.001, uFogFar - uFogNear);
     float fog_amount = clamp((length(world_pos - uCameraPosition) - uFogNear) / fog_span, 0.0, 1.0);
     frag_color = vec4(mix(lit_rgb, uFogColor, fog_amount), frag_color.a);

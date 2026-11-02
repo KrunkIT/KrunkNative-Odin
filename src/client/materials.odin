@@ -20,6 +20,9 @@ Shader_Uniforms :: struct {
 	is_ramp:              i32,
 	is_ladder:            i32,
 	use_face_tex_scaling: i32,
+	face_mask:            i32,
+	texture_scale:        i32,
+	unlit:                i32,
 	world_uv_scale:       i32,
 	face_scale:           i32,
 	color:                i32,
@@ -38,6 +41,7 @@ Shader_Uniforms :: struct {
 	camera_position:      i32,
 	aspect:               i32,
 	r_clip:               i32,
+	stroke_width:         i32,
 	border_bottom_left_radius:  i32,
 	border_bottom_right_radius: i32,
 	border_top_left_radius:     i32,
@@ -59,6 +63,9 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.is_ramp = gl.GetUniformLocation(program, "is_ramp")
 	u.is_ladder = gl.GetUniformLocation(program, "is_ladder")
 	u.use_face_tex_scaling = gl.GetUniformLocation(program, "use_face_tex_scaling")
+	u.face_mask = gl.GetUniformLocation(program, "face_mask")
+	u.texture_scale = gl.GetUniformLocation(program, "texture_scale")
+	u.unlit = gl.GetUniformLocation(program, "unlit")
 	u.world_uv_scale = gl.GetUniformLocation(program, "world_uv_scale")
 	u.face_scale = gl.GetUniformLocation(program, "face_scale")
 	u.color = gl.GetUniformLocation(program, "color")
@@ -77,6 +84,7 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.camera_position = gl.GetUniformLocation(program, "uCameraPosition")
 	u.aspect = gl.GetUniformLocation(program, "aspect")
 	u.r_clip = gl.GetUniformLocation(program, "r_clip")
+	u.stroke_width = gl.GetUniformLocation(program, "stroke_width")
 	u.border_bottom_left_radius = gl.GetUniformLocation(program, "border_bottom_left_radius")
 	u.border_bottom_right_radius = gl.GetUniformLocation(program, "border_bottom_right_radius")
 	u.border_top_left_radius = gl.GetUniformLocation(program, "border_top_left_radius")
@@ -102,6 +110,9 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform1i(is_ramp, i32(material.is_ramp ? 1 : 0))
 	gl.Uniform1i(is_ladder, i32(material.is_ladder ? 1 : 0))
 	gl.Uniform1i(use_face_tex_scaling, i32(material.use_face_tex_scaling ? 1 : 0))
+	gl.Uniform1i(u_basic.face_mask, i32(material.face_mask))
+	gl.Uniform1f(u_basic.texture_scale, material.texture_scale)
+	gl.Uniform1i(u_basic.unlit, i32(material.unlit))
 	gl.Uniform1f(world_uv_scale, shared.GAME_CONSTANTS.world_uv_scale)
 	gl.Uniform3f(face_scale, material.face_scale.x, material.face_scale.y, material.face_scale.z)
 
@@ -110,19 +121,21 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	tex_transform := u_basic.tex_transform
 	texture := u_basic.tex
 
-	repeat := [3][3]f32{
-		{material.texture_repeat.x, 0, 0},
-		{0, material.texture_repeat.y, 0},
+	c := math.cos(material.texture_rotation)
+	s := math.sin(material.texture_rotation)
+	// Match THREE.Texture.setUvTransform with its default center (0, 0).
+	// Krunker stores `tro` in degrees and applies it clockwise in UV space.
+	m00 := material.texture_repeat.x * c
+	m01 := material.texture_repeat.x * s
+	m10 := -material.texture_repeat.y * s
+	m11 := material.texture_repeat.y * c
+	tx := material.texture_offset.x
+	ty := material.texture_offset.y
+	transform := [3][3]f32{
+		{m00, m01, tx},
+		{m10, m11, ty},
 		{0, 0, 1},
 	}
-
-	translate := [3][3]f32{
-		{1, 0, material.texture_offset.x},
-		{0, 1, material.texture_offset.y},
-		{0, 0, 1},
-	}
-
-	transform := shared.mat3x3(flatten_mat3(repeat), flatten_mat3(translate))
 
 	gl.Uniform4f(color, material.color.x, material.color.y, material.color.z, material.color.w)
 	gl.Uniform4f(emissive, material.emissive.x, material.emissive.y, material.emissive.z, material.emissive.w)
@@ -144,14 +157,14 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform1f(u_basic.fog_far, max(1.0, g_lighting_config.fog_distance))
 	gl.Uniform3f(u_basic.camera_position, g_render_camera_position.x, g_render_camera_position.y, g_render_camera_position.z)
 
-	if material.texture != 0 && g_active_texture == material.texture || material.texture == 0 && g_blank_texture != 0 && g_active_texture == g_blank_texture {
-		return
-	}
-
-	transform_ptr := [9]f32{transform[0], transform[1], transform[2], transform[3], transform[4], transform[5], transform[6], transform[7], transform[8]}
+	transform_flat := flatten_mat3(transform)
+	transform_ptr := transform_flat
 	gl.UniformMatrix3fv(tex_transform, 1, gl.TRUE, &transform_ptr[0])
 	gl.Uniform1i(texture, 0)
 	gl.ActiveTexture(gl.TEXTURE0)
+	if material.texture != 0 && g_active_texture == material.texture || material.texture == 0 && g_blank_texture != 0 && g_active_texture == g_blank_texture {
+		return
+	}
 
 	if material.texture != 0 {
 		gl.BindTexture(gl.TEXTURE_2D, material.texture)
@@ -163,6 +176,8 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 
 			blank := [3]u8{255, 255, 255}
 			gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, &blank[0])
+			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 		}
 
 		gl.BindTexture(gl.TEXTURE_2D, g_blank_texture)
@@ -183,6 +198,8 @@ basic_material_init :: proc() -> ^Basic_Material {
 	material.color = shared.Vec4{1.0, 1.0, 1.0, 1.0}
 
 	material.texture_repeat = shared.Vec2{1.0, 1.0}
+	material.face_mask = 0x3f
+	material.texture_scale = 1.0
 
 	if basic_shader_program == 0 {
 		vert_shader := shared.concat(shared.assets_path(), "shaders/basic.vert")
@@ -222,6 +239,7 @@ quad_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform4f(color, material.color.x, material.color.y, material.color.z, material.color.w)
 	gl.Uniform1f(aspect, material.aspect)
 	gl.Uniform1f(r_clip, material.r_clip)
+	gl.Uniform1f(u_quad.stroke_width, material.stroke_width)
 
 	gl.Uniform1f(border_bottom_left_radius, material.border_bottom_left_radius)
 	gl.Uniform1f(border_bottom_right_radius, material.border_bottom_right_radius)

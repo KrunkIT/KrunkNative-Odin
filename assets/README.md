@@ -5,7 +5,10 @@ Please unpack Krunker's `mod.zip` into this folder, more specifically:
 - `models/*`
 - `textures/*`
 - `sound/*`
-- `css/fonts/font2.ttf`
+
+HUD and menu text use the bundled `css/fonts/Rajdhani-SemiBold.ttf` from
+[Google Fonts](https://github.com/google/fonts/tree/main/ofl/rajdhani), licensed
+under the SIL Open Font License in `css/fonts/Rajdhani-OFL.txt`.
 
 > [!TIP]
 > The client has been checked against the current `mod.zip` used by the latest

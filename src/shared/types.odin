@@ -122,6 +122,8 @@ Texture_Animation :: struct {
 Object :: struct {
 	prefab:         Prefab,
 	texture:        u32,
+	texture_variant: i32,
+	face_mask:      u32,
 	active:         bool,
 	is_border:      bool,
 	premium:        bool,

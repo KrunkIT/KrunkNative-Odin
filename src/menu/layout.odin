@@ -61,30 +61,33 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 home :: proc(state: ^State, view: View) {
 	s := state.scale
 	class := selected(view)
-	if clay.UI(clay.ID("Welcome"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(26 * s)), childGap = u16(12 * s)}}) {
-		text(view.active ? "BACK IN THE ACTION" : "JUMP IN. KEEP MOVING.", 13, s, ACCENT)
-		text(view.active ? "READY FOR MORE?" : "MAKE YOUR NEXT MOVE.", 48, s)
-		text(view.online ? "Your match is live. Choose a class and join the action." : "Practice your movement, learn the maps, find your class.", 17, s, MUTED)
-		spacer()
-		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(24 * s)}}) {
-			text(view.map_name, 24, s)
-			text(view.mode, 16, s, ACCENT)
+	if clay.UI(clay.ID("Welcome"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(24 * s)}}) {
+		if clay.UI(clay.ID("WelcomeCopy"))({layout = {sizing = {width = clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = u16(8 * s)}}) {
+			text(view.active ? "BACK IN THE ACTION" : "JUMP IN. KEEP MOVING.", 13, s, ACCENT)
+			text(view.active ? "READY FOR MORE?" : "MAKE YOUR NEXT MOVE.", 48, s)
+			text(view.online ? "Your match is live. Choose a class and join the action." : "Practice your movement, learn the maps, find your class.", 17, s, MUTED)
 		}
-		text(fmt.tprintf("%d PLAYER%s IN SESSION", view.player_count, view.player_count == 1 ? "" : "S"), 12, s, MUTED)
+		if clay.UI(clay.ID("SessionSummary"))({layout = {sizing = {width = clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = u16(8 * s)}}) {
+			if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(20 * s), childAlignment = {y = .Center}}}) {
+				text(view.map_name, 24, s)
+				text(view.mode, 16, s, ACCENT)
+			}
+			text(fmt.tprintf("%d PLAYER%s IN SESSION", view.player_count, view.player_count == 1 ? "" : "S"), 12, s, MUTED)
+		}
 	}
-	if clay.UI(clay.ID("HomeCards"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(230 * s)}, childGap = u16(18 * s)}}) {
+	if clay.UI(clay.ID("HomeCards"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(250 * s)}, childGap = u16(18 * s)}}) {
 		if clay.UI(clay.ID("LoadoutCard"))({
 			layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(10 * s)},
 			backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(8 * s),
 		}) {
 			text("YOUR NEXT LOADOUT", 12, s, MUTED)
-			text(class.name, 26, s)
-			text(class.weapon, 16, s, ACCENT)
+			text(class.name, 23, s)
+			text(class.weapon, 14, s, ACCENT)
 			spacer()
 			button(state, "CHANGE CLASS", "ChangeClass", {index = i32(Page.CLASSES)})
 		}
 		if clay.UI(clay.ID("PlayCard"))({
-			layout = {sizing = {width = clay.SizingFixed(310 * s), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(10 * s)},
+			layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(10 * s)},
 			backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(8 * s),
 		}) {
 			text(view.online ? "MULTIPLAYER" : "LOCAL PLAY", 12, s, MUTED)
@@ -95,7 +98,7 @@ home :: proc(state: ^State, view: View) {
 			button(state, label, "Play", {kind = .PLAY}, primary = true, enabled = view.ready && !view.spawn_pending)
 		}
 		if clay.UI(clay.ID("JoinCard"))({
-			layout = {sizing = {width = clay.SizingFixed(310 * s), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(10 * s)},
+			layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(24 * s)), childGap = u16(10 * s)},
 			backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(8 * s),
 		}) {
 			text("CUSTOM / RANKED LOBBY", 12, s, MUTED)
@@ -140,7 +143,6 @@ classes :: proc(state: ^State, view: View) {
 							border = {color = ACCENT, width = clay.BorderOutside(state.focus == id.id || is_selected ? 1 : 0)},
 						}) {
 							text(class.name, 18, s, is_selected ? ACCENT : WHITE)
-							spacer()
 							text(class.weapon, 12, s, MUTED)
 						}
 					}

@@ -53,6 +53,7 @@ Quad_Material :: struct {
 	border_top_left_radius: f32,
 	border_top_right_radius: f32,
 	r_clip: f32,
+	stroke_width: f32,
 	texture_viewport: [4]f32,
 	texture: u32,
 }
@@ -69,11 +70,16 @@ Basic_Material :: struct {
 	is_ladder: bool,
 	use_face_tex_scaling: bool,
 	face_scale: shared.Vec3,
+	face_mask: u32,
+	texture_scale: f32,
+	unlit: bool,
 	color: shared.Vec4,
 	emissive: shared.Vec4,
 	alpha_test: f32,
 	texture_repeat: shared.Vec2,
 	texture_offset: shared.Vec2,
+	base_texture_offset: shared.Vec2,
+	texture_rotation: f32,
 	texture: u32,
 }
 

@@ -11,7 +11,45 @@ when ODIN_TEST {
 	@(test)
 	prefab_texture_registry :: proc(t: ^testing.T) {
 		testing.expect(t, len(prefab_textures) > 5, "prefab texture registry is missing the default slot")
-		testing.expect(t, prefab_textures[5] == "sand", "map texture index 5 must resolve to sand_0.png")
+		testing.expect(t, prefab_textures[5] == "default", "map texture index 5 must remain the untextured default material")
+		testing.expect(t, len(prefab_textures) >= 20, "live map texture registry must expose all 20 slots")
+		testing.expect(t, prefab_textures[17] == "metal", "map texture index 17 must resolve to metal")
+		testing.expect(t, prefab_textures[18] == "sand", "map texture index 18 must resolve to sand")
+		 testing.expect(t, prefab_textures[19] == "snow", "map texture index 19 must resolve to snow")
+		testing.expect(t, len(prefab_models) >= 99, "live prefab model table must cover current map IDs")
+		testing.expect(t, prefab_models[55].filename == "ghost_0", "AI spawner prefab 55 must render its ghost model")
+		testing.expect(t, prefab_models[84].filename == "water_tower_0", "water tower prefab 84 must resolve its model")
+	}
+
+	@(test)
+	prefab_model_variant_registry :: proc(t: ^testing.T) {
+		// Texture-only variants keep the base OBJ; `diffM` variants select the
+		// matching geometry file as the browser does.
+		testing.expect(t, model_geometry_variant(int(shared.Prefab.CRATE), 1) == 0, "crate texture-only variant must keep base geometry")
+		testing.expect(t, model_geometry_variant(int(shared.Prefab.CRATE), 2) == 2, "crate diffM variant must select crate_0_2.obj")
+		testing.expect(t, model_geometry_variant(int(shared.Prefab.TREE), 8) == 8, "tree HD variant must select tree_0_8.obj")
+		testing.expect(t, model_geometry_variant(int(shared.Prefab.VEHICLE), 1) == 0, "vehicle classic texture must keep base geometry")
+	}
+
+	@(test)
+	sandstorm_v3_texture_metadata :: proc(t: ^testing.T) {
+		path := shared.concat(shared.assets_path(), "maps/sandstorm_v3.json")
+		map_inst, ok := shared.map_load_from_file(path)
+		delete(path)
+		if !testing.expect(t, ok && map_inst != nil, "Sandstorm v3 map must load for texture parity checks") do return
+		defer shared.map_destroy(map_inst)
+
+		found_dirt_variant := false
+		found_lines_variant_2 := false
+		found_face_mask := false
+		for object in map_inst.objects {
+			if object.texture == 1 && object.texture_variant == 1 { found_dirt_variant = true }
+			if object.texture == 10 && object.texture_variant == 2 { found_lines_variant_2 = true }
+			if object.face_mask != 0x3f { found_face_mask = true }
+		}
+		testing.expect(t, found_dirt_variant, "Sandstorm v3 dirt tv=1 variant was not parsed")
+		testing.expect(t, found_lines_variant_2, "Sandstorm v3 lines tv=2 variant was not parsed")
+		testing.expect(t, found_face_mask, "Sandstorm v3 face visibility masks were not parsed")
 	}
 
 	// Exercise the actual map/mesh/camera handoff in a hidden GL window. This

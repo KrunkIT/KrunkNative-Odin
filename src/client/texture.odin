@@ -27,12 +27,22 @@ texture_manager_init :: proc() -> Texture_Manager {
 	// KrunkNative client. Keep the list in index order; map JSON stores only the
 	// numeric index in its "t" field.
 	texture_names := [?]string{
-		"wall", "dirt", "floor", "grid", "grey", "sand", "roof", "flag",
-		"grass", "check", "lines", "brick", "link", "liquid", "grain", "fabric", "tile",
+		"wall", "dirt", "floor", "grid", "grey", "default", "roof", "flag",
+		"grass_1", "check", "lines", "brick", "link", "liquid", "grain", "fabric", "tile",
+		"metal", "sand", "snow",
 	}
 
 	for name, idx in texture_names {
-		path := strings.concatenate({"assets/textures/", name, "_0.png"})
+		// Slot 5 is the live DEFAULT material and deliberately has no image.
+		if name == "default" {
+			continue
+		}
+		suffix := "_0"
+		if idx == 8 {
+			// The browser registry points grass at grass_1.png.
+			suffix = ""
+		}
+		path := strings.concatenate({"assets/textures/", name, suffix, ".png"})
 		tex, ok := texture_load_from_file(path)
 		if !ok {
 			fmt.eprintf("Failed to load texture %d: %s\n", idx, path)
@@ -42,19 +52,8 @@ texture_manager_init :: proc() -> Texture_Manager {
 		fmt.printf("Loaded texture %d: %s (%dx%d)\n", idx, path, tex.width, tex.height)
 	}
 
-	// The supplied asset pack has no default_0.png. sand_0.png is the closest
-	// equivalent and is also what the map set expects for its default material.
-	if _, ok := tm.textures[5]; !ok {
-		fallback_tex, fallback_ok := texture_load_from_file("assets/textures/sand_0.png")
-		if fallback_ok {
-			tm.textures[5] = fallback_tex.id
-		}
-	}
-
 	if wall, ok := tm.textures[0]; ok {
 		tm.fallback = wall
-	} else if sand, ok := tm.textures[5]; ok {
-		tm.fallback = sand
 	}
 	return tm
 }

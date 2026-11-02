@@ -277,6 +277,25 @@ map_load_from_file :: proc(filename: string) -> (map_ptr: ^Map, ok: bool) {
 
 		if t_val, has_t := raw_obj["t"]; has_t {
 			obj.texture = u32(get_json_f32(t_val))
+		} else if obj.prefab == .LADDER {
+			obj.texture = 2
+		}
+		if tv_val, has_tv := raw_obj["tv"]; has_tv && json_is_number(tv_val) {
+			obj.texture_variant = i32(get_json_f32(tv_val))
+		}
+		// Current map exports encode visible cube faces as a hexadecimal bit mask
+		// in `f`. Missing faces are intentionally omitted to avoid drawing hidden
+		// sides of adjacent blocks.
+		obj.face_mask = 0x3f
+		if f_val, has_f := raw_obj["f"]; has_f {
+			#partial switch v in f_val {
+			case json.String:
+				obj.face_mask = map_face_mask_native(parse_hex_u32(string(v)))
+			case json.Integer:
+				obj.face_mask = map_face_mask_native(u32(max(0, i32(v))))
+			case json.Float:
+				obj.face_mask = map_face_mask_native(u32(max(0, i32(v))))
+			}
 		}
 
 		if prefab_id == i32(Prefab.BOOST_PAD) {
@@ -484,6 +503,32 @@ json_is_number :: proc(val: json.Value) -> bool {
 	}
 
 	return false
+}
+
+parse_hex_u32 :: proc(value: string) -> u32 {
+	result: u32 = 0
+	for ch in value {
+		digit: u32
+		switch ch {
+		case '0'..='9': digit = u32(ch - '0')
+		case 'a'..='f': digit = u32(ch - 'a') + 10
+		case 'A'..='F': digit = u32(ch - 'A') + 10
+		case: continue
+		}
+		result = (result << 4) | digit
+	}
+	return result
+}
+
+// Browser face order is +X, -X, +Y, -Y, +Z, -Z. Native cube geometry is
+// front(+Z), back(-Z), left(-X), right(+X), top(+Y), bottom(-Y).
+map_face_mask_native :: proc(raw: u32) -> u32 {
+	return (((raw >> 1) & 1) << 0) |
+		(((raw >> 0) & 1) << 1) |
+		(((raw >> 4) & 1) << 2) |
+		(((raw >> 5) & 1) << 3) |
+		(((raw >> 3) & 1) << 4) |
+		(((raw >> 2) & 1) << 5)
 }
 
 is_nullish :: proc(val: json.Value) -> bool {

@@ -61,8 +61,11 @@ load_glyph :: proc(c: u8) -> ^Glyph_Cache_Entry {
 
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		// Glyphs are grayscale coverage textures. Linear filtering preserves
+		// their edge coverage when the 100 px raster is scaled to UI size;
+		// nearest filtering makes every menu and HUD character look jagged.
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 
 		gl.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
 		stbtt.FreeBitmap(bitmap, nil)
@@ -84,7 +87,7 @@ load_font :: proc() {
 		return
 	}
 
-	font_path := shared.concat(shared.assets_path(), "css/fonts/font2.ttf")
+	font_path := shared.concat(shared.assets_path(), "css/fonts/Rajdhani-SemiBold.ttf")
 	font_data, ok := shared.read_file(font_path)
 	delete(font_path)
 
@@ -240,8 +243,14 @@ ui_fill_rect_rclip :: proc(ui: ^UI, color: shared.Vec4, x, y, width, height, rad
 	ui_fill_rect_(ui, ui.material.base.program, x, y, width, height)
 }
 
-ui_draw_image :: proc(ui: ^UI, texture_id: u32, x, y, width, height: f32) {
-	ui.material.color = shared.Vec4{1.0, 1.0, 1.0, 1.0}
+ui_stroke_round_rect :: proc(ui: ^UI, color: shared.Vec4, x, y, width, height, radius, thickness: f32) {
+	ui.material.stroke_width = thickness / min(width, height)
+	ui_round_rect(ui, color, x, y, width, height, radius)
+	ui.material.stroke_width = 0
+}
+
+ui_draw_image :: proc(ui: ^UI, texture_id: u32, x, y, width, height: f32, color := shared.Vec4{1.0, 1.0, 1.0, 1.0}) {
+	ui.material.color = color
 	ui.material.texture = texture_id
 
 	ui.material.texture_viewport = [4]f32{0.0, 0.0, 1.0, 1.0}
@@ -291,6 +300,7 @@ ui_draw_image_rounded :: proc(ui: ^UI, texture_id: u32, x, y, width, height, rad
 
 ui_measure_text :: proc(ui: ^UI, text: string, size: f32) -> f32 {
 	width: f32 = 0
+	previous: rune
 
 	for c in text {
 		glyph := load_glyph(u8(c))
@@ -298,15 +308,22 @@ ui_measure_text :: proc(ui: ^UI, text: string, size: f32) -> f32 {
 			continue
 		}
 
-		width += glyph.advance * size / 100.0
+		width += ui_text_kerning(previous, c, size) + glyph.advance * size / 100.0
+		previous = c
 	}
 
 	return width
 }
 
+ui_text_kerning :: proc(previous, current: rune, size: f32) -> f32 {
+	if previous == 0 || !g_font_loaded { return 0 }
+	return f32(stbtt.GetCodepointKernAdvance(&g_font_info, previous, current)) * stbtt.ScaleForPixelHeight(&g_font_info, size)
+}
+
 ui_fill_text :: proc(ui: ^UI, color: shared.Vec4, text: string, x, y, size: f32) -> f32 {
 	start_x := x
 	cursor_x := x
+	previous: rune
 
 	ui.text_material.color = color
 	gl.BindVertexArray(ui.vao)
@@ -323,15 +340,17 @@ ui_fill_text :: proc(ui: ^UI, color: shared.Vec4, text: string, x, y, size: f32)
 			continue
 		}
 
+		cursor_x += ui_text_kerning(previous, c, size)
 		if c != ' ' {
 			ui.text_material.texture = glyph.texture
 			material_update_uniforms(&ui.text_material.base)
 
 			glyph_y := y - glyph.h_bearing.y * size / 100.0
-			ui_fill_rect_(ui, ui.text_material.base.program, cursor_x - glyph.h_bearing.x * size / 100.0, glyph_y, glyph.size.x * size / 100.0, glyph.size.y * size / 100.0)
+			ui_fill_rect_(ui, ui.text_material.base.program, cursor_x + glyph.h_bearing.x * size / 100.0, glyph_y, glyph.size.x * size / 100.0, glyph.size.y * size / 100.0)
 		}
 
 		cursor_x += glyph.advance * size / 100.0
+		previous = c
 	}
 
 	return cursor_x - start_x

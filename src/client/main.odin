@@ -280,21 +280,26 @@ client_update_fps :: proc(client: ^Client, delta: f32) {
 }
 
 fps_render :: proc(client: ^Client) {
-	if !client.show_fps {
+	if !client.show_fps || !client.in_game || !client.mouse_state.locked {
 		return
 	}
 
-	text := fmt.tprintf("FPS %d", client.fps_value)
-
-	text_size := 20.0 * client.ui.scale
-	padding := 12.0 * client.ui.scale
-	width := ui_measure_text(client.ui, text, text_size) + padding * 2.0
-	height := 38.0 * client.ui.scale
-	x := 20.0 * client.ui.scale
+	text_size := 34.0 * client.ui.scale
+	// Keep the performance counter beside the timer instead of stacking it
+	// above the timer. The timer uses the same text size and left inset here.
+	remaining := max(0, int(client.game.match.time_remaining + 0.999))
+	timer := fmt.tprintf("%02d:%02d", remaining / 60, remaining % 60)
+	timer_width := ui_measure_text(client.ui, timer, HUD_TIMER_TEXT_SIZE * client.ui.scale)
+	timer_holder_width := timer_width + (HUD_TIMER_TEXT_INSET + HUD_TIMER_RIGHT_PADDING) * client.ui.scale
+	x := 20.0 * client.ui.scale + timer_holder_width + 12.0 * client.ui.scale
 	y := 20.0 * client.ui.scale
 
-	ui_round_rect(client.ui, shared.Vec4{0.0, 0.0, 0.0, 0.55}, x, y, width, height, 6.0 * client.ui.scale)
-	ui_fill_text(client.ui, shared.Vec4{1.0, 1.0, 1.0, 0.95}, text, x + padding, y + 27.0 * client.ui.scale, text_size)
+	value := fmt.tprintf("%d", client.fps_value)
+	label := " FPS"
+	baseline := y + 33.0 * client.ui.scale
+	ui_fill_text(client.ui, shared.Vec4{0.35, 0.95, 0.1, 1.0}, value, x, baseline, text_size)
+	value_width := ui_measure_text(client.ui, value, text_size)
+	ui_fill_text(client.ui, shared.Vec4{1.0, 1.0, 1.0, 0.95}, label, x + value_width, baseline, text_size)
 }
 
 client_load_map :: proc(client: ^Client) {

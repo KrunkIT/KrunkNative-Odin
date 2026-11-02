@@ -22,7 +22,8 @@ void main() {
         else if (gl_VertexID - 8 < 6) face_idx = 2;
         else face_idx = 3;
     } else {
-        face_idx = gl_VertexID / 4; // only works for quad mesh!
+		// Cube geometry uses four unique indexed vertices per face.
+		face_idx = gl_VertexID / 4;
     }
 
     gl_Position = camera_projection * camera_world_inverse * vec4(world_pos, 1.0f);

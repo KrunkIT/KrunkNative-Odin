@@ -10,7 +10,9 @@ SURFACE :: clay.Color{28, 37, 46, 255}
 SELECTED :: clay.Color{46, 64, 40, 255}
 
 text :: proc(label: string, size, scale: f32, color: clay.Color = WHITE) {
-	clay.Text(label, {fontSize = u16(size * scale), lineHeight = u16(size * scale * 1.3), textColor = color})
+	// Rajdhani needs larger type to keep labels comfortable to read.
+	font_size := size * scale * 1.25
+	clay.Text(label, {fontSize = u16(font_size), lineHeight = u16(font_size * 1.1), textColor = color})
 }
 
 button :: proc(state: ^State, label, id_label: string, action: Action, selected: bool = false, primary: bool = false, enabled: bool = true) {
@@ -22,7 +24,7 @@ button :: proc(state: ^State, label, id_label: string, action: Action, selected:
 	if primary { color = enabled ? ACCENT : SURFACE }
 	label_color := !enabled ? MUTED : primary ? clay.Color{16, 25, 18, 255} : selected ? ACCENT : WHITE
 	if clay.UI(id)({
-		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(48 * state.scale)}, padding = clay.PaddingAll(u16(14 * state.scale)), childAlignment = {y = .Center}},
+		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(52 * state.scale)}, padding = {left = u16(16 * state.scale), right = u16(16 * state.scale), top = u16(10 * state.scale), bottom = u16(10 * state.scale)}, childAlignment = {x = .Center, y = .Center}},
 		backgroundColor = color,
 		cornerRadius = clay.CornerRadiusAll(5 * state.scale),
 		border = {color = state.focus == id.id ? ACCENT : clay.Color{}, width = clay.BorderOutside(state.focus == id.id ? 1 : 0)},
