@@ -26,13 +26,13 @@ test_server_physics :: proc() -> bool {
 		active = true,
 		collision_type = .BOX,
 		position = {0, 0, 0},
-		scale = {100, 1, 100},
+		scale = {1000, 1, 1000},
 	}
 	wall := shared.Object{
 		active = true,
 		collision_type = .BOX,
 		position = {0, 1, 0},
-		scale = {1, 20, 100},
+		scale = {1, 20, 1000},
 	}
 	append(&map_inst.objects, &floor, &wall)
 

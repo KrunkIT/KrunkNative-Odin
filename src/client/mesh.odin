@@ -16,6 +16,12 @@ mesh_init :: proc(geometry: ^Geometry, material: ^Material) -> ^Mesh {
 }
 
 mesh_update_transform_matrix :: proc(mesh: ^Mesh) {
+	// Most map meshes have no parent and never move. Compare the actual public
+	// fields so direct edits still take effect without a separate dirty API.
+	// Parented meshes always update: an ancestor may have moved independently.
+	if mesh.transform.parent == nil && mesh.transform_cached && mesh.transform == mesh.last_transform {
+		return
+	}
 	transform_matrix := linalg.MATRIX4F32_IDENTITY
 
 	transform: ^Mesh_Transform = &mesh.transform
@@ -48,6 +54,8 @@ mesh_update_transform_matrix :: proc(mesh: ^Mesh) {
 	}
 
 	mesh.transform_matrix = transform_matrix
+	mesh.last_transform = mesh.transform
+	mesh.transform_cached = true
 }
 
 mesh_fini :: proc(mesh: ^Mesh) {

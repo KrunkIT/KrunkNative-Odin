@@ -4,6 +4,7 @@ layout (location = 1) in vec2 v_tex_coord;
 
 uniform vec2 offset;
 uniform vec2 scale;
+uniform float depth;
 
 out vec2 tex_coord;
 
@@ -11,5 +12,5 @@ void main() {
     tex_coord = v_tex_coord;
 
     vec2 transformed = v_pos.xy * scale + offset;
-    gl_Position = vec4(transformed.xy, 0.0f, 1.0f);
+    gl_Position = vec4(transformed.xy, depth, 1.0f);
 }

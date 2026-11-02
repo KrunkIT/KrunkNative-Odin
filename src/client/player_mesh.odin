@@ -489,7 +489,13 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	weapon_offset_mlt := shared.Vec3{1.0, 1.0, 1.0}
 
 	third_person := player_uses_third_person_camera(player)
-	aim_val_mlt: f32 = animate_aim && player.is_you ? player.aim_val : 0.0
+	view_aim := player.aim_val
+	view_position := player.position
+	if g_client != nil && g_client.krunker.connected && g_client.me == player && !is_preview {
+		sample := krunker_client_render_sample(g_client)
+		view_aim, view_position = sample.aim, sample.position
+	}
+	aim_val_mlt: f32 = animate_aim && player.is_you ? view_aim : 0.0
 	aim_mlt: f32 = player.weapon.animate_while_aiming ? 0.0 : aim_val_mlt
 	anim_mlt := (1.0 - (1.0 - shared.GAME_CONSTANTS.aim_anim_mlt) * aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt * weapon_bobbing_mlt
 	anim_mlt_crouch := 1.0 - player.crouch_val * 0.8
@@ -550,7 +556,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	// Every entity's root follows its authoritative position. Previously this
 	// was restricted to the local/preview player, leaving network peers moving
 	// and rotating at the world origin despite receiving correct snapshots.
-	player_mesh.anchor.position = player.position
+	player_mesh.anchor.position = view_position
 	player_mesh.anchor.position.y += step_y
 
 	if player.game.map_inst.config.model != .SPRITE {
@@ -693,8 +699,8 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 			arms.weapon_right.transform.position = {0.9, -0.95, 0.72}
 			arms.weapon_right.transform.rotation = {MELEE_ROT_X, MELEE_ROT_Y, MELEE_ROT_Z}
 		}
-		if player.aim_val > 0 && player.can_throw && player.weapon.can_throw {
-			wind_up := player.aim_val
+		if view_aim > 0 && player.can_throw && player.weapon.can_throw {
+			wind_up := view_aim
 			arms.right.pivot.rotation.z -= wind_up * 1.3
 			arms.right.pivot.position.x += wind_up * 1.7
 			arms.right.pivot.position.z += wind_up * 1.8

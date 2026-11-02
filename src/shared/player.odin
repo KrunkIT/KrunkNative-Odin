@@ -140,6 +140,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0) {
 
 	player.swap_timer = 0.0
 	player.slide_timer = 0.0
+	player.can_slide_timer = 0.0
 	player.jump_timer = 0.0
 	player.reload_timer = 0.0
 
@@ -239,18 +240,19 @@ player_reset_step :: proc(player: ^Player, recon: bool) {
 		player_animate_land(player)
 	}
 
-	if !player.game.config.can_slide || player.game.mode.config.real_movement || player.crouch_val == 0 || !player.can_slide {
+	if !player.game.config.can_slide || player.game.mode.config.real_movement || player.crouch_val == 0 || !player.can_slide || player.can_slide_timer > 0 {
 		return
 	}
 
 	player.can_slide = false
+	player.can_slide_timer = 0.1
 
 	player.slide_timer = GAME_CONSTANTS.slide_time *
 		player.game.config.slide_time *
 		player.game.map_inst.config.slide_time *
 		player.crouch_val
 
-	slide_mlt := (player.on_terrain ? GAME_CONSTANTS.player_terrain_slide_velocity_mlt : GAME_CONSTANTS.player_slide_velocity_mlt) * player.game.map_inst.config.slide_accel
+	slide_mlt := (player.on_terrain ? GAME_CONSTANTS.player_terrain_slide_velocity_mlt : GAME_CONSTANTS.player_slide_velocity_mlt) * player.game.map_inst.config.slide_accel * player.game.config.slide_speed
 
 	player.velocity.x *= slide_mlt
 	player.velocity.z *= slide_mlt
@@ -738,7 +740,7 @@ player_update_recoil :: proc(player: ^Player, delta: f32) {
 
 // Fresh client prediction may play movement effects. Reconciliation replays
 // leave predict_effects false so snapshots cannot restart the same animation.
-player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool, predict_effects: bool = false) {
+player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool, predict_effects: bool = false, predict_combat: bool = false) {
 	delta := min(input.delta, GAME_CONSTANTS.max_delta)
 	move_dir := -math.PI / 2.0 + math.PI / 4.0 * f32(input.move_dir)
 
@@ -798,7 +800,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 				swap_to = 0
 			}
 
-			player_swap_weapon(player, swap_to, false, false, recon)
+			player_swap_weapon(player, swap_to, false, false, recon && !predict_combat)
 		}
 	}
 
@@ -875,6 +877,7 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 			decel = GAME_CONSTANTS.air_decel
 		}
 
+		player.can_slide_timer = max(0, player.can_slide_timer - delta)
 		if player.crouch_val <= 0.5 {
 			player.can_slide = true
 		}
@@ -928,6 +931,11 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 		if input.move_dir >= 0 {
 			yaw_origin := player.direction.y
+			// The browser boosts diagonal inputs before applying acceleration.
+			// Omitting this loses about ten world units per second with the SMG.
+			if input.move_dir % 2 != 0 && !player.game.mode.config.real_movement {
+				accel *= player.game.config.strafe_speed
+			}
 
 			player.velocity.x += accel * math.cos(move_dir - yaw_origin)
 			player.velocity.z += accel * math.sin(move_dir - yaw_origin)
@@ -949,28 +957,43 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 			}
 		}
 
-		if player.velocity.x != 0 {
-			player.position.x += player.velocity.x * player.game.map_inst.config.speed.x * delta * 1000.0
-			player.velocity.x *= math.pow(decel, delta * 1000.0)
-			player.velocity.x = crop(player.velocity.x, GAME_CONSTANTS.min_decel)
-		}
-
-		if player.velocity.y != 0 {
-			player.position.y += player.velocity.y * player.game.map_inst.config.speed.y * delta * 1000.0
-
-			if player.noclip {
-				player.velocity.y *= math.pow(decel, delta * 1000.0)
-			} else if player.velocity.y > 0.0 {
-				player.velocity.y -= delta * 0.032
-			} else if player.velocity.y < -0.3 {
-				player.velocity.y = -0.3
+		if player.game.config.fixed_movement && !player.noclip {
+			// fixMov integrates exponential drag over the entire command. Comp
+			// lobbies send this setting; the Euler path travels farther each tick.
+			ms := delta * 1000
+			decay := math.pow(decel, ms)
+			travel := decel == 1 ? ms : (decay - 1) / math.ln(decel)
+			player.position.x += player.velocity.x * travel * player.game.map_inst.config.speed.x
+			player.position.z += player.velocity.z * travel * player.game.map_inst.config.speed.z
+			player.velocity.x = crop(player.velocity.x * decay, GAME_CONSTANTS.min_decel)
+			player.velocity.z = crop(player.velocity.z * decay, GAME_CONSTANTS.min_decel)
+			vertical_decay := math.pow(f32(0.9993), ms)
+			player.position.y += player.velocity.y * (vertical_decay - 1) / math.ln(f32(0.9993)) * player.game.map_inst.config.speed.y
+			player.velocity.y *= vertical_decay
+		} else {
+			if player.velocity.x != 0 {
+				player.position.x += player.velocity.x * player.game.map_inst.config.speed.x * delta * 1000.0
+				player.velocity.x *= math.pow(decel, delta * 1000.0)
+				player.velocity.x = crop(player.velocity.x, GAME_CONSTANTS.min_decel)
 			}
-		}
 
-		if player.velocity.z != 0 {
-			player.position.z += player.velocity.z * player.game.map_inst.config.speed.z * delta * 1000.0
-			player.velocity.z *= math.pow(decel, delta * 1000.0)
-			player.velocity.z = crop(player.velocity.z, GAME_CONSTANTS.min_decel)
+			if player.velocity.y != 0 {
+				player.position.y += player.velocity.y * player.game.map_inst.config.speed.y * delta * 1000.0
+
+				if player.noclip {
+					player.velocity.y *= math.pow(decel, delta * 1000.0)
+				} else if player.velocity.y > 0.0 {
+					player.velocity.y -= delta * 0.032
+				} else if player.velocity.y < -0.3 {
+					player.velocity.y = -0.3
+				}
+			}
+
+			if player.velocity.z != 0 {
+				player.position.z += player.velocity.z * player.game.map_inst.config.speed.z * delta * 1000.0
+				player.velocity.z *= math.pow(decel, delta * 1000.0)
+				player.velocity.z = crop(player.velocity.z, GAME_CONSTANTS.min_decel)
+			}
 		}
 
 		can_jump := player.on_ground && !player.did_jump
@@ -1027,7 +1050,9 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 		}
 	}
 
-	if !recon && player.game.map_inst.config.model != .SPRITE {
+	// Live Krunker predicts magazine/reload state and shot presentation once,
+	// while movement reconciliation never repeats these effects.
+	if (!recon || predict_combat) && player.game.map_inst.config.model != .SPRITE {
 		if input.reload && !player.game.mode.config.no_reloads {
 			player_reload(player)
 		}
@@ -1060,10 +1085,10 @@ player_proc_input :: proc(player: ^Player, input: ^Input, recon, move_lock: bool
 
 			if will_shoot && player.reloads[player.loadout_index] <= 0.0 && player.swap_timer <= 0.0 && player.reload_timer <= 0.0 {
 				if player.weapon.melee {
-					player_melee(player)
+					player_melee(player, recon)
 				} else {
 					if player.ammo[player.loadout_index] > 0 {
-						player_shoot(player)
+						player_shoot(player, recon)
 					} else if !player.game.mode.config.no_reloads {
 						player_reload(player)
 					}
@@ -1116,7 +1141,7 @@ player_step :: proc(player: ^Player, distance: f32) {
 	}
 }
 
-player_melee :: proc(player: ^Player) {
+player_melee :: proc(player: ^Player, presentation_only: bool = false) {
 	is_throw := player.can_throw && player.weapon.can_throw && player.aim_val == 1.0
 
 	player.reloads[player.loadout_index] = player.weapon.rate * player.game.config.fire_rate
@@ -1129,6 +1154,7 @@ player_melee :: proc(player: ^Player) {
 	if is_throw {
 		player.can_throw = player.unlimited_ammo
 	} else {
+		if presentation_only { return }
 		shot_height := player.position.y + player.height - GAME_CONSTANTS.camera_height
 		shot_angles := Vec2{player.direction.x, player.direction.y}
 		range := max(15.0, player.weapon.range)
@@ -1192,7 +1218,7 @@ player_melee :: proc(player: ^Player) {
 	}
 }
 
-player_shoot :: proc(player: ^Player) {
+player_shoot :: proc(player: ^Player, presentation_only: bool = false) {
 	if !player.unlimited_ammo {
 		player.ammo[player.loadout_index] -= 1
 	}
@@ -1290,7 +1316,7 @@ player_shoot :: proc(player: ^Player) {
 				}
 			}
 
-			if nearest_player != nil {
+			if nearest_player != nil && !presentation_only {
 				distance := range * nearest_t
 				damage := player.weapon.damage
 				if player.weapon.range > player.weapon.drop_start && distance > player.weapon.drop_start {

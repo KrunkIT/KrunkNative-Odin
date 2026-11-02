@@ -25,17 +25,22 @@ krunker_client_load_world_map :: proc(client: ^Client) -> bool {
 	client_clear_players(client)
 	client_clear_impacts(client)
 	clear(&state.player_revisions)
+	krunker_client_reset_prediction(client)
+	state.local_sync_revision = 0
+	state.local_ammo_revision = 0
 	if client.game.maps_list_owned { delete(client.game.maps_list) }
 	client.game.maps_list = make([]^shared.Map, 1)
 	client.game.maps_list[0] = map_inst
 	client.game.maps_list_owned = true
 	client.game.map_count = 1
+	if world.has_game_config { client.game.config = world.game_config }
 	shared.game_init(&client.game, 0, world.mode_index, false)
 	if !client.game.ready { krunker_ws_set_status(client, "Could not initialize lobby map/mode; see logs/krunker-network.log"); return false }
 	client_load_current_map(client)
 	client.camera.position = map_inst.camera_position
 	client.game.move_lock = world.move_lock
 	state.render_map_ready = true
+	kproto.network_log("world-movement", fmt.tprintf("fixed=%v strafe=%.3f jump=%.3f gravity=%.3f slide_speed=%.3f delta=%.3f", client.game.config.fixed_movement, client.game.config.strafe_speed, client.game.config.jump_mlt, client.game.config.gravity_mlt, client.game.config.slide_speed, client.game.config.delta_mlt))
 	kproto.network_log("world-map", fmt.tprintf("READY asset=%s objects=%d is_local=%v", shared.map_asset_name(name), len(map_inst.objects), client.game.is_local))
 	return true
 }
@@ -56,6 +61,8 @@ krunker_client_sync_world :: proc(client: ^Client) {
 		}
 		player := client_find_player(client, source.sid)
 		created := player == nil
+		was_active := player != nil && player.active
+		respawned := created || player != nil && (player.class_index != source.class_index || !was_active && source.active)
 		if created {
 			player = shared.player_init(&client.game)
 			if player == nil { kproto.network_log("world-player", "ERROR player allocation failed"); continue }
@@ -65,32 +72,28 @@ krunker_client_sync_world :: proc(client: ^Client) {
 			player.render_you = is_you
 			shared.game_players_add(&client.game, player)
 			shared.player_spawn(player, source.class_index)
-		} else if player.class_index != source.class_index {
+		} else if respawned {
 			if player.mesh != nil {
 				scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
 				player_meshes_fini(player)
 			}
 			shared.player_spawn(player, source.class_index)
 		}
+		if respawned {
+			// As with native snapshots, spawning projects a server-owned entity.
+			// Its offline spawn/swap timer would never advance during prediction.
+			player.swap_timer = 0
+			if is_you { krunker_client_reset_prediction(client); state.local_ammo_revision = 0 }
+		}
 		player.team = source.team
 		player.active = source.active
-		player.position = source.position
-		player.velocity = source.velocity
-		if !is_you || created { player.direction = source.direction }
-		player.on_ground = source.on_ground
-		player.crouch_val = clamp(source.crouch_val, 0, 1)
-		player.aim_val = clamp(source.aim_val, 0, 1)
+		if !player.active && was_active && player.mesh != nil {
+			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
+		}
 		player.health = source.health
 		player.max_health = i32(source.max_health)
-		shared.player_update_height(player)
-		if is_you && source.has_ack {
-			client_discard_acked_inputs(client, source.ack_seq)
-			for &input in client.predicted_inputs { shared.player_proc_input(player, &input, true, world.move_lock) }
-			state.input_sequence = max(state.input_sequence, source.ack_seq + 1)
-		}
-		for weapon, slot in player.loadout {
-			if weapon == source.weapon && player.loadout_index != i32(slot) { shared.player_swap_weapon(player, i32(slot), true, true, true); break }
-		}
+		krunker_client_apply_motion(client, player, &source, respawned)
+		if is_you { krunker_client_apply_ammo(client, player, &source) }
 		if player.mesh == nil && player.active {
 			player_generate_meshes(player, is_you)
 			if player.mesh != nil { scene_add_player_mesh(is_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size)) }
@@ -112,4 +115,5 @@ krunker_client_sync_world :: proc(client: ^Client) {
 			}
 		}
 	}
+	krunker_client_present_shots(client)
 }

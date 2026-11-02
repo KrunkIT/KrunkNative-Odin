@@ -368,6 +368,7 @@ ui_fini :: proc(ui: ^UI) {
 		free(glyph)
 	}
 	delete(g_glyph_cache)
+	g_glyph_cache = nil
 
 	if ui.vao != 0 {
 		gl.DeleteVertexArrays(1, &ui.vao)

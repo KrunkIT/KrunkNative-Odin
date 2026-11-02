@@ -4,11 +4,11 @@ import "core:c"
 import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
-import "core:math"
 import "core:os"
 import "core:strings"
 import "core:time"
 import curl "vendor:curl"
+import glfw "vendor:glfw"
 import shared "../shared"
 import kproto "../krunker"
 
@@ -38,11 +38,21 @@ Krunker_WS_State :: struct {
 	rendered_map_revision: u64,
 	render_map_ready: bool,
 	player_revisions: map[i32]u64,
+	local_sync_revision: u64,
+	local_ammo_revision: u64,
 	ready_received: bool,
 	bootstrap_step: int,
 	next_bootstrap: f64,
 	last_server_message: string,
-	input_elapsed: f32,
+	input_elapsed: f64,
+	send_elapsed: f64,
+	input_commands: [dynamic]shared.Input,
+	input_reset: bool,
+	input_swap: u8,
+	command_direction: shared.Vec2,
+	render_previous, render_current: Krunker_Render_Sample,
+	render_sample_ready: bool,
+	prediction_corrections: int,
 	input_sequence: i32,
 	input_logged: int,
 	heartbeat_logged: int,
@@ -309,7 +319,9 @@ krunker_ws_flush_pending :: proc(state: ^Krunker_WS_State) -> bool {
 	return true
 }
 
-KRUNKER_BOOTSTRAP_OPS := [?]string{"po", "en", "team", "class", "en", "q", "q", "q", "q", "q", "v"}
+// Entry ends with the class/team spawn request. Captured idle q packets used
+// to delay real input by three seconds after spawn; live commands replace them.
+KRUNKER_BOOTSTRAP_OPS := [?]string{"po", "en", "team", "class", "en"}
 
 krunker_ws_bootstrap_tick :: proc(client: ^Client) {
 	state := &client.krunker
@@ -344,6 +356,7 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte) {
 		if state.rx_logged <= 40 || (opcode != "k" && opcode != "l" && opcode != "gmsg") {
 			kproto.network_log("msgpack", fmt.tprintf("RECV opcode=%v args=%d trailer=%d complete_message_bytes=%d", packet[0], len(packet)-1, counter, len(payload)))
 		}
+		client.krunker_world.received_at = glfw.GetTime()
 		applied := kproto.krunker_world_apply_packet(&client.krunker_world, packet)
 		if is_text {
 			switch opcode {
@@ -398,21 +411,41 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte) {
 					}
 				}
 			case "f":
-				kproto.network_log("input", fmt.tprintf("server reported input synchronization failure args=%v; resetting prediction history", packet[1:]))
-				clear(&client.predicted_inputs)
+				kproto.network_log("input", fmt.tprintf("server reported input synchronization failure args=%v; next q will reset input synchronization", packet[1:]))
+				krunker_client_reset_prediction(client)
+				state.input_reset = true
 			}
 		}
 		if applied { krunker_client_sync_world(client) }
 	}
 }
 
-krunker_ws_send_input :: proc(client: ^Client, input: ^shared.Input) {
+// Encoding is side-effect free: E_AGAIN and pending control messages must keep
+// the reset flag, commands, and packet counter for the eventual successful send.
+krunker_ws_encode_input :: proc(state: ^Krunker_WS_State) -> ([]byte, bool) {
+	count := min(len(state.input_commands), kproto.KRUNKER_MAX_INPUT_BATCH)
+	counter := kproto.krunker_msgpack_counter_next(state.ah_num, "q")
+	return kproto.krunker_input_encode_batch(state.input_commands[:count], counter, false, state.input_reset)
+}
+
+krunker_ws_input_sent :: proc(state: ^Krunker_WS_State, count: int, counter: u8) {
+	state.ah_num = counter
+	state.input_reset = false
+	copy(state.input_commands[:], state.input_commands[count:])
+	resize(&state.input_commands, len(state.input_commands)-count)
+	state.send_elapsed = max(0, state.send_elapsed - KRUNKER_SEND_SECONDS)
+	state.input_logged += 1
+}
+
+krunker_ws_send_input :: proc(client: ^Client) {
 	state := &client.krunker
 	if !state.connected || !state.spawned || !state.bootstrapped do return
-	state.input_elapsed = min(state.input_elapsed + input.delta, 0.1)
-	if state.input_elapsed < 1.0/30.0 || len(state.pending) > 0 do return
+	if state.send_elapsed < KRUNKER_SEND_SECONDS || len(state.pending) > 0 || len(state.input_commands) == 0 do return
+	count := min(len(state.input_commands), kproto.KRUNKER_MAX_INPUT_BATCH)
+	first_sequence := state.input_commands[0].seq
 	counter := kproto.krunker_msgpack_counter_next(state.ah_num, "q")
-	packet, ok := kproto.krunker_input_encode(input, i32(math.round(state.input_elapsed * 1000 * client.game.config.delta_mlt)), counter, client.krunker_world.move_lock)
+	reset := state.input_reset
+	packet, ok := krunker_ws_encode_input(state)
 	if !ok { krunker_ws_set_status(client, "Could not encode live movement input."); state.connected = false; return }
 	defer delete(packet)
 	sent: c.size_t
@@ -424,11 +457,9 @@ krunker_ws_send_input :: proc(client: ^Client, input: ^shared.Input) {
 		state.connected = false
 		return
 	}
-	state.ah_num = counter
-	state.input_elapsed = 0
-	state.input_sequence += 1
-	state.input_logged += 1
-	if state.input_logged <= 3 || state.input_logged % 120 == 0 { kproto.network_log("input", fmt.tprintf("SENT live q seq=%d move=%d bytes=%d counter=%d", input.seq, input.move_dir, sent, counter)) }
+	// Keep commands intact on E_AGAIN; only successful sends consume the queue.
+	krunker_ws_input_sent(state, count, counter)
+	if reset || state.input_logged <= 3 || state.input_logged % 120 == 0 { kproto.network_log("input", fmt.tprintf("SENT live q seq=%d samples=%d last_seq=%d bytes=%d counter=%d reset=%v", first_sequence, count, first_sequence+i32(count)-1, sent, counter, reset)) }
 }
 
 krunker_ws_poll :: proc(client: ^Client) {
@@ -486,6 +517,7 @@ krunker_ws_disconnect :: proc(state: ^Krunker_WS_State) {
 	delete(state.upgrade_capture.headers)
 	delete(state.message.buffer)
 	delete(state.player_revisions)
+	delete(state.input_commands)
 	delete(state.last_server_message)
 	delete(state.server_error)
 	state^ = {}

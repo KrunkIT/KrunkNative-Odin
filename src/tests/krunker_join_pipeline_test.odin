@@ -94,7 +94,7 @@ test_krunker_join_pipeline :: proc() -> bool {
 	sync[8] = f64(0.75); sync[9] = true
 	sync[15] = f64(0.25); sync[16] = f64(0.5); sync[17] = i64(3)
 	sync_packet := []krunker.Krunker_Msgpack_Value{"l", sync[:]}
-	if !krunker.krunker_world_apply_packet(&world, sync_packet) || local.position != (shared.Vec3{200, 40, -100}) || local.velocity != (shared.Vec3{3, 2, 4}) || !local.on_ground || local.weapon != 3 || local.aim_val != 0.25 || local.crouch_val != 0.5 || local.ack_seq != 20 { fmt.eprintln("Local sync pose/ack mapping failed"); return false }
+	if !krunker.krunker_world_apply_packet(&world, sync_packet) || local.position != (shared.Vec3{200, 40, -100}) || local.velocity != (shared.Vec3{3, 2, 4}) || !local.on_ground || local.weapon_slot != 3 || local.aim_val != 0.75 || local.crouch_val != 0.5 || local.ack_seq != 20 { fmt.eprintln("Local sync pose/ack mapping failed"); return false }
 	fmt.println("Krunker chunked/fragmented receive, numeric opcode, ownership and spawn pipeline tests OK")
 	return true
 }
@@ -112,7 +112,7 @@ test_krunker_live_input :: proc() -> bool {
 		angles := root[5].([]krunker.Krunker_Msgpack_Value)
 		controls := root[6].([]krunker.Krunker_Msgpack_Map_Entry)
 		valid := len(root) == 7 && root[0].(string) == "q" && root[2].(i64) == 21 && durations[0].(i64) == 33 && angles[0].(i64) == 250 && angles[1].(i64) == -4712 && len(controls) == 11
-		valid = valid && controls[0].value.(i64) == (locked ? -1 : 6) && controls[3].value.(i64) == (locked ? 0 : 1) && controls[7].value.(i64) == 2
+		valid = valid && controls[0].value.(i64) == (locked ? -1 : 7) && controls[3].value.(i64) == (locked ? 0 : 1) && controls[7].value.(i64) == 2
 		delete(packet)
 		if !valid { fmt.eprintln("Live q batch shape/angles/controls do not match browser compressor"); return false }
 	}

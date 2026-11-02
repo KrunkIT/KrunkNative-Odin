@@ -99,14 +99,19 @@ when ODIN_TEST {
 		client.krunker_world.map_index = 2
 		client.krunker_world.mode_index = 4
 		client.krunker_world.map_revision = 1
+		client.krunker_world.has_game_config = true
+		client.krunker_world.game_config = shared.DEFAULT_GAME_CONFIG
+		client.krunker_world.game_config.fixed_movement = true
 		client.krunker_world.local_sid = 7
 		append(&client.krunker_world.players, kproto.Krunker_World_Player{
 			sid = 7, class_index = 2, team = 2, position = {120, 30, -80},
+			weapon_slot = 0,
 			active = true, has_position = true, health = 100, max_health = 100, revision = 1,
 		})
 		krunker_client_sync_world(&client)
 		testing.expect(t, client.map_loaded && client.game.map_inst == shared.g_maps[2], "server map must load through the Sandstorm v3 alias")
 		testing.expect(t, !client.game.is_local, "live session must not run offline simulation")
+		testing.expect(t, client.game.config.fixed_movement, "server movement settings must reach the actual prediction game")
 		testing.expect(t, client.me == nil && !client.krunker.spawned, "player position alone must not manufacture a server start")
 		client.krunker_world.in_game = true
 		krunker_client_sync_world(&client)
@@ -116,6 +121,77 @@ when ODIN_TEST {
 		testing.expect(t, client.me.position == (shared.Vec3{120, 30, -80}), "camera target must use the server position")
 		testing.expect(t, client.me.mesh != nil && client.fps_scene.mesh_count > 0, "SMG view model must be attached")
 		testing.expect(t, client.mouse_state.locked, "confirmed spawn must leave the menu")
+		testing.expect(t, client.me.swap_timer == 0 && client.me.ammo[0] == 24, "live spawn must raise the weapon and use the current SMG magazine")
+		local_mesh := cast(^Player_Mesh)client.me.mesh
+		testing.expect(t, abs(local_mesh.upper_body_anchor.rotation.x - client.me.weapon.y_rotation) < 1e-5,
+			"local upper body must not remain bent by the offline spawn animation")
+
+		append(&client.krunker_world.players, kproto.Krunker_World_Player{
+			sid = 8, class_index = 3, team = 1, position = {100, 30, -80}, direction = {math.PI/6, math.PI/2},
+			weapon_slot = 0, active = true, has_position = true, health = 170, max_health = 170, revision = 1,
+		})
+		krunker_client_sync_world(&client)
+		peer := client_find_player(&client, 8)
+		if !testing.expect(t, peer != nil && peer.mesh != nil, "remote player must generate a third person mesh") do return
+		peer_mesh := cast(^Player_Mesh)peer.mesh
+		testing.expect(t, !peer.render_you && peer.swap_timer == 0 && peer.ammo[0] == 50, "remote spawn must raise the current LMG model")
+		testing.expect(t, abs(peer_mesh.upper_body_anchor.rotation.x - (math.PI/12 + peer.weapon.y_rotation)) < 1e-5,
+			"remote upper body must follow pitch without a frozen swap bend")
+
+		// Simulate a 200 Hz display with slower, delayed local corrections. ADS
+		// must remain monotonic while pressing and releasing the aim button.
+		client.me.noclip = true
+		local_source := &client.krunker_world.players[0]
+		for scope in ([]bool{true, false}) {
+			for frame in 0..<40 {
+				before := client.me.aim_val
+				input := shared.Input{seq = i32(frame/7 + 13), delta = 0.005, move_dir = -1, scope = scope, x_dir = 0.2, y_dir = 0.4}
+				append(&client.predicted_inputs, input)
+				shared.player_proc_input(client.me, &input, true, false, true)
+				if frame % 4 == 0 {
+					local_source.aim_val = scope ? 0 : 1
+					local_source.has_ack = true
+					local_source.ack_seq = i32(frame/7 + 11)
+					local_source.sync_revision += 1
+					local_source.revision += 1
+					krunker_client_sync_world(&client)
+				}
+				testing.expect(t, scope ? client.me.aim_val >= before : client.me.aim_val <= before,
+					"delayed snapshots must not reverse the local ADS transition")
+				testing.expect(t, client.me.direction == (shared.Vec2{0.2, 0.4}), "replay must preserve the current camera direction")
+			}
+			testing.expect(t, client.me.aim_val == (scope ? 1 : 0), "holding/releasing ADS must reach its endpoint")
+			clear(&client.predicted_inputs)
+		}
+		// A roster revision without a fresh local snapshot must leave predicted
+		// position and weapon switches alone, even when the old snapshot has ACKs.
+		client.me.position.x += 10
+		shared.player_swap_weapon(client.me, 1, true, true, true)
+		predicted_position := client.me.position
+		local_source.revision += 1
+		krunker_client_sync_world(&client)
+		testing.expect(t, client.me.position == predicted_position && client.me.weapon.melee,
+			"unrelated player metadata must not replay a stale local correction")
+		local_source.class_index, local_source.weapon_slot = 3, 0
+		local_source.revision += 1
+		krunker_client_sync_world(&client)
+		testing.expect(t, client.me.swap_timer == 0 && client.me.ammo[0] == 50, "class changes must raise the new weapon with its current magazine")
+		// Live health changes must reach existing meshes without re-spawning or
+		// disturbing interpolation. Death and same-class respawn must also stop
+		// and restore the remote bar/model together.
+		kproto.krunker_world_apply_packet(&client.krunker_world, []kproto.Krunker_Msgpack_Value{"h", i64(85), i64(8)})
+		krunker_client_sync_world(&client)
+		testing.expect(t, peer.health == 85 && peer.max_health == 170 && peer.active, "server health must update an existing remote player")
+		before_death := client.scene.mesh_count
+		kproto.krunker_world_apply_packet(&client.krunker_world, []kproto.Krunker_Msgpack_Value{"3", i64(8)})
+		krunker_client_sync_world(&client)
+		testing.expect(t, !peer.active && peer.health == 0 && client.scene.mesh_count < before_death, "a death must hide the remote model and health bar")
+		roster: [53]kproto.Krunker_Msgpack_Value
+		roster[1], roster[6], roster[7], roster[8], roster[9] = i64(8), i64(3), i64(170), i64(170), i64(1)
+		roster[2], roster[3], roster[4] = i64(100), i64(30), i64(-80)
+		kproto.krunker_world_apply_packet(&client.krunker_world, []kproto.Krunker_Msgpack_Value{i64(0), roster[:]})
+		krunker_client_sync_world(&client)
+		testing.expect(t, peer.active && peer.health == 170 && peer.mesh != nil && client.scene.mesh_count == before_death, "same-class respawn must restore a full-health remote model without duplicate meshes")
 		// Render the map and player view model once to catch GL/resource issues.
 		client.camera.position = client.me.position
 		client.camera.position.y += client.me.height - shared.GAME_CONSTANTS.camera_height

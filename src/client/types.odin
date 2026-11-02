@@ -94,6 +94,9 @@ Mesh_Transform :: struct {
 
 Mesh :: struct {
 	transform: Mesh_Transform,
+	// Root meshes can reuse their matrix until one of their public fields changes.
+	last_transform: Mesh_Transform,
+	transform_cached: bool,
 	visible:   bool,
 	geometry:  ^Geometry,
 	transform_matrix:    shared.Mat4,

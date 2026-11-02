@@ -1,6 +1,7 @@
 package krunker
 
 import shared "../shared"
+import "core:math"
 import "core:strings"
 
 // Krunker_World_Player is the small, authoritative subset needed by the
@@ -17,15 +18,31 @@ Krunker_World_Player :: struct {
 	velocity:   shared.Vec3,
 	direction:  shared.Vec2,
 	on_ground:  bool,
+	on_ladder:  bool,
+	on_terrain: bool,
+	did_jump: bool,
+	did_wall_jump: bool,
+	on_wall: i32,
+	slide_timer: f32,
+	can_slide: bool,
+	can_slide_timer: f32,
+	cylinder_velocity: shared.Vec2,
 	crouch_val: f32,
 	aim_val:    f32,
-	weapon:     i32,
+	weapon_slot: i32,
 	ping:       i32,
 	active:     bool,
 	has_position: bool,
 	revision: u64,
 	ack_seq: i32,
 	has_ack: bool,
+	sync_revision: u64,
+	ammo: [8]i32,
+	ammo_count: int,
+	ammo_revision: u64,
+	poses: [16]Krunker_World_Pose,
+	pose_count: int,
+	send_rate: f32,
 }
 
 Krunker_World_State :: struct {
@@ -39,15 +56,20 @@ Krunker_World_State :: struct {
 	ready:       bool,
 	in_game:     bool,
 	move_lock:   bool,
+	game_config: shared.Game_Config,
+	has_game_config: bool,
 	server_time: f64,
+	received_at: f64,
 	local_sid:   i32,
 	local_socket_id: string,
 	map_revision: u64,
 	players:     [dynamic]Krunker_World_Player,
+	shots:       [dynamic]Krunker_World_Shot,
 }
 
 krunker_world_reset :: proc(state: ^Krunker_World_State) {
 	delete(state.players)
+	delete(state.shots)
 	delete(state.local_socket_id)
 	state^ = {map_index = -1, mode_index = -1, event_index = -1, local_sid = -1}
 }
@@ -72,6 +94,12 @@ krunker_world_i32 :: proc(value: Krunker_Msgpack_Value, fallback: i32 = 0) -> i3
 
 krunker_world_f32 :: proc(value: Krunker_Msgpack_Value, fallback: f32 = 0) -> f32 {
 	if number, ok := krunker_world_number(value); ok { return f32(number) }
+	return fallback
+}
+
+// The browser uses 1 for hip fire and 0 for ADS; shared.Player uses the reverse.
+krunker_world_aim :: proc(value: Krunker_Msgpack_Value, fallback: f32) -> f32 {
+	if number, ok := krunker_world_number(value); ok { return clamp(1 - f32(number), 0, 1) }
 	return fallback
 }
 
@@ -114,7 +142,9 @@ krunker_world_apply_init :: proc(state: ^Krunker_World_State, packet: []Krunker_
 	if opcode, ok := packet[0].(string); !ok || opcode != "init" { return false }
 	state.map_index = krunker_world_i32(packet[1], -1)
 	state.map_revision += 1
+	krunker_world_apply_game_config(state, packet)
 	clear(&state.players)
+	clear(&state.shots)
 	state.in_game = false
 	state.mode_index = krunker_world_i32(packet[2], -1)
 	if len(packet) > 3 { state.event_index = krunker_world_i32(packet[3], -1) }
@@ -160,13 +190,16 @@ krunker_world_apply_add_players :: proc(state: ^Krunker_World_State, packet: []K
 		if socket_id, ok := records[offset].(string); ok && socket_id == state.local_socket_id && len(socket_id) > 0 { state.local_sid = sid }
 		player.position = {krunker_world_f32(records[offset + 2]), krunker_world_f32(records[offset + 3]), krunker_world_f32(records[offset + 4])}
 		player.has_position = true
-		player.health = krunker_world_f32(records[offset + 7], player.health)
 		player.max_health = krunker_world_f32(records[offset + 8], player.max_health)
+		// A nil roster health means full health, including on respawn.
+		player.health = krunker_world_f32(records[offset + 7], player.max_health)
 		player.team = krunker_world_i32(records[offset + 9], player.team)
 		player.class_index = krunker_world_i32(records[offset + 6], player.class_index)
 		player.direction.y = krunker_world_f32(records[offset + 18], player.direction.y)
 		player.active = true
 		player.revision += 1
+		player.pose_count = 0
+		krunker_world_buffer_pose(player, state.received_at)
 	}
 	return true
 }
@@ -183,13 +216,17 @@ krunker_world_apply_update_players :: proc(state: ^Krunker_World_State, packet: 
 		if sid < 0 { continue }
 		player := krunker_world_upsert_player(state, sid)
 		player.position = {krunker_world_f32(records[offset + 1]), krunker_world_f32(records[offset + 2]), krunker_world_f32(records[offset + 3])}
-		// The wire calls yaw xDire and pitch yDire; shared.Vec2 is pitch/yaw.
-		player.direction = {krunker_world_f32(records[offset + 5]), krunker_world_f32(records[offset + 4])}
+		// k compresses angles to degrees. Roster and local l angles are radians.
+		// The browser calls yaw xDire and pitch yDire; Vec2 is pitch/yaw.
+		if pitch, ok := krunker_world_number(records[offset + 5]); ok { player.direction.x = f32(pitch) * math.PI / 180 }
+		if yaw, ok := krunker_world_number(records[offset + 4]); ok { player.direction.y = f32(yaw) * math.PI / 180 }
 		player.on_ground = krunker_world_bool(records[offset + 7])
 		player.crouch_val = krunker_world_f32(records[offset + 8])
-		player.weapon = krunker_world_i32(records[offset + 9], player.weapon)
-		player.aim_val = krunker_world_f32(records[offset + 10])
+		player.weapon_slot = krunker_world_i32(records[offset + 9], player.weapon_slot)
+		player.aim_val = krunker_world_aim(records[offset + 10], player.aim_val)
 		player.ping = krunker_world_i32(records[offset + 12], player.ping)
+		if len(packet) > 2 { player.send_rate = clamp(krunker_world_f32(packet[2], 10), 1, 128) }
+		krunker_world_buffer_pose(player, state.received_at)
 		player.active = true
 		player.has_position = true
 		player.revision += 1
@@ -209,15 +246,25 @@ krunker_world_apply_sync_player :: proc(state: ^Krunker_World_State, packet: []K
 	player.position = {krunker_world_f32(values[2]), krunker_world_f32(values[3]), krunker_world_f32(values[4])}
 	player.velocity = {krunker_world_f32(values[6]), krunker_world_f32(values[5]), krunker_world_f32(values[7])}
 	player.direction.y = krunker_world_f32(values[8])
-	player.weapon = krunker_world_i32(values[17], player.weapon)
+	player.weapon_slot = krunker_world_i32(values[17], player.weapon_slot)
 	player.on_ground = krunker_world_bool(values[9])
-	player.aim_val = krunker_world_f32(values[15])
+	player.did_jump = krunker_world_bool(values[10])
+	player.did_wall_jump = krunker_world_bool(values[11])
+	player.on_wall = krunker_world_i32(values[13])
+	player.on_ladder = krunker_world_bool(values[14])
+	player.aim_val = krunker_world_aim(values[15], player.aim_val)
 	player.crouch_val = krunker_world_f32(values[16])
+	if len(values) > 18 { player.slide_timer = krunker_world_f32(values[18]) / 1000 }
+	if len(values) > 19 { player.can_slide = krunker_world_bool(values[19]) }
+	if len(values) > 20 { player.on_terrain = krunker_world_bool(values[20]) }
+	if len(values) > 22 { player.cylinder_velocity = {krunker_world_f32(values[21]), krunker_world_f32(values[22])} }
+	if len(values) > 24 { player.can_slide_timer = krunker_world_f32(values[24]) / 1000 }
 	player.active = true
 	player.has_position = true
 	player.revision += 1
 	player.ack_seq = krunker_world_i32(values[0], -1)
 	player.has_ack = true
+	player.sync_revision += 1
 	return true
 }
 
@@ -246,6 +293,8 @@ krunker_world_apply_packet :: proc(state: ^Krunker_World_State, packet: []Krunke
 	if len(packet) == 0 { return false }
 	if numeric_opcode, numeric_ok := packet[0].(i64); numeric_ok {
 		if numeric_opcode == 0 { return krunker_world_apply_add_players(state, packet) }
+		if numeric_opcode == 9 { return krunker_world_apply_shot(state, packet) }
+		if numeric_opcode == 2 || numeric_opcode == 3 { return krunker_world_apply_player_gone(state, packet) }
 		return false
 	}
 	opcode, ok := packet[0].(string); if !ok { return false }
@@ -257,6 +306,10 @@ krunker_world_apply_packet :: proc(state: ^Krunker_World_State, packet: []Krunke
 	case "0": return krunker_world_apply_add_players(state, packet)
 	case "k": return krunker_world_apply_update_players(state, packet)
 	case "l": return krunker_world_apply_sync_player(state, packet)
+	case "uamo": return krunker_world_apply_ammo(state, packet)
+	case "9": return krunker_world_apply_shot(state, packet)
+	case "h": return krunker_world_apply_health(state, packet)
+	case "2", "3": return krunker_world_apply_player_gone(state, packet)
 	}
 	return false
 }

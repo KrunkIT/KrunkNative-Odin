@@ -118,7 +118,6 @@ overlay_ammo_render :: proc(client: ^Client) {
 	ui_fill_rect(client.ui, muted, separator_x, top + 16.0 * s, 3.0 * s, 48.0 * s)
 	ui_fill_text(client.ui, muted, max_ammo_str, separator_x + 13.0 * s, baseline, text_size)
 	if ammo_icon != 0 {
-		// The symbol has transparent padding below it; compensate to center the visible marks.
 		ui_draw_image(client.ui, ammo_icon, right - 66.0 * s, top + 18.0 * s, 54.0 * s, 54.0 * s)
 	}
 }

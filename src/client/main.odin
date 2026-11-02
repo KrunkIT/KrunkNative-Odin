@@ -972,11 +972,8 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		input.seq = client.net_input_seq
 		client.net_input_seq += 1
 		if client.krunker.connected {
-			input.seq = client.krunker.input_sequence
-			append(&client.predicted_inputs, input)
-			if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }
-			shared.player_proc_input(client.me, &input, true, client.krunker_world.move_lock, true)
-			krunker_ws_send_input(client, &input)
+			krunker_client_predict_input(client, &input)
+			krunker_ws_send_input(client)
 		} else if client.net.connected {
 			append(&client.predicted_inputs, input)
 			if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS {
@@ -1002,6 +999,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	} else {
 		// The local player is predicted above. Remote players remain one snapshot
 		// behind and interpolate between authoritative samples.
+		if client.krunker.connected { krunker_client_interpolate_remotes(client, f64(now), delta) }
 		for player in client.game.players {
 			if player.active {
 				player.idle_anim += shared.GAME_CONSTANTS.idle_anim_speed * delta
@@ -1022,20 +1020,25 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	// Camera and view-model transforms must use the state produced by this
 	// frame's input, otherwise fast mouse movement makes the gun trail and jump.
 	if client.me != nil && client.me.active && !client.freecam_enabled {
+		view_position, view_aim := client.me.position, client.me.aim_val
+		if client.krunker.connected {
+			sample := krunker_client_render_sample(client)
+			view_position, view_aim = sample.position, sample.aim
+		}
 		third_person := player_uses_third_person_camera(client.me)
 		if third_person {
 			// Full-body meshes use the map's camera offset. Keeping the camera at
 			// the collision origin in this mode places it inside the character.
-			client.camera.position = client.me.position + client.me.game.map_inst.config.cam_offset
+			client.camera.position = view_position + client.me.game.map_inst.config.cam_offset
 			client.camera.position.y += client.me.height - shared.GAME_CONSTANTS.camera_height
 		} else {
-			client.camera.position = client.me.position
+			client.camera.position = view_position
 			client.camera.position.y += client.me.height - shared.GAME_CONSTANTS.camera_height
 		}
 
 		client.camera.rotation.x = client.me.direction.x + client.me.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt
 		client.camera.rotation.y = client.me.direction.y
-		client.camera.zoom = 1.0 + (client.me.weapon.zoom - 1.0) * client.me.aim_val
+		client.camera.zoom = 1.0 + (client.me.weapon.zoom - 1.0) * view_aim
 
 		if client.me.mesh != nil && !client.net.connected && !client.krunker.connected {
 			player_update_meshes(client.me, false)
@@ -1048,6 +1051,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	scene_render(client.scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height))
+	player_healthbars_render(client)
 
 	gl.Clear(gl.DEPTH_BUFFER_BIT)
 	weapon_camera := camera_for_viewmodel(&client.camera)

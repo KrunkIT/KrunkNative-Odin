@@ -53,6 +53,7 @@ Shader_Uniforms :: struct {
 	camera_projection:     i32,
 	offset:                i32,
 	scale:                 i32,
+	depth:                 i32,
 }
 
 u_basic: Shader_Uniforms
@@ -97,6 +98,7 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.camera_projection = gl.GetUniformLocation(program, "camera_projection")
 	u.offset = gl.GetUniformLocation(program, "offset")
 	u.scale = gl.GetUniformLocation(program, "scale")
+	u.depth = gl.GetUniformLocation(program, "depth")
 	return u
 }
 
@@ -106,7 +108,6 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	is_ramp := u_basic.is_ramp
 	is_ladder := u_basic.is_ladder
 	use_face_tex_scaling := u_basic.use_face_tex_scaling
-	world_uv_scale := u_basic.world_uv_scale
 	face_scale := u_basic.face_scale
 
 	gl.Uniform1i(is_ramp, i32(material.is_ramp ? 1 : 0))
@@ -116,13 +117,11 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform1f(u_basic.texture_scale, material.texture_scale)
 	gl.Uniform1i(u_basic.unlit, i32(material.unlit))
 	gl.Uniform1i(u_basic.no_fog, i32(material.no_fog))
-	gl.Uniform1f(world_uv_scale, shared.GAME_CONSTANTS.world_uv_scale)
 	gl.Uniform3f(face_scale, material.face_scale.x, material.face_scale.y, material.face_scale.z)
 
 	color := u_basic.color
 	emissive := u_basic.emissive
 	tex_transform := u_basic.tex_transform
-	texture := u_basic.tex
 
 	c := math.cos(material.texture_rotation)
 	s := math.sin(material.texture_rotation)
@@ -144,27 +143,8 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 	gl.Uniform4f(emissive, material.emissive.x, material.emissive.y, material.emissive.z, material.emissive.w)
 	gl.Uniform1f(u_basic.alpha_test, material.alpha_test)
 
-	// Current Krunker uses an ambient light plus a directional sky/sun light.
-	// Keep the same angle convention as the browser's sceneInit (degrees,
-	// negated before conversion to radians).
-	light_x := g_lighting_config.light_distance * math.cos(-g_lighting_config.sun_angle_x * math.PI / 180.0)
-	light_y := g_lighting_config.light_distance * math.sin(-g_lighting_config.sun_angle_x * math.PI / 180.0) * math.sin(-g_lighting_config.sun_angle_y * math.PI / 180.0)
-	light_z := g_lighting_config.light_distance * math.sin(-g_lighting_config.sun_angle_x * math.PI / 180.0) * math.cos(-g_lighting_config.sun_angle_y * math.PI / 180.0)
-	gl.Uniform3f(u_basic.ambient_color, g_lighting_config.ambient_color.x, g_lighting_config.ambient_color.y, g_lighting_config.ambient_color.z)
-	gl.Uniform1f(u_basic.ambient_intensity, g_lighting_config.ambient_intensity)
-	gl.Uniform3f(u_basic.light_color, g_lighting_config.light_color.x, g_lighting_config.light_color.y, g_lighting_config.light_color.z)
-	gl.Uniform1f(u_basic.light_intensity, g_lighting_config.light_intensity)
-	gl.Uniform3f(u_basic.light_dir, light_x, light_y, light_z)
-	gl.Uniform3f(u_basic.fog_color, g_lighting_config.fog_color.x, g_lighting_config.fog_color.y, g_lighting_config.fog_color.z)
-	gl.Uniform1f(u_basic.fog_near, 1.0)
-	gl.Uniform1f(u_basic.fog_far, max(1.0, g_lighting_config.fog_distance))
-	gl.Uniform3f(u_basic.camera_position, g_render_camera_position.x, g_render_camera_position.y, g_render_camera_position.z)
-
 	transform_flat := flatten_mat3(transform)
-	transform_ptr := transform_flat
-	gl.UniformMatrix3fv(tex_transform, 1, gl.TRUE, &transform_ptr[0])
-	gl.Uniform1i(texture, 0)
-	gl.ActiveTexture(gl.TEXTURE0)
+	gl.UniformMatrix3fv(tex_transform, 1, gl.TRUE, &transform_flat[0])
 	if material.texture != 0 && g_active_texture == material.texture || material.texture == 0 && g_blank_texture != 0 && g_active_texture == g_blank_texture {
 		return
 	}
@@ -186,6 +166,28 @@ basic_material_update_uniforms :: proc(mat: rawptr) {
 		gl.BindTexture(gl.TEXTURE_2D, g_blank_texture)
 		g_active_texture = g_blank_texture
 	}
+}
+
+// Camera and environment are shared by every basic material in this pass.
+// Updating them here also computes the sun direction only once per pass.
+basic_material_update_pass_uniforms :: proc(camera: ^Camera) {
+	gl.Uniform1f(u_basic.world_uv_scale, shared.GAME_CONSTANTS.world_uv_scale)
+	gl.Uniform1i(u_basic.tex, 0)
+	// Current Krunker uses an ambient light plus a directional sky/sun light.
+	// Keep the same angle convention as the browser's sceneInit (degrees,
+	// negated before conversion to radians).
+	light_x := g_lighting_config.light_distance * math.cos(-g_lighting_config.sun_angle_x * math.PI / 180.0)
+	light_y := g_lighting_config.light_distance * math.sin(-g_lighting_config.sun_angle_x * math.PI / 180.0) * math.sin(-g_lighting_config.sun_angle_y * math.PI / 180.0)
+	light_z := g_lighting_config.light_distance * math.sin(-g_lighting_config.sun_angle_x * math.PI / 180.0) * math.cos(-g_lighting_config.sun_angle_y * math.PI / 180.0)
+	gl.Uniform3f(u_basic.ambient_color, g_lighting_config.ambient_color.x, g_lighting_config.ambient_color.y, g_lighting_config.ambient_color.z)
+	gl.Uniform1f(u_basic.ambient_intensity, g_lighting_config.ambient_intensity)
+	gl.Uniform3f(u_basic.light_color, g_lighting_config.light_color.x, g_lighting_config.light_color.y, g_lighting_config.light_color.z)
+	gl.Uniform1f(u_basic.light_intensity, g_lighting_config.light_intensity)
+	gl.Uniform3f(u_basic.light_dir, light_x, light_y, light_z)
+	gl.Uniform3f(u_basic.fog_color, g_lighting_config.fog_color.x, g_lighting_config.fog_color.y, g_lighting_config.fog_color.z)
+	gl.Uniform1f(u_basic.fog_near, 1.0)
+	gl.Uniform1f(u_basic.fog_far, max(1.0, g_lighting_config.fog_distance))
+	gl.Uniform3f(u_basic.camera_position, camera.position.x, camera.position.y, camera.position.z)
 }
 
 flatten_mat3 :: proc(m: [3][3]f32) -> [9]f32 {

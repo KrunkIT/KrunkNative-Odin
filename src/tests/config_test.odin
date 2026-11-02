@@ -159,6 +159,22 @@ test_gameplay_config :: proc() -> bool {
 		fmt.eprintln("Gameplay config default-copy test failed")
 		return false
 	}
+	// Check the complete supported magazine registry through both startup paths.
+	// Previously game.toml silently replaced modern defaults with legacy stats.
+	magazines := [?]u32{3, 30, 10, 24, 6, 2, 50, 8, 3, 28, 7, 4, 0, 0, 24, 0, 0, 0, 16}
+	for rounds, id in magazines {
+		if embedded.weapons[id] == nil { continue }
+		if config.weapons[id].ammo != rounds || embedded.weapons[id].ammo != rounds {
+			fmt.eprintf("Current weapon magazine mismatch for ID %d\n", id); return false
+		}
+	}
+	if config.weapons[3].rate != 0.095 || config.weapons[3].damage_drop != 9 ||
+		config.weapons[6].damage != 17 || config.weapons[6].reload_time != 3.3 ||
+		config.weapons[14].damage != 28 || config.weapons[14].burst_rate != 0.085 || config.weapons[14].rate != 0.33 ||
+		config.weapons[7].damage != 35 || config.weapons[7].reload_time != 1.35 ||
+		config.weapons[10].recoil != 10 || config.weapons[11].recoil != 6 {
+		fmt.eprintln("Current weapon timing/damage/recoil registry mismatch"); return false
+	}
 	spray_index := shared.class_config_index("spray_n_pray")
 
 	// Compact JSON keys supply the shared class registry, including hidden classes.
@@ -369,7 +385,9 @@ test_famas_burst :: proc() -> bool {
 	input := shared.Input{move_dir = -1, shoot = true}
 	shot_seq_before := player.shot_seq
 	ammo_before := player.ammo[player.loadout_index]
-	for _ in 0 ..< 50 {
+	// Include the current 330 ms cooldown after the third shot before testing
+	// the next trigger press. Holding throughout must still fire just one burst.
+	for _ in 0 ..< 70 {
 		input.delta = 0.01
 		shared.player_proc_input(player, &input, false, false)
 	}

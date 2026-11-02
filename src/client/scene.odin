@@ -1,11 +1,6 @@
 package main
 
-import "core:math"
-import "core:math/linalg"
 import gl "vendor:OpenGL"
-import shared "../shared"
-
-g_render_camera_position: shared.Vec3
 
 scene_init :: proc() -> ^Scene {
 	return new(Scene)
@@ -201,23 +196,55 @@ scene_uniforms :: proc(program: u32) -> ^Shader_Uniforms {
 	return &u_text
 }
 
-scene_draw_mesh :: proc(mesh: ^Mesh, camera: ^Camera) {
+// Local to a render pass: HUD draws, resource uploads, and other GL contexts
+// cannot leave this cache stale. Blend and polygon state start disabled/filled.
+Scene_Draw_State :: struct {
+	program, vao: u32,
+	blending, wireframe: bool,
+}
+
+scene_update_pass_uniforms :: proc(program: u32, camera: ^Camera) {
+	u := scene_uniforms(program)
+	if u.camera_world_inverse > -1 {
+		gl.UniformMatrix4fv(u.camera_world_inverse, 1, gl.FALSE, &camera.world_inverse_matrix[0, 0])
+	}
+	if u.camera_projection > -1 {
+		gl.UniformMatrix4fv(u.camera_projection, 1, gl.FALSE, &camera.projection_matrix[0, 0])
+	}
+	if program == basic_shader_program {
+		basic_material_update_pass_uniforms(camera)
+	}
+}
+
+scene_draw_mesh :: proc(mesh: ^Mesh, camera: ^Camera, state: ^Scene_Draw_State) {
 	if !mesh.visible {
 		return
 	}
 
-	if mesh.material.transparent {
-		gl.Enable(gl.BLEND)
-	} else {
-		gl.Disable(gl.BLEND)
+	if state.blending != mesh.material.transparent {
+		if mesh.material.transparent {
+			gl.Enable(gl.BLEND)
+		} else {
+			gl.Disable(gl.BLEND)
+		}
+		state.blending = mesh.material.transparent
 	}
 
-	gl.BindVertexArray(mesh.geometry.vao)
-	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.geometry.ebo)
+	if state.vao != mesh.geometry.vao {
+		// The index buffer is already part of the VAO, set during upload.
+		gl.BindVertexArray(mesh.geometry.vao)
+		state.vao = mesh.geometry.vao
+	}
 
-	if g_active_shader != mesh.material.program {
-		gl.UseProgram(mesh.material.program)
-		g_active_shader = mesh.material.program
+	if state.program != mesh.material.program {
+		if g_active_shader != mesh.material.program {
+			gl.UseProgram(mesh.material.program)
+			g_active_shader = mesh.material.program
+		}
+		// A new pass can use the same program with a different camera (weapons)
+		// or map environment. Refresh these even if the program is still bound.
+		scene_update_pass_uniforms(mesh.material.program, camera)
+		state.program = mesh.material.program
 	}
 
 	material_update_uniforms(mesh.material)
@@ -226,17 +253,9 @@ scene_draw_mesh :: proc(mesh: ^Mesh, camera: ^Camera) {
 	if u.transform > -1 {
 		gl.UniformMatrix4fv(u.transform, 1, gl.FALSE, &mesh.transform_matrix[0, 0])
 	}
-	if u.camera_world_inverse > -1 {
-		gl.UniformMatrix4fv(u.camera_world_inverse, 1, gl.FALSE, &camera.world_inverse_matrix[0, 0])
-	}
-	if u.camera_projection > -1 {
-		gl.UniformMatrix4fv(u.camera_projection, 1, gl.FALSE, &camera.projection_matrix[0, 0])
-	}
-
-	if mesh.material.wireframe {
-		gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-	} else {
-		gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
+	if state.wireframe != mesh.material.wireframe {
+		gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE if mesh.material.wireframe else gl.FILL)
+		state.wireframe = mesh.material.wireframe
 	}
 
 	gl.DrawElements(gl.TRIANGLES, mesh.geometry.index_count, gl.UNSIGNED_INT, nil)
@@ -280,10 +299,13 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 	gl.Enable(gl.DEPTH_TEST)
 	gl.DepthMask(gl.TRUE)
 	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+	gl.Disable(gl.BLEND)
+	gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
+	gl.ActiveTexture(gl.TEXTURE0)
+	state: Scene_Draw_State
 
 	camera_update_projection_matrix(camera, aspect)
 	camera_update_world_inverse_matrix(camera)
-	g_render_camera_position = camera.position
 
 	mesh_count := len(scene.meshes)
 	if mesh_count == 0 {
@@ -304,7 +326,7 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 			mesh.camera_space_matrix = camera.world_inverse_matrix * mesh.transform_matrix
 			append(&scene.transparent_meshes, mesh)
 		} else {
-			scene_draw_mesh(mesh, camera)
+			scene_draw_mesh(mesh, camera, &state)
 		}
 	}
 
@@ -315,7 +337,7 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 		scene_sort_transparent(scene)
 
 		for i in 0 ..< trans_count {
-			scene_draw_mesh(scene.transparent_meshes[i], camera)
+			scene_draw_mesh(scene.transparent_meshes[i], camera, &state)
 		}
 	}
 
