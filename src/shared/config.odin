@@ -508,6 +508,7 @@ config_apply_weapon :: proc(
 	config_apply_f32(table, "hold_distance_offset", "weapon", id, &weapon.hold_distance_offset)
 
 	config_apply_vec3(table, "origin", "weapon", id, &weapon.origin)
+	config_apply_vec3(table, "model_offset", "weapon", id, &weapon.model_offset)
 	config_apply_vec3(table, "offset", "weapon", id, &weapon.offset)
 	config_apply_vec3(table, "left_hold", "weapon", id, &weapon.left_hold)
 	config_apply_vec3(table, "right_hold", "weapon", id, &weapon.right_hold)

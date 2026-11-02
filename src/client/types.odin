@@ -135,6 +135,8 @@ Player_Arms :: struct {
 	weapon_left:  ^Mesh,
 	weapon_right: ^Mesh,
 	attachment:   ^Mesh,
+	// Per weapon rig, so peers and weapon swaps keep independent barrel cycles.
+	next_left_muzzle: bool,
 }
 
 Player_Mesh :: struct {

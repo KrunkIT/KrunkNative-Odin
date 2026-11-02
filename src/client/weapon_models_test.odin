@@ -76,6 +76,8 @@ when ODIN_TEST {
 				gun := arms.weapon_right
 				model := "models/melee/melee_0.obj" if weapon.melee else fmt.tprintf("models/weapons/%s.obj", weapon.src)
 				texture := "textures/melee/melee_0.png" if weapon.melee else fmt.tprintf("textures/weapons/%s.png", weapon.src)
+				if len(weapon.model) > 0 { model = weapon.model }
+				if len(weapon.texture) > 0 { texture = weapon.texture }
 				icon := fmt.tprintf("textures/%s/%s.png", "melee" if weapon.melee else "weapons", weapon.icon)
 				testing.expect(t, strings.has_suffix(gun.geometry.cache_key, model) && gun.geometry.index_count > 0, fmt.tprintf("weapon %d must use its current base geometry", id))
 				testing.expect(t, (cast(^Basic_Material)gun.material).texture != 0, fmt.tprintf("weapon %d must load a texture", id))
@@ -85,6 +87,10 @@ when ODIN_TEST {
 				}
 				testing.expect(t, (arms.attachment != nil) == (weapon.has_attachment && first_person), fmt.tprintf("weapon %d must use the correct sight in each view", id))
 				testing.expect(t, (arms.weapon_left != nil) == weapon.akimbo, "Akimbo must include both guns")
+				if id == 5 {
+					testing.expect(t, model == "models/weapons/weapon_6_0.obj" && texture == "textures/weapons/weapon_6_38.png", "Shotgun must use the Nova Pump model and its default texture")
+					testing.expect(t, gun.transform.scale == (shared.Vec3{1, 1, 1}) && gun.transform.position == (shared.Vec3{0, -0.5, 0.28}), "Nova Pump must use the replacement model's scale and mount")
+				}
 				if first_person && id == 4 {
 					testing.expect(t, abs(arms.right.anchor.position.z - 5.1) < 0.0001, "Revolver hand offset must affect the arms without moving the gun")
 				}

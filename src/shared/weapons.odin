@@ -354,8 +354,12 @@ WEAPON_SHOTGUN := Weapon {
 	},
 	// Current browser model, grip, sight mount and animation rig.
 	src                   = "weapon_6",
+	// The browser's default altSkin is Nova Pump (mid=0, midT=38).
+	model                 = "models/weapons/weapon_6_0.obj",
+	texture               = "textures/weapons/weapon_6_38.png",
+	model_offset          = {0, -0.5, 0.28},
 	icon                  = "icon_6",
-	scale                 = 0.00082934281407035,
+	scale                 = 1,
 	hold_width            = 1,
 	jump_y_mlt            = 0.2,
 	jump_bob_y_mlt        = 0.5,

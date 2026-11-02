@@ -18,6 +18,8 @@ textures/weapons/icon_5.png
 models/weapons/weapon_6.obj
 textures/weapons/weapon_6.png
 textures/weapons/icon_6.png
+models/weapons/weapon_6_0.obj
+textures/weapons/weapon_6_38.png
 models/weapons/weapon_7.obj
 textures/weapons/weapon_7.png
 textures/weapons/icon_7.png

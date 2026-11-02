@@ -77,6 +77,37 @@ when ODIN_TEST {
 	}
 
 	@(test)
+	krunker_uzi_uses_spread_for_each_predicted_round :: proc(t: ^testing.T) {
+		client: Client
+		map_inst: shared.Map
+		krunker_presentation_fixture(&client, &map_inst)
+		defer krunker_presentation_cleanup(&client)
+		shared.player_spawn(client.me, 8)
+		client.me.swap_timer = 0
+		client.me.noclip = true
+		testing.expect(t, client.me.weapon.akimbo && client.me.spread == 10, "Uzi's zero base spread must still respect its minimum spread of 10")
+		ammo := client.me.ammo[0]
+		frame := shared.Input{delta = 0.007, move_dir = -1, shoot = true}
+		for _ in 0..<42 { krunker_client_predict_input(&client, &frame) }
+		if !testing.expect(t, len(client.game.impacts) >= 4, "holding fire must produce multiple Uzi rounds") do return
+		testing.expect(t, client.me.ammo[0] == ammo-u32(len(client.game.impacts)), "dual barrels must consume one round per firing event")
+		first := client.game.impacts[0].position-client.game.impacts[0].origin
+		varied := false
+		for impact in client.game.impacts {
+			ray := impact.position-impact.origin
+			testing.expect(t, ray.x != 0 && ray.y != 0, "Uzi spread must affect actual predicted bullet paths")
+			if ray != first { varied = true }
+		}
+		testing.expect(t, varied, "successive Uzi bullets must use distinct spread samples")
+		client.me.spread_plus, client.me.recoil_anim = 0, 0
+		shared.player_update_spread(client.me, 2, 0, 0)
+		testing.expect(t, abs(client.me.spread_plus-0.5) < 1e-5, "Uzi movement spread must use its 0.01 multiplier")
+		client.me.recoil_anim = 0.2
+		shared.player_update_spread(client.me, 0, 0, 0)
+		testing.expect(t, client.me.spread > 10, "sustained recoil must widen Uzi spread beyond the minimum")
+	}
+
+	@(test)
 	krunker_remote_poses_are_smooth_and_wrap_yaw :: proc(t: ^testing.T) {
 		client: Client
 		map_inst: shared.Map

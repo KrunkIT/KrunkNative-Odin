@@ -319,6 +319,7 @@ Weapon :: struct {
 	view_kick:             [4]f32,
 	rotation:              f32,
 	model_rotation:        Vec3,
+	model_offset:          Vec3,
 	z_rotation:            f32,
 	z_rotation_mlt:        f32,
 	z_lean_mlt:            f32,

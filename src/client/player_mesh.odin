@@ -438,9 +438,10 @@ player_generate_meshes :: proc(player: ^shared.Player, render_you: bool) {
 
 					weapon_mat.texture = weapon_tex
 
-					weapon_mesh.transform.position.x = j == 1 ? weapon.offset.x * -2.0 : 0.0
-					weapon_mesh.transform.position.y = 0.0
-					weapon_mesh.transform.position.z = 0.0
+					weapon_mesh.transform.position = weapon.model_offset
+					if j == 1 {
+						weapon_mesh.transform.position.x += weapon.offset.x * -2.0 * (player.left_handed ? -1.0 : 1.0)
+					}
 
 					model_scale := weapon.scale != 0 ? weapon.scale : 1.0
 					weapon_mesh.transform.scale = {model_scale, model_scale, model_scale}

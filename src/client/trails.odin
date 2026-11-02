@@ -51,9 +51,18 @@ bullet_tracer_origin :: proc(client: ^Client, impact: ^shared.Bullet_Impact, wea
 		if player.mesh != nil && player.loadout_index < player.loadout_size && player.loadout[player.loadout_index] == impact.weapon_id {
 			rig := cast(^Player_Mesh)player.mesh
 			if int(player.loadout_index) < len(rig.arms) && rig.arms[player.loadout_index] != nil {
+				arms := rig.arms[player.loadout_index]
 				point: Mesh
-				point.transform.parent = &rig.arms[player.loadout_index].anchor
+				point.transform.parent = &arms.anchor
 				point.transform.position = bullet_muzzle_offset(weapon)
+				// Match the second gun's offset in anchor space. Advance once per
+				// rendered bullet, including batches and server-owned peer shots.
+				if weapon.akimbo {
+					if arms.next_left_muzzle {
+						point.transform.position.x = -2 * weapon.offset.x * (player.left_handed ? -1.0 : 1.0)
+					}
+					arms.next_left_muzzle = !arms.next_left_muzzle
+				}
 				point.transform.scale = {1, 1, 1}
 				mesh_update_transform_matrix(&point)
 				world := point.transform_matrix * shared.Vec4{0, 0, 0, 1}

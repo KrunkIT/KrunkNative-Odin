@@ -17,6 +17,12 @@ assets/css/fonts/*
 !assets/textures/scopes/
 assets/textures/scopes/*
 !assets/textures/scopes/scope_0.png
+!assets/models/weapons/
+assets/models/weapons/*
+!assets/models/weapons/weapon_6_0.obj
+!assets/textures/weapons/
+assets/textures/weapons/*
+!assets/textures/weapons/weapon_6_38.png
 !assets/models/custom/2412.obj
 !assets/textures/custom/2412.png
 !assets/models/custom/158.obj

@@ -134,5 +134,24 @@ when ODIN_TEST {
 		append(&map_inst.objects, &wall)
 		start = bullet_tracer_origin(&client, &impact, client.game.weapons[1])
 		testing.expect(t, start == impact.origin, "a muzzle beyond a wall must fall back to the unobstructed shot origin")
+
+		// Every event in a batched burst must advance the barrel independently;
+		// this also covers peer shots, whose packets do not identify a barrel.
+		clear(&map_inst.objects)
+		loadout[0] = 9
+		impact.weapon_id = 9
+		for left_handed in ([]bool{false, true}) {
+			player.left_handed = left_handed
+			arms.next_left_muzzle = false
+			arms.anchor.position = {left_handed ? -1.5 : 1.5, 0, 0}
+			for shot in 0..<6 {
+				client_add_tracer(&client, &impact)
+				tracer := client.tracer_markers[len(client.tracer_markers)-1]
+				expected_x: f32 = (shot % 2 == 0 ? 1.5 : -1.5) * (left_handed ? -1.0 : 1.0)
+				testing.expect(t, abs(tracer.start_position.x-expected_x) < 0.001 && abs(tracer.start_position.z+3.6) < 0.001,
+					"Uzi tracers must alternate between both barrels, including mirrored rigs and queued shots")
+			}
+			client_clear_tracers(&client)
+		}
 	}
 }

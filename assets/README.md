@@ -19,6 +19,8 @@ The AK, SMG, LMG, Semi Auto, Famas and Blaster include their reflex sights.
 Both release packagers refresh all supported weapons from the unpacked pack,
 including textures and HUD icons, using `config/weapon-assets.txt`.
 This also includes the practice-class primaries and `textures/scopes/scope_0.png`.
+The shotgun uses the browser's Nova Pump replacement (`weapon_6_0.obj`,
+`weapon_6_38.png`) with its own model scale and mounting offset.
 
 Run `python download_maps.py` from the repository to refresh all 47 official
 map files from GAPI. The script keeps native server IDs aligned with the
