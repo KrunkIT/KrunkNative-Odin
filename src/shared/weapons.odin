@@ -5,6 +5,7 @@ package shared
 // Keep game.toml overrides optional so shipped defaults cannot shadow this table.
 
 WEAPON_AWP := Weapon {
+	scope = true,
 	move_spread = 1,
 	name          = "Sniper Rifle",
 	secondary     = false,
@@ -756,6 +757,158 @@ WEAPON_BLASTER := Weapon {
 	right_hold            = {0, -0.6, -1.25},
 }
 
+// Browser weapon 13: current base asset and first-person rig.
+WEAPON_CROSSBOW := Weapon {
+	move_spread = 1,
+	name = "Crossbow",
+	src = "weapon_14",
+	icon = "icon_14",
+	sound = "weapon_14",
+	secondary = false,
+	equipment = false,
+	no_aim = false,
+	no_auto = true,
+	no_inspect = true,
+	ammo = 3,
+	swap_time = 0.2,
+	reload_time = 0.9,
+	aim_speed = 0.12,
+	speed_mlt = 1,
+	damage = 100,
+	headshot_mlt = 1,
+	pierce = 0,
+	range = 700,
+	damage_drop = 0,
+	rate = 0.15,
+	spread = 120,
+	zoom = 1.4,
+	recoil = 7.0,
+	recoil_r = 0.01,
+	recover = 0.985,
+	recover_y = 0.996,
+	recover_f = 0.98,
+	scale = 0.0007303348040201011,
+	hold_width = 0.5,
+	attach_y_offset = -0.1,
+	attach_z_offset = 0.75,
+	z_rotation = 0.9,
+	jump_y_mlt = 0.95,
+	recoil_z = 4,
+	lean_mlt = 0.3,
+	crouch_lean = 0.1,
+	crouch_rotation = 0.1,
+	crouch_drop = 0.2,
+	projectile_speed = 750.0,
+	projectile_damage = 100,
+	projectile_range = 1500,
+	projectile_color = 16777179,
+	projectile_scale = 1.4,
+	projectile_length = 10,
+	projectile = true,
+	origin = {0, -0.72, -0.7},
+	offset = {1, -1, -1.4},
+	left_hold = {0, -0.33, 2.2},
+	right_hold = {0, -0.28, 0.9},
+	view_kick_time = 0.3,
+	view_kick = {0.1, 0, 0, 0},
+}
+
+// Browser weapon 19: current base asset and first-person rig.
+WEAPON_BUILD_TOOL := Weapon {
+	move_spread = 1,
+	name = "Build Tool",
+	src = "weapon_20",
+	icon = "icon_20",
+	sound = "weapon_20",
+	equipment = true,
+	no_aim = false,
+	no_inspect = true,
+	swap_time = 0.2,
+	aim_speed = 0.1,
+	speed_mlt = 0.9,
+	range = 50,
+	rate = 0.3,
+	spread = 120,
+	zoom = 1.1,
+	recover = 0.98,
+	recover_f = 0.98,
+	scale = 1.2,
+	hold_width = 1.3,
+	aim_lean = 1e-06,
+	jump_y_mlt = 0.95,
+	lean_mlt = 0.3,
+	crouch_lean = 0,
+	crouch_rotation = 0,
+	crouch_drop = 0.12,
+	origin = {1e-05, -3.8, -3.2},
+	offset = {0, -2.6, -3.5},
+	left_hold = {2.2, 0.6, 0.1},
+	right_hold = {-2.2, 0.6, 0.1},
+	model_rotation = {0, 1.5707963267948966, -0.4},
+}
+
+// Browser weapon 28: current base asset and first-person rig.
+WEAPON_CHARGE_RIFLE := Weapon {
+	move_spread = 1,
+	name = "Charge Rifle",
+	src = "weapon_29",
+	icon = "icon_29",
+	sound = "weapon_29",
+	secondary = false,
+	equipment = false,
+	no_aim = false,
+	scope = true,
+	no_auto = false,
+	animate_while_aiming = true,
+	ammo = 1,
+	swap_time = 0.3,
+	reload_time = 1.4,
+	aim_speed = 0.12,
+	speed_mlt = 0.95,
+	damage = 15,
+	headshot_mlt = 1,
+	pierce = 1,
+	range = 1000,
+	damage_drop = 5,
+	rate = 0.15,
+	spread = 150,
+	min_spread = 5,
+	zoom = 2,
+	recoil = 3.0,
+	recoil_r = 0.05,
+	recover = 0.978,
+	recover_y = 0.995,
+	recover_f = 0.975,
+	scale = 0.00115608717587935,
+	hold_width = 1,
+	jump_y_mlt = 0.9,
+	jump_bob_y_mlt = 0.15,
+	recoil_y_mlt = 1.1,
+	recoil_z = 4.3,
+	recoil_z_mlt = -0.04,
+	aim_recoil_mlt = 0.65,
+	lean_mlt = 1.5,
+	inspect_rotation = 0.2,
+	inspect_mlt = 0.1,
+	crouch_lean = 0.2,
+	crouch_rotation = 0.2,
+	crouch_drop = 0.1,
+	projectile_disable = true,
+	projectile_speed = 2500.0,
+	projectile_damage = 100,
+	projectile_range = 7000,
+	projectile_color = 9109499,
+	projectile_scale = 1.4,
+	projectile_length = 10,
+	projectile = true,
+	origin = {0, -0.55, -0.8},
+	offset = {0.8, -0.65, -1.8},
+	left_hold = {0, -0.65, 2.5},
+	right_hold = {0, -0.68, 0.75},
+	view_kick_time = 0.16,
+	view_kick = {0.065, 0, 0, 0.1},
+}
+
 // Weapon IDs follow the browser registry, including unimplemented slots.
 WEAPONS_LIST := [?]^Weapon{
 	&WEAPON_AWP,
@@ -771,12 +924,22 @@ WEAPONS_LIST := [?]^Weapon{
 	&WEAPON_DEAGLE,
 	&WEAPON_ALIEN_BLASTER,
 	&WEAPON_KNIFE,
-	nil, // Weapon ID 13 (Crossbow) is not implemented yet.
+	&WEAPON_CROSSBOW, // 13: Bowman's primary
 	&WEAPON_FAMAS,
 	nil, // 15: Sawed Off
 	nil, // 16: Auto Pistol
 	nil, // 17: Bomb
 	&WEAPON_BLASTER, // 18: Trooper's primary
+	&WEAPON_BUILD_TOOL, // 19: Survivor's tool
+	nil, // 20
+	nil, // 21
+	nil, // 22
+	nil, // 23
+	nil, // 24
+	nil, // 25
+	nil, // 26
+	nil, // 27
+	&WEAPON_CHARGE_RIFLE, // 28: Infiltrator's primary
 }
 
 g_weapons :: proc() -> []^Weapon {

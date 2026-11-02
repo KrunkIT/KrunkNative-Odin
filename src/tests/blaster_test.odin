@@ -8,7 +8,7 @@ test_trooper_blaster :: proc() -> bool {
 	config := shared.config_load_gameplay()
 	defer shared.config_destroy_gameplay(config)
 	if shared.weapon_config_index("blaster") != 18 || len(config.weapons) <= 18 || config.weapons[18] == nil ||
-		config.weapons[18].src != "weapon_19" || config.weapons[18].icon != "icon_19" || config.weapons[13] != nil || config.weapons[17] != nil { return false }
+		config.weapons[18].src != "weapon_19" || config.weapons[18].icon != "icon_19" || config.weapons[13] == nil || config.weapons[17] != nil { return false }
 	map_inst := shared.Map{death_y = -1000}
 	game: shared.Game
 	maps := []^shared.Map{&map_inst}

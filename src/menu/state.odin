@@ -4,7 +4,8 @@ import "core:fmt"
 import "base:runtime"
 import clay "../third_party/clay"
 
-Page :: enum { HOME, SETTINGS, CONTROLS, SESSION }
+Page :: enum { HOME, SETTINGS, CONTROLS, SESSION, CLASSES }
+Lobby_Presentation :: enum { STANDARD, COMPETITIVE }
 // The client owns clipboard access and session changes. The menu emits actions
 // and renders requested selections separately from confirmed lobby state.
 Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
@@ -13,6 +14,8 @@ Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_j
 Player :: struct { name, class_name: string, team: i32, is_you: bool }
 Team :: struct { id: i32, name: string, capacity: int, available: bool, reason: string, score: u32 }
 View :: struct {
+	presentation: Lobby_Presentation,
+	ranked, team_selection: bool,
 	classes: []Class,
 	selected_class: i32,
 	confirmed_class, confirmed_team, requested_team: i32,
@@ -177,7 +180,10 @@ activate :: proc(state: ^State, control: Control) -> Action {
 
 focus_visible :: proc(control: Control, page: Page) {
 	container: string
-	if page == .HOME && (control.action.kind == .SELECT_CLASS || control.action.kind == .INSPECT_CLASS) { container = "ClassStrip" }
+	if control.action.kind == .SELECT_CLASS || control.action.kind == .INSPECT_CLASS {
+		if page == .HOME { container = "ClassStrip" }
+		if page == .CLASSES { container = "ClassPicker" }
+	}
 	if page == .SETTINGS && (control.slider || control.action.kind == .DISPLAY_MODE || control.action.kind == .RESOLUTION || control.action.kind == .FPS) { container = "SettingsPanel" }
 	if len(container) == 0 { return }
 	data := clay.GetScrollContainerData(clay.ID(container))

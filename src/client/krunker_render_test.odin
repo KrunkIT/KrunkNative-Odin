@@ -19,6 +19,13 @@ when ODIN_TEST {
 		testing.expect(t, len(prefab_models) >= 99, "live prefab model table must cover current map IDs")
 		testing.expect(t, prefab_models[55].filename == "ghost_0", "AI spawner prefab 55 must render its ghost model")
 		testing.expect(t, prefab_models[84].filename == "water_tower_0", "water tower prefab 84 must resolve its model")
+		// Frontier authors tv=4 for these surfaces, beyond either variants
+		// array. The browser uses their base source without requesting a file.
+		testing.expect(t, shared.map_texture_variant(2, 4) == 0, "Frontier floors must use floor_0.png directly")
+		testing.expect(t, shared.map_texture_variant(10, 4) == 0, "Frontier lines must use lines_0.png directly")
+		testing.expect(t, shared.map_texture_variant(2, 3) == 3 && shared.map_texture_variant(10, 2) == 2, "valid surface variants must keep their textures")
+		testing.expect(t, shared.map_texture_variant(11, 10) == 10, "brick supports more variants than floor and lines")
+		testing.expect(t, shared.map_texture_variant(0, -1) == 0 && shared.map_texture_variant(-1, 2) == 0 && shared.map_texture_variant(20, 1) == 0, "invalid texture IDs and variant indices must resolve safely")
 	}
 
 	@(test)

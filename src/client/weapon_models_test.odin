@@ -32,6 +32,12 @@ when ODIN_TEST {
 		defer { g_client = nil }
 		config := shared.config_load_gameplay()
 		defer shared.config_destroy_gameplay(config)
+		for class in config.classes {
+			for id in class.loadout {
+				testing.expect(t, id >= 0 && int(id) < len(config.weapons) && config.weapons[id] != nil,
+					fmt.tprintf("%s must have its configured primary instead of falling back to a knife", class.name))
+			}
+		}
 		map_inst := shared.Map{death_y = -1000}
 		maps := []^shared.Map{&map_inst}
 		shared.game_configure(&client.game, &config.game, maps, nil, config.weapons, config.classes)
@@ -96,8 +102,15 @@ when ODIN_TEST {
 					player.aim_val = aim
 					camera.zoom = 1 + (weapon.zoom - 1) * aim
 					player_update_meshes(player, false)
+					scoped := first_person && weapon.scope && aim == 1
+					testing.expect(t, gun.visible != scoped, "ADS must hide scoped first-person weapons and restore them when unscoped")
+					if scoped {
+						for mesh in scene.meshes {
+							testing.expect(t, !mesh.visible, "scoping must hide the hands as well as the weapon")
+						}
+					}
 					// Isolate the weapon: visible hands/body must not mask a missing gun.
-					for mesh in scene.meshes { mesh.visible = mesh == gun || mesh == arms.weapon_left || mesh == arms.attachment }
+					for mesh in scene.meshes { mesh.visible = mesh.visible && (mesh == gun || mesh == arms.weapon_left || mesh == arms.attachment) }
 					gl.ClearColor(0, 0, 0, 1)
 					gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 					scene_render(scene, &camera, 640, 360)
@@ -123,7 +136,7 @@ when ODIN_TEST {
 					for i := 0; i < len(pixels); i += 3 {
 						if pixels[i] > 0 || pixels[i + 1] > 0 || pixels[i + 2] > 0 { visible += 1 }
 					}
-					testing.expect(t, visible > 20 && visible < 640 * 360 * 0.8, fmt.tprintf("weapon %d %s must render at a sensible size (first person=%v aim=%v pixels=%d)", id, weapon.name, first_person, aim, visible))
+					testing.expect(t, (scoped && visible == 0) || (!scoped && visible > 20 && visible < 640 * 360 * 0.8), fmt.tprintf("weapon %d %s must render at a sensible size (first person=%v aim=%v pixels=%d)", id, weapon.name, first_person, aim, visible))
 					testing.expect(t, gl.GetError() == gl.NO_ERROR, fmt.tprintf("weapon %d must render without OpenGL errors", id))
 					when #config(WEAPON_PREVIEW, false) {
 						if first_person {
@@ -135,10 +148,13 @@ when ODIN_TEST {
 						}
 					}
 				}
+				player.aim_val = 0
+				player_update_meshes(player, false)
+				testing.expect(t, gun.visible, "weapon must reappear when leaving ADS")
 				client_clear_players(&client)
 				testing.expect(t, scene.mesh_count == 0, "removing a weapon must detach all meshes")
 			}
 		}
-		testing.expect(t, supported == 15, "render check must cover all 15 supported weapons")
+		testing.expect(t, supported == 18, "render check must cover all 18 supported weapons")
 	}
 }

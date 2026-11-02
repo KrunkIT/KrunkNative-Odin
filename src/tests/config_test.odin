@@ -168,7 +168,7 @@ team2_name = "Bravo custom"
 	}
 	// Check the complete supported magazine registry through both startup paths.
 	// Previously game.toml silently replaced modern defaults with legacy stats.
-	magazines := [?]u32{3, 30, 10, 24, 6, 2, 50, 8, 3, 28, 7, 4, 0, 0, 24, 0, 0, 0, 16}
+	magazines := [?]u32{3, 30, 10, 24, 6, 2, 50, 8, 3, 28, 7, 4, 0, 3, 24, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
 	for rounds, id in magazines {
 		if embedded.weapons[id] == nil { continue }
 		if config.weapons[id].ammo != rounds || embedded.weapons[id].ammo != rounds {
@@ -219,7 +219,7 @@ team2_name = "Bravo custom"
 	commando_index := shared.class_config_index("commando")
 	famas_ok :=
 		famas_index == 14 && commando_index == 12 &&
-		config.weapons[13] == nil && config.weapons[famas_index] != nil &&
+		config.weapons[13] != nil && config.weapons[famas_index] != nil &&
 		config.weapons[famas_index].burst && config.weapons[famas_index].no_auto &&
 		config.weapons[famas_index].burst_count == 3 &&
 		len(config.classes[commando_index].loadout) > 0 &&
@@ -595,7 +595,11 @@ test_shot_feedback :: proc() -> bool {
 }
 
 test_objective_combat_state :: proc() -> bool {
-	rotation_maps_ok := len(shared.ROTATION_MAPS) == 4 && shared.ROTATION_MAPS[0] == 2 && shared.ROTATION_MAPS[1] == 4 && shared.ROTATION_MAPS[2] == 12 && shared.ROTATION_MAPS[3] == 14
+	rotation_maps_ok := len(shared.ROTATION_MAPS) == 8 &&
+		shared.ROTATION_MAPS[0] == 0 && shared.ROTATION_MAPS[1] == 2 &&
+		shared.ROTATION_MAPS[2] == 4 && shared.ROTATION_MAPS[3] == 3 &&
+		shared.ROTATION_MAPS[4] == 11 && shared.ROTATION_MAPS[5] == 14 &&
+		shared.ROTATION_MAPS[6] == 17 && shared.ROTATION_MAPS[7] == 42
 	rotation_classes_ok := len(shared.ROTATION_CLASSES) == 9 && shared.ROTATION_CLASSES[0] == 0 && shared.ROTATION_CLASSES[1] == 1 && shared.ROTATION_CLASSES[2] == 2 && shared.ROTATION_CLASSES[3] == 3 && shared.ROTATION_CLASSES[4] == 5 && shared.ROTATION_CLASSES[5] == 6 && shared.ROTATION_CLASSES[6] == 8 && shared.ROTATION_CLASSES[7] == 12 && shared.ROTATION_CLASSES[8] == 13
 	if !rotation_maps_ok || !rotation_classes_ok {
 		fmt.eprintln("Standard rotation pool test failed")

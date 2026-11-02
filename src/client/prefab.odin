@@ -160,6 +160,7 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 	alpha_test: f32
 	custom_asset_found := false
 	custom_unlit := false
+	preserve_origin := false
 
 	if aid, is_string := obj_obj["aid"].(json.String); is_string {
 		asset, supported := shared.map_custom_asset(string(aid))
@@ -168,6 +169,7 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 			alpha_test = asset.alpha_test
 			custom_asset_found = true
 			custom_unlit = asset.emissive
+			preserve_origin = asset.preserve_origin
 		}
 	}
 	if prefab_id == int(shared.Prefab.CUSTOM_ASSET) && !custom_asset_found {
@@ -265,7 +267,7 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 		base_texture_path := shared.concat(shared.assets_path(), fmt.tprintf("textures/%s.png", prefab_model.filename))
 
 		texture_id := load_texture_with_fallback(texture_path, base_texture_path)
-		geometry := load_obj_model(model_path, true)
+		geometry := load_obj_model(model_path, !preserve_origin)
 
 		delete(model_path)
 		delete(texture_path)
@@ -323,8 +325,7 @@ prefab_init :: proc(object: ^shared.Object, colors: []shared.Vec4, raw_obj: json
 			// fallback is intentional here.
 			texture_path = ""
 		} else {
-			variant := 0
-			variant = max(0, int(object.texture_variant))
+			variant := shared.map_texture_variant(i32(tex_id), object.texture_variant)
 			base := name
 			base_suffix := "_0"
 			if tex_id == 8 {

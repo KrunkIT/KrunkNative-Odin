@@ -96,8 +96,22 @@ def main() -> int:
             (os.path.join(ROOT, "assets/textures/objective_4.png"), "assets/textures/objective_4.png"),
             (os.path.join(ROOT, "assets/textures/objective_5.png"), "assets/textures/objective_5.png"),
         ]
+        for name in sorted(os.listdir(os.path.join(ROOT, "assets/maps"))):
+            if name.endswith(".json"):
+                rel = "assets/maps/" + name
+                overlays.append((os.path.join(ROOT, rel), rel))
+        obsolete_sandstorm = os.path.join(stage, "assets/maps/sandstorm.json")
+        if os.path.isfile(obsolete_sandstorm):
+            os.remove(obsolete_sandstorm)
         # The archive seed can contain old files under the same model names.
         with open(os.path.join(ROOT, "assets/config/weapon-assets.txt"), encoding="utf-8") as fh:
+            for line in fh:
+                asset = line.strip()
+                if asset and not asset.startswith("#"):
+                    rel = "assets/" + asset
+                    overlays.append((os.path.join(ROOT, rel), rel))
+        # Hosted map art is not included in mod.zip or older seed archives.
+        with open(os.path.join(ROOT, "assets/config/map-assets.txt"), encoding="utf-8") as fh:
             for line in fh:
                 asset = line.strip()
                 if asset and not asset.startswith("#"):

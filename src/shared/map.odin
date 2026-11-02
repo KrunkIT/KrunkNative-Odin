@@ -7,32 +7,74 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 
+// Official GAPI map IDs 0-46, matching download_maps.py.
 DEFAULT_MAP_NAMES := [?]string{
-	"burg",
-	"littletown",
-	"sandstorm",
-	"subzero",
-	"undergrowth",
-	"shipyard",
-	"freight",
-	"lostworld",
-	"citadel",
-	"oasis",
-	"kanji",
-	"newtown",
-	"industry",
-	"soul_sanctum",
-	"evacuation",
+	"burg", // 0
+	"littletown", // 1
+	"sandstorm", // 2
+	"subzero", // 3
+	"undergrowth", // 4
+	"shipment", // 5
+	"freight", // 6
+	"lostworld", // 7
+	"citadel", // 8
+	"oasis", // 9
+	"kanji", // 10
+	"industry", // 11
+	"lumber", // 12
+	"evacuation", // 13
+	"site", // 14
+	"skytemple", // 15
+	"lagoon", // 16
+	"bureau", // 17
+	"tortuga", // 18
+	"tropicano", // 19
+	"krunk_plaza", // 20
+	"arena", // 21
+	"habitat", // 22
+	"atomic", // 23
+	"old_burg", // 24
+	"throwback", // 25
+	"stockade", // 26
+	"facility", // 27
+	"clockwork", // 28
+	"laboratory", // 29
+	"shipyard", // 30
+	"soul_sanctum", // 31
+	"bazaar", // 32
+	"erupt", // 33
+	"hq", // 34
+	"khepri", // 35
+	"lush", // 36
+	"vivo", // 37
+	"slide_moonlight", // 38
+	"eterno_simulator", // 39
+	"stalk_factory", // 40
+	"eterno_jump", // 41
+	"frontier", // 42
+	"bastion", // 43
+	"piazza", // 44
+	"barnyard", // 45
+	"candy_heist", // 46
 }
 
 // Standard rotation intentionally stays smaller than the complete map registry.
 // Excluded maps remain available through --map and custom server configuration.
-ROTATION_MAPS := [?]int{2, 4, 12, 14}
+ROTATION_MAPS := [?]int{0, 2, 4, 3, 11, 14, 17, 42}
 ROTATION_MODES := [?]i32{0}
 
-// Sandstorm's original map export is retained as assets/maps/sandstorm.json
-// for reference. Runtime requests for the public name use the current v3
-// export so custom and offline sessions see the same geometry.
+// Browser surface texture registry, in `t` order. `tv` is an index into
+// that texture's variants array, not an arbitrary filename suffix. Model
+// prefab skins have their own registry and do not use this table.
+MAP_TEXTURE_VARIANT_COUNTS := [?]i32{8, 4, 4, 1, 3, 1, 3, 3, 4, 1, 3, 11, 3, 4, 3, 4, 4, 2, 3, 1}
+
+map_texture_variant :: proc(texture_id, requested: i32) -> i32 {
+	if texture_id < 0 || int(texture_id) >= len(MAP_TEXTURE_VARIANT_COUNTS) { return 0 }
+	if requested <= 0 || requested >= MAP_TEXTURE_VARIANT_COUNTS[texture_id] { return 0 }
+	return requested
+}
+
+// Sandstorm uses the refreshed API map under the existing v3 asset filename.
 map_asset_name :: proc(name: string) -> string {
 	if name == "sandstorm" || name == "ss_v3" {
 		return "sandstorm_v3"

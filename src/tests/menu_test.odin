@@ -37,6 +37,7 @@ test_menu :: proc() -> bool {
 	}
 	view := menuui.View{classes = classes[:], players = players[:], online = true, ready = true, selected_class = 2, confirmed_class = 2, confirmed_team = 1, map_name = "Sandstorm", mode = "Hardpoint", lobby_name = "Competitive lobby", resolution = "1920 x 1080", sensitivity = 1,
 		teams = {{id=1, name="Alpha", capacity=4, available=true}, {id=2, name="Bravo", capacity=4, available=true}}}
+	view.presentation = .COMPETITIVE
 	sizes := [?][2]f32{{1280,720}, {1920,1080}, {2560,1600}}
 	for size in sizes {
 		for page in menuui.Page {
@@ -118,7 +119,74 @@ test_menu :: proc() -> bool {
 	menu_test_frame(&state, view, {})
 	if state.errors != 0 { return false }
 	fmt.println("Competitive lobby layout, modal, selection, invite, mouse and keyboard tests OK")
-	return test_lobby_packets() && test_live_lobby_records()
+	return test_standard_menu() && test_lobby_packets() && test_live_lobby_records()
+}
+
+test_standard_menu :: proc() -> bool {
+	state: menuui.State
+	if !menuui.init(&state, menu_test_measure, nil) { return false }
+	defer menuui.fini(&state)
+	classes: [len(shared.CLASSES_LIST)]menuui.Class
+	for class, i in shared.CLASSES_LIST { classes[i] = {id=i32(i), name=class.name, weapon="Primary weapon", available=true} }
+	classes[1].available = false
+	classes[1].reason = "Restricted by this server"
+	view := menuui.View{classes=classes[:], online=true, ready=true, selected_class=2, confirmed_class=0,
+		map_name="Sandstorm", mode="Hardpoint", lobby_name="Standard lobby", resolution="1920 x 1080", sensitivity=1,
+		teams={{id=1,name="An exceptionally long Alpha team name",capacity=4,available=true},{id=2,name="Bravo",capacity=4,available=true}}}
+	for size in ([?][2]f32{{1280,720},{1920,1080},{2560,1600}}) {
+		for manual in ([?]bool{false,true}) {
+			view.team_selection = manual
+			for page in menuui.Page {
+				state.page = page
+				menu_test_frame(&state, view, {}, size[0], size[1])
+				if state.errors != 0 { fmt.eprintln("Standard menu layout failed"); return false }
+				for id in ([?]string{"StandardPlayPanel","SelectedClass","Play","ChangeClass"}) {
+					data := clay.GetElementData(clay.ID(id, id == "ChangeClass" ? u32(menuui.Page.CLASSES) : 0)); box := data.boundingBox
+					if !data.found || box.width <= 0 || box.height <= 0 || box.x < 0 || box.y < 0 || box.x+box.width > size[0]+1 || box.y+box.height > size[1]+1 {
+						fmt.println("Standard menu bounds failed", id, size, box); return false
+					}
+				}
+			}
+		}
+	}
+	state.page = .HOME
+	view.team_selection = false
+	menu_test_frame(&state, view, {})
+	for control in state.controls[:state.control_count] {
+		if control.action.kind == .SELECT_CLASS || control.action.kind == .SELECT_TEAM { fmt.println("Unexpected standard menu selection control"); return false }
+	}
+	if menu_test_click(&state, view, clay.ID("Play")).kind != .PLAY { fmt.println("Standard Play failed"); return false }
+	menu_test_click(&state, view, clay.ID("ChangeClass",u32(menuui.Page.CLASSES)))
+	if state.page != .CLASSES { fmt.println("Change class navigation failed"); return false }
+	menu_test_frame(&state, view, {})
+	// A locked class stays focusable and does not close the picker.
+	if menu_test_click(&state, view, clay.ID("ClassChoice",1)).kind != .NONE || state.page != .CLASSES { fmt.println("Restricted class navigation failed"); return false }
+	if menu_test_click(&state, view, clay.ID("Play")).kind == .PLAY { fmt.println("Play activated through class picker"); return false }
+	choice := menu_test_click(&state, view, clay.ID("ClassChoice",2))
+	if choice.kind != .SELECT_CLASS || choice.index != 2 { fmt.println("Class picker selection failed", choice); return false }
+	// Scrolling via Tab must reach the last row of portraits.
+	state.focus = clay.ID("Back").id
+	for _ in 0..<len(classes) { menu_test_frame(&state, view, {}); menu_test_frame(&state, view, {tab=true}) }
+	scroll := clay.GetScrollContainerData(clay.ID("ClassPicker"))
+	if !scroll.found || scroll.scrollPosition[1] >= 0 { fmt.println("Class picker focus did not scroll"); return false }
+	view.active = true
+	if menu_test_frame(&state, view, {escape=true}).kind != .NONE || state.page != .HOME || state.focus != clay.ID("ChangeClass",u32(menuui.Page.CLASSES)).id { return false }
+	menu_test_frame(&state, view, {})
+	if menu_test_frame(&state, view, {escape=true}).kind != .PLAY { return false }
+	view.active = false
+	view.team_selection = true
+	view.play_reason = "Choose a team to enter game"
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("Play")).kind != .NONE { return false }
+	if menu_test_click(&state, view, clay.ID("JoinTeam",2)).index != 2 { return false }
+	view.team_pending = true; view.requested_team = 2
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("JoinTeam",2)).kind != .NONE || view.confirmed_team != 0 { return false }
+	view.team_pending = false; view.confirmed_team = 2; view.play_reason = ""
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("JoinTeam",0)).kind != .SELECT_TEAM { return false }
+	fmt.println("Standard lobby, class overlay, keyboard scrolling and team confirmation tests OK")
+	return true
 }
 
 test_lobby_packets :: proc() -> bool {
@@ -144,6 +212,11 @@ test_lobby_packets :: proc() -> bool {
 test_live_lobby_records :: proc() -> bool {
 	world: kproto.Krunker_World_State
 	defer kproto.krunker_world_reset(&world)
+	init_packet: [18]kproto.Krunker_Msgpack_Value
+	init_packet[0], init_packet[1], init_packet[2] = "init", i64(2), i64(2)
+	init_packet[16], init_packet[17] = true, true
+	if !kproto.krunker_world_apply_init(&world, init_packet[:]) || !world.is_comp || !world.is_ranked { return false }
+	if !kproto.krunker_world_apply_init(&world, init_packet[:3]) || world.is_comp || world.is_ranked { return false }
 	world.local_socket_id = ""
 	record := []kproto.Krunker_Msgpack_Map_Entry{{key="n",value="Player name"},{key="t",value=i64(1)},{key="c",value=i64(2)},{key="a",value=false}}
 	roster := []kproto.Krunker_Msgpack_Map_Entry{{key="socket-a",value=record}}

@@ -384,10 +384,10 @@ main :: proc() {
 		"wall_jump.json",
 	}
 
-	// NOTE: expects to be run from the repo root so assets/maps/sandstorm.json resolves
+	// Recorded movement traces use frozen map geometry; official maps may update.
 	game := shared.Game{}
 
-	sandstorm_path := fmt.tprintf("%sassets/maps/sandstorm.json", project_root())
+	sandstorm_path := fmt.tprintf("%ssrc/tests/fixtures/maps/sandstorm.json", project_root())
 	sandstorm, map_ok := shared.map_load_from_file(sandstorm_path)
 
 	if !map_ok {
@@ -419,7 +419,7 @@ main :: proc() {
 	}
 
 	// kanji jump pad test
-	kanji_path := fmt.tprintf("%sassets/maps/kanji.json", project_root())
+	kanji_path := fmt.tprintf("%ssrc/tests/fixtures/maps/kanji.json", project_root())
 	kanji, kanji_ok := shared.map_load_from_file(kanji_path)
 
 	if !kanji_ok {

@@ -9,6 +9,38 @@ timer_icon: u32
 health_icon: u32
 class_icons: map[i32]u32
 weapon_icons: map[i32]u32
+scope_icon: u32
+
+// Use the same interpolated aim as the first-person rig and camera.
+overlay_scope_active :: proc(client: ^Client) -> bool {
+	player := client.me
+	if player == nil || !player.active || player.weapon == nil || !player.weapon.scope || player_uses_third_person_camera(player) { return false }
+	aim := player.aim_val
+	if client.krunker.connected { aim = krunker_client_render_sample(client).aim }
+	return player_scope_visible(player, aim)
+}
+
+overlay_scope_render :: proc(ui: ^UI) {
+	if scope_icon == 0 {
+		path := shared.concat(shared.assets_path(), "textures/scopes/scope_0.png")
+		scope_icon = load_texture(path)
+		delete(path)
+	}
+	// A square scope stays circular on every aspect ratio; fill the outside.
+	size := min(ui.width, ui.height)
+	x, y := (ui.width - size) * 0.5, (ui.height - size) * 0.5
+	black := shared.Vec4{0, 0, 0, 1}
+	ui_fill_rect(ui, black, 0, 0, x, ui.height)
+	ui_fill_rect(ui, black, x + size, 0, x, ui.height)
+	ui_fill_rect(ui, black, x, 0, size, y)
+	ui_fill_rect(ui, black, x, y + size, size, y)
+	if scope_icon != 0 {
+		ui_draw_image(ui, scope_icon, x, y, size, size)
+	} else {
+		ui_fill_rect(ui, black, ui.width * 0.5 - 1, ui.height * 0.5 - 16, 2, 32)
+		ui_fill_rect(ui, black, ui.width * 0.5 - 16, ui.height * 0.5 - 1, 32, 2)
+	}
+}
 
 HUD_TIMER_TEXT_SIZE :: 40.0
 HUD_TIMER_ICON_SIZE :: 32.0
@@ -54,6 +86,7 @@ overlay_loadout_render :: proc(client: ^Client, right, bottom: f32) {
 		// The bundled silhouettes use a 2:1 canvas, including their transparent padding.
 		if icon != 0 {
 			icon_top := top + (12.0 if weapon.melee else -8.0) * s
+			if slot == 0 && !weapon.melee { icon_top -= 10.0 * s }
 			ui_draw_image(client.ui, icon, right - 184.0 * s, icon_top, 160.0 * s, 80.0 * s, color)
 		} else {
 			text_size := 24.0 * s
@@ -123,6 +156,8 @@ overlay_ammo_render :: proc(client: ^Client) {
 }
 
 overlay_render :: proc(client: ^Client, delta: f32) {
+	scoped := overlay_scope_active(client)
+	if scoped { overlay_scope_render(client.ui) }
 	white := shared.Vec4{1.0, 1.0, 1.0, 1.0}
 	background_color := shared.Vec4{0.0, 0.0, 0.0, 0.4}
 
@@ -203,8 +238,8 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		}
 	}
 
-	// test crosshair
-	{
+	// The scope image supplies its own centered reticle.
+	if !scoped {
 		color := shared.Vec4{1.0, 1.0, 0.0, 1.0}
 
 		ui_fill_rect(client.ui, color, client.ui.width * 0.5 - 1.0 * client.ui.scale, client.ui.height * 0.5 - 5.0 * client.ui.scale, 2.0 * client.ui.scale, 10.0 * client.ui.scale)
@@ -283,6 +318,8 @@ overlay_fini :: proc() {
 	texture_release(health_icon)
 	texture_release(ammo_icon)
 	texture_release(timer_icon)
+	texture_release(scope_icon)
+	scope_icon = 0
 	health_icon = 0
 	ammo_icon = 0
 	timer_icon = 0

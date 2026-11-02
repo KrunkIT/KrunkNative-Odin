@@ -11,6 +11,11 @@ MELEE_ROT_Z :: -math.PI * 0.9
 
 REFLEX_SIGHT_AIM_OFFSET_Y :: 0.16
 
+player_scope_visible :: proc(player: ^shared.Player, view_aim: f32) -> bool {
+	return player != nil && player.active && player.is_you && player.weapon != nil && player.weapon.scope &&
+		!player_uses_third_person_camera(player) && view_aim >= 0.99
+}
+
 generate_weapon_attachment :: proc(weapon: ^shared.Weapon, parent: ^Mesh_Transform) -> ^Mesh {
 	model_path := shared.concat(shared.assets_path(), "models/attach/attach_0.obj")
 	texture_path := shared.concat(shared.assets_path(), "textures/attach/attach_0.png")
@@ -441,6 +446,9 @@ player_generate_meshes :: proc(player: ^shared.Player, render_you: bool) {
 					weapon_mesh.transform.scale = {model_scale, model_scale, model_scale}
 
 					weapon_mesh.transform.rotation.y = weapon.rotation != 0 ? weapon.rotation : math.PI * 0.5
+					if weapon.model_rotation != (shared.Vec3{}) {
+						weapon_mesh.transform.rotation = weapon.model_rotation
+					}
 					weapon_mesh.transform.parent = &arms.anchor
 
 					if j == 1 {
@@ -587,7 +595,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 			continue
 		}
 
-		visible := i == int(player.loadout_index)
+		visible := i == int(player.loadout_index) && !(!is_preview && player_scope_visible(player, view_aim))
 
 		if arms.weapon_right != nil {
 			arms.weapon_right.visible = visible

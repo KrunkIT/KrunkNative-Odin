@@ -39,6 +39,7 @@ when ODIN_TEST {
 			classes[i] = {id=i32(i), name=class.name, weapon="Primary weapon", available=shared.class_is_in_rotation(i32(i)), portrait=rawptr(uintptr(texture)), reason="Restricted by lobby rules"}
 		}
 		classes[2].weapon="SMG"
+		selected_name := classes[2].name
 		classes[1].used=1; classes[1].limit=1
 		players := [?]menuui.Player{
 			{name="An exceptionally long competitive player name",class_name="Run N Gun",team=1,is_you=true},
@@ -49,6 +50,7 @@ when ODIN_TEST {
 		}
 		view := menuui.View{classes=classes[:],players=players[:],online=true,ready=true,selected_class=2,confirmed_class=0,confirmed_team=1,map_name="Sandstorm",mode="Hardpoint",lobby_name="EU competitive / A1B2",match_status="Waiting for players",resolution="1920 x 1080",sensitivity=1,
 			teams={{id=1,name="Alpha",capacity=4,available=true,score=42},{id=2,name="Bravo",capacity=4,available=true,score=38}}}
+		view.presentation = .COMPETITIVE
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		sizes := [?][2]i32{{1280,720}, {1920,1080}, {2560,1600}}
 		for size in sizes {
@@ -59,8 +61,11 @@ when ODIN_TEST {
 			full_players: [32]menuui.Player
 			for &player, i in full_players { player = {name="Competitive player with a long name", class_name="Run N Gun", team=i32(i%2+1), is_you=i==0} }
 			play_y: f32
-			for scenario in 0..<8 {
+			for scenario in 0..<18 {
 				view.online=true; view.team_pending=false; view.class_pending=false; view.spawn_pending=false; view.join_status=""; view.active=false
+				view.presentation=.COMPETITIVE; view.ranked=false; view.team_selection=false; view.local_practice=false; view.ready=true; view.confirmed_team=1; view.play_reason=""
+				view.teams[0].name="Alpha"; view.teams[1].name="Bravo"
+				classes[2].name=selected_name; classes[2].weapon="SMG"
 				state.page=.HOME
 				view.players=players[:]; view.teams[0].capacity=4; view.teams[1].capacity=4; view.selection_status=""
 				switch scenario {
@@ -72,6 +77,16 @@ when ODIN_TEST {
 				case 5: view.active=true
 				case 6: state.page=.CONTROLS
 				case 7: view.players=full_players[:]; view.teams[0].capacity=16; view.teams[1].capacity=16
+				case 8: view.presentation=.STANDARD
+				case 9: view.presentation=.STANDARD; view.team_selection=true; view.confirmed_team=0; view.play_reason="Choose a team to enter game"; view.teams[0].name="An exceptionally long Alpha team name"; classes[2].name="An exceptionally long selected class name"; classes[2].weapon="An exceptionally long primary weapon name"
+				case 10: view.presentation=.STANDARD; view.team_selection=true; view.team_pending=true; view.requested_team=2; view.selection_status="Waiting for the server to confirm your team"
+				case 11: view.presentation=.STANDARD; view.active=true
+				case 12: view.presentation=.STANDARD; state.page=.CLASSES
+				case 13: view.presentation=.STANDARD; state.page=.CLASSES; view.selection_status="Could not send class selection. Please try again."; state.focus=clay.ID("ClassChoice",4).id
+				case 14: view.presentation=.STANDARD; state.page=.SETTINGS
+				case 15: view.presentation=.STANDARD; view.online=false; view.local_practice=true; view.team_selection=true
+				case 16: view.presentation=.STANDARD; view.ready=false
+				case 17: view.ranked=true
 				}
 				page := state.page
 				commands := menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
@@ -81,28 +96,50 @@ when ODIN_TEST {
 				menu_render_commands(ui, commands)
 				labels := [?][2]string{
 					{"Quit", "Quit"}, {"Enter Game", "Play"}, {"Respawn", "Play"}, {"Resume", "Play"}, {"Join", "JoinLink"}, {"Paste", "Paste"},
+					{"Change class", "ChangeClass"},
 				}
 				for command in commands.internalArray[:commands.length] {
 					if command.commandType != .Text { continue }
 					text := command.renderData.text.stringContents
 					for label in labels {
 						if string(text.chars[:text.length]) != label[0] { continue }
-						parent := clay.GetElementData(clay.ID(label[1]))
+						parent := clay.GetElementData(clay.ID(label[1], label[1] == "ChangeClass" ? u32(menuui.Page.CLASSES) : 0))
 						box := command.boundingBox
 						testing.expect(t, parent.found && box.x >= parent.boundingBox.x && box.y >= parent.boundingBox.y &&
 							box.x + box.width <= parent.boundingBox.x + parent.boundingBox.width &&
 							box.y + box.height <= parent.boundingBox.y + parent.boundingBox.height,
 							"actual font label must fit inside its button")
 					}
+					if scenario == 9 {
+						label := string(text.chars[:text.length])
+						if label == menuui.shorten(classes[2].name,30) || label == menuui.shorten(classes[2].weapon,36) {
+							parent := clay.GetElementData(clay.ID("SelectedClass")).boundingBox
+							box := command.boundingBox
+							testing.expect(t, box.x>=parent.x && box.y>=parent.y && box.x+box.width<=parent.x+parent.width+1 && box.y+box.height<=parent.y+parent.height+1,
+								"long selected class and weapon names must fit their card")
+						}
+					}
 				}
-				if page == .HOME && view.online {
+				if page == .HOME && view.online && view.ready && view.presentation == .COMPETITIVE {
 					left := clay.GetElementData(clay.ID("Team",1)).boundingBox
 					right := clay.GetElementData(clay.ID("Team",2)).boundingBox
 					play := clay.GetElementData(clay.ID("Play")).boundingBox
 					if scenario==0 { play_y=play.y }
 					testing.expect(t, abs(play.y-play_y)<1, "Play must stay fixed when selections are pending")
 					testing.expect(t, abs(left.width-right.width)<1 && abs(left.y-right.y)<1, "team panels must have equal widths and top alignment")
-					testing.expect(t, play.x >= left.x+left.width && play.x+play.width <= right.x, "Play must sit between the rosters")
+						testing.expect(t, play.x >= left.x+left.width && play.x+play.width <= right.x, "Play must sit between the rosters")
+				}
+				if view.presentation == .STANDARD && view.ready {
+					for id in ([?]string{"StandardPlayPanel", "SelectedClass", "StandardPlayStatus"}) {
+						box := clay.GetElementData(clay.ID(id)).boundingBox
+						testing.expect(t, box.width>0 && box.height>0 && box.x>=0 && box.y>=0 && box.x+box.width<=ui.width+1 && box.y+box.height<=ui.height+1,
+							"standard lobby controls must stay within the viewport")
+					}
+					if page == .HOME {
+						play := clay.GetElementData(clay.ID("Play")).boundingBox
+						if scenario==8 { play_y=play.y }
+						testing.expect(t, abs(play.y-play_y)<1, "standard Play must stay fixed across team and pending states")
+					}
 				}
 				when #config(MENU_PREVIEW, false) {
 					pixels := make([]u8, int(size[0] * size[1] * 3))

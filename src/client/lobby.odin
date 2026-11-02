@@ -116,7 +116,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 			delete(path)
 			menu_portraits[class.icon_index] = texture
 		}
-		classes[i] = {id = i32(i), name = class.name, weapon = weapon, available = shared.class_is_in_rotation(i32(i)), portrait = rawptr(uintptr(texture))}
+		classes[i] = {id = i32(i), name = class.name, weapon = weapon, available = client.local_practice || shared.class_is_in_rotation(i32(i)), portrait = rawptr(uintptr(texture))}
 		if !classes[i].available { classes[i].reason = "Outside this lobby's class rotation" }
 	}
 	players := make([dynamic]menuui.Player, 0, len(client.game.players), context.temp_allocator)
@@ -150,13 +150,15 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 	if client.game.config.team1_name != "Team 1" && len(client.game.config.team1_name) > 0 { team_names[0] = client.game.config.team1_name }
 	if client.game.config.team2_name != "Team 2" && len(client.game.config.team2_name) > 0 { team_names[1] = client.game.config.team2_name }
 	online := client.krunker.connected || client.net.connected
-	team_selection := client.local_practice || client.krunker.connected && client.krunker_world.lobby_select_team
+	team_selection := (client.local_practice || client.krunker.connected && client.krunker_world.lobby_select_team) && (client.game.mode == nil || client.game.mode.config.teams)
 	if client.krunker.connected {
 		capacity = int((client.krunker_world.lobby_capacity+1)/2)
 		for name, i in client.krunker_world.lobby_team_names { if len(name)>0 { team_names[i]=name } }
 	}
 	if client.net.connected { team_selection = client.net.lobby_received && client.net.lobby.select_team; capacity = int(client.net.lobby.capacity); team_names = client.net.lobby.team_names }
 	view := menuui.View{
+		presentation = client_lobby_presentation(client), ranked = client.krunker.connected && client.krunker_world.is_ranked,
+		team_selection = team_selection,
 		classes = classes, selected_class = client.selected_class, confirmed_class = confirmed_class,
 		confirmed_team = client.lobby_team, requested_team = client.requested_team, team_pending = client.team_pending,
 		players = players[:], online = online, local_practice = client.local_practice,
@@ -192,7 +194,15 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 	return view
 }
 
-menu_apply_action :: proc(client: ^Client, action: menuui.Action) {
+client_lobby_presentation :: proc(client: ^Client) -> menuui.Lobby_Presentation {
+	if client.krunker.connected {
+		return client.krunker_world.is_comp || client.krunker_world.is_ranked ? .COMPETITIVE : .STANDARD
+	}
+	// The native dedicated server currently hosts competitive Hardpoint.
+	return client.net.connected ? .COMPETITIVE : .STANDARD
+}
+
+menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: proc(^Krunker_WS_State, string) -> bool = krunker_ws_send) {
 	switch action.kind {
 	case .NONE, .EDIT_INVITE, .INSPECT_CLASS:
 	case .PASTE:
@@ -252,12 +262,23 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action) {
 		view := menu_view(client)
 		for class in view.classes {
 			if class.id != action.index { continue }
-			if !class.available || class.limit > 0 && class.used >= class.limit { client_selection_status(client, class.reason); return }
-			client.selected_class = action.index
+			if !menuui.class_selectable(view, class) { client_selection_status(client, len(class.reason)>0 ? class.reason : "Class limit reached. Choose another class."); return }
 			if client.krunker.connected {
+				previous_class := client.krunker.class_index
 				client.krunker.class_index = action.index
-				if !krunker_ws_send(&client.krunker, "class") { client_selection_status(client, "Could not send class selection.") }
+				if !send_class(&client.krunker, "class") {
+					client.krunker.class_index = previous_class
+					client_selection_status(client, "Could not send class selection.")
+					return
+				}
 			}
+			client.selected_class = action.index
+			client_selection_status(client, "")
+			if client.menu.page == .CLASSES {
+				client.menu.page = .HOME
+				client.menu.focus = client.menu.return_focus
+			}
+			return
 		}
 	case .QUIT: glfw.SetWindowShouldClose(client.window, true)
 	case .DISPLAY_MODE: client_set_display_mode(client, Display_Mode(action.index))

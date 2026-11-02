@@ -24,7 +24,8 @@ CONFIG_CLASS_PATH :: "krunker-configs/class-configs.json"
 weapon_config_names := [?]string{
 	"awp", "ak47", "pistol", "smg", "revolver", "shotgun",
 	"lmg", "semi", "rpg", "akimbo", "deagle", "alien", "knife",
-	"", "famas", "", "", "", "blaster",
+	"crossbow", "famas", "", "", "", "blaster", "build_tool",
+	"", "", "", "", "", "", "", "", "charge_rifle",
 }
 
 // Section names map config keys to stable class indices (CLASSES_LIST order).
@@ -428,6 +429,7 @@ config_apply_weapon :: proc(
 	config_apply_bool(table, "no_projectile_spread", "weapon", id, &weapon.no_projectile_spread)
 	config_apply_bool(table, "akimbo", "weapon", id, &weapon.akimbo)
 	config_apply_bool(table, "no_aim", "weapon", id, &weapon.no_aim)
+	config_apply_bool(table, "scope", "weapon", id, &weapon.scope)
 	config_apply_bool(table, "no_auto", "weapon", id, &weapon.no_auto)
 	config_apply_bool(table, "no_inspect", "weapon", id, &weapon.no_inspect)
 	config_apply_bool(table, "can_throw", "weapon", id, &weapon.can_throw)

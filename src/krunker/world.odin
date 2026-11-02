@@ -159,6 +159,8 @@ krunker_world_apply_init :: proc(state: ^Krunker_World_State, packet: []Krunker_
 	clear(&state.shots)
 	state.in_game = false
 	state.mode_index = krunker_world_i32(packet[2], -1)
+	state.is_comp = false
+	state.is_ranked = false
 	if len(packet) > 3 { state.event_index = krunker_world_i32(packet[3], -1) }
 	if len(packet) > 16 { state.is_comp = krunker_world_bool(packet[16]) }
 	if len(packet) > 17 { state.is_ranked = krunker_world_bool(packet[17]) }

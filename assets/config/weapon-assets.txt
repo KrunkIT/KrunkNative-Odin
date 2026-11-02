@@ -47,3 +47,15 @@ textures/weapons/weapon_19.png
 textures/weapons/icon_19.png
 models/attach/attach_0.obj
 textures/attach/attach_0.png
+
+# Additional practice-class primaries and the default sniper scope.
+models/weapons/weapon_14.obj
+textures/weapons/weapon_14.png
+textures/weapons/icon_14.png
+models/weapons/weapon_20.obj
+textures/weapons/weapon_20.png
+textures/weapons/icon_20.png
+models/weapons/weapon_29.obj
+textures/weapons/weapon_29.png
+textures/weapons/icon_29.png
+textures/scopes/scope_0.png

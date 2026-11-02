@@ -50,10 +50,25 @@ try {
         (Join-Path $root "assets\textures\objective_5.png") = (Join-Path $stage "assets\textures\objective_5.png")
     }
 
+    # Refresh the full map catalog instead of retaining old maps in the seed.
+    foreach ($map in Get-ChildItem -LiteralPath (Join-Path $root "assets\maps") -Filter "*.json" -File) {
+        $copies[$map.FullName] = Join-Path $stage (Join-Path "assets\maps" $map.Name)
+    }
+    $obsoleteSandstorm = Join-Path $stage "assets\maps\sandstorm.json"
+    if (Test-Path -LiteralPath $obsoleteSandstorm -PathType Leaf) { Remove-Item -LiteralPath $obsoleteSandstorm }
+
     # Replace every supported default weapon from the installed modern pack;
     # the archive seed may contain an older generation of these same filenames.
     $weaponAssets = Get-Content -LiteralPath (Join-Path $root "assets\config\weapon-assets.txt")
     foreach ($asset in $weaponAssets) {
+        $asset = $asset.Trim()
+        if (-not $asset -or $asset.StartsWith("#")) { continue }
+        $relative = Join-Path "assets" $asset
+        $copies[(Join-Path $root $relative)] = Join-Path $stage $relative
+    }
+
+    # Hosted map art is absent from mod.zip and older seed archives.
+    foreach ($asset in Get-Content -LiteralPath (Join-Path $root "assets\config\map-assets.txt")) {
         $asset = $asset.Trim()
         if (-not $asset -or $asset.StartsWith("#")) { continue }
         $relative = Join-Path "assets" $asset

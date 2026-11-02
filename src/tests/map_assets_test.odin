@@ -59,7 +59,7 @@ test_sandstorm_palms :: proc() -> bool {
 	return test_custom_map_assets() && test_builtin_map_textures()
 }
 
-// Verify that every map-authored `t`/`tv` pair has a corresponding image in
+// Verify that every registry-valid surface `t`/`tv` pair has an image in
 // the extracted mod pack. A missing texture otherwise binds the renderer's
 // white fallback and makes an entire map surface look untextured.
 test_builtin_map_textures :: proc() -> bool {
@@ -68,15 +68,15 @@ test_builtin_map_textures :: proc() -> bool {
 		"grass", "check", "lines", "brick", "link", "liquid", "grain", "fabric",
 		"tile", "metal", "sand", "snow",
 	}
-	map_names := [?]string{
-		"burg", "citadel", "evacuation", "freight", "industry", "kanji", "littletown",
-		"lostworld", "newtown", "oasis", "sandstorm", "sandstorm_v3", "shipyard",
-		"soul_sanctum", "subzero", "undergrowth",
-	}
+	map_names := shared.DEFAULT_MAP_NAMES[:]
 
-	checked := 0
+	if len(map_names) != 47 || map_names[5] != "shipment" || map_names[11] != "industry" || map_names[30] != "shipyard" || map_names[46] != "candy_heist" {
+		fmt.eprintln("Official map registry must match the GAPI server IDs 0-46")
+		return false
+	}
+	checked, ignored_variants := 0, 0
 	for name in map_names {
-		map_path := strings.concatenate({shared.assets_path(), "maps/", name, ".json"})
+		map_path := strings.concatenate({shared.assets_path(), "maps/", shared.map_asset_name(name), ".json"})
 		map_inst, loaded := shared.map_load_from_file(map_path)
 		delete(map_path)
 		if !loaded {
@@ -86,6 +86,9 @@ test_builtin_map_textures :: proc() -> bool {
 
 		failed := false
 		for object, object_index in map_inst.objects {
+			// Model prefab tv values select model skins (e.g. tree_0_8),
+			// independently of the surface texture registry below.
+			if object.prefab != .CUBE && object.prefab != .PLANE && object.prefab != .RAMP && object.prefab != .CYLINDER && object.prefab != .SPHERE { continue }
 			texture_index := int(object.texture)
 			if texture_index == 5 {
 				// DEFAULT is intentionally untextured in the live registry.
@@ -102,9 +105,11 @@ test_builtin_map_textures :: proc() -> bool {
 				// Browser registry's GRASS source is grass_1.png.
 				base_suffix = "_1"
 			}
-			texture_file := strings.concatenate({texture_names[texture_index], base_suffix})
-			if object.texture_variant > 0 {
-				texture_file = fmt.tprintf("%s_%d", texture_file, object.texture_variant)
+			texture_file := fmt.tprintf("%s%s", texture_names[texture_index], base_suffix)
+			variant := shared.map_texture_variant(i32(object.texture), object.texture_variant)
+			if variant != object.texture_variant { ignored_variants += 1 }
+			if variant > 0 {
+				texture_file = fmt.tprintf("%s_%d", texture_file, variant)
 			}
 			texture_path := strings.concatenate({shared.assets_path(), "textures/", texture_file, ".png"})
 			if !os.exists(texture_path) {
@@ -124,17 +129,17 @@ test_builtin_map_textures :: proc() -> bool {
 		fmt.eprintf("Map texture test: expected at least 1000 textured objects, found %d\n", checked)
 		return false
 	}
-	fmt.eprintf("Map texture registry test OK (%d textured objects)\n", checked)
+	fmt.eprintf("Map texture registry test OK (%d textured objects across 47 maps; %d out-of-range variants use the base source)\n", checked, ignored_variants)
 	return true
 }
 
 // Exercise every locally exported custom reference, including decorative AI
 // assets, so a map update cannot silently leave a model or texture unaccounted.
 test_custom_map_assets :: proc() -> bool {
-	map_names := [?]string{"sandstorm_v3", "undergrowth", "evacuation"}
+	map_names := [?]string{"burg", "sandstorm_v3", "undergrowth", "evacuation"}
 	total_assets := 0
 	for name in map_names {
-		path := strings.concatenate({shared.assets_path(), "maps/", name, ".json"})
+		path := strings.concatenate({shared.assets_path(), "maps/", shared.map_asset_name(name), ".json"})
 		map_inst, loaded := shared.map_load_from_file(path)
 		delete(path)
 		if !loaded {
@@ -197,7 +202,13 @@ test_custom_map_assets :: proc() -> bool {
 		fmt.eprintln("Custom asset test: numeric asset ID or material suffix resolved incorrectly")
 		return false
 	}
-	bad_aids := [?]string{"", "unknown", "999999", "../2412a", "2412.obj", "2412g", "2412q", "2412f"}
+	foliage, foliage_ok := shared.map_custom_asset("27432g")
+	tree, tree_ok := shared.map_custom_asset("632nest")
+	if !foliage_ok || !foliage.preserve_origin || foliage.filename != "custom/27432" || !tree_ok || tree.filename != "custom/632" {
+		fmt.eprintln("Custom asset test: Burg's converted foliage or hosted tree resolved incorrectly")
+		return false
+	}
+	bad_aids := [?]string{"", "unknown", "999999", "../2412a", "2412.obj", "2412g", "2412q", "2412f", "27432q", "27432ga"}
 	for aid in bad_aids {
 		if _, supported := shared.map_custom_asset(aid); supported {
 			fmt.eprintf("Custom asset test: unsupported aid=%s accepted as a static OBJ\n", aid)

@@ -10,6 +10,8 @@ with Odin!
 > The Odin port is actively developed. The client starts on a connection screen and exposes an explicit
 > **Join** action beside an editable invite field. Paste a link, join the lobby,
 > choose a team and class, then select **Enter Game**. **Local practice** starts an offline session for network experiments.
+> Competitive and Ranked sessions use the team-roster lobby. Ordinary sessions and Local practice
+> use a compact Play menu with a **Change class** overlay; manual team controls appear when allowed.
 >
 > The native protocol is project-owned and intentionally targets only this native client and
 > dedicated server.
@@ -212,6 +214,27 @@ server frames and trailer values.
 
 You can also choose a class on the spawn screen before entering the game.
 
+All 47 official map IDs (0–46) are registered with their server IDs. Refresh
+them with `python download_maps.py`, or refresh selected maps with
+`python download_maps.py --ids 2 4`. The downloader validates each response,
+replaces older maps, and skips identical files. Sandstorm keeps the
+`sandstorm_v3.json` asset filename; the obsolete export is removed after a
+successful download. Both release packagers include the refreshed map files.
+Use `--offline --map candy_heist` (or another name from `--help`) to open one
+directly. The practice rotation contains Burg, Sandstorm, Undergrowth, Subzero,
+Industry, Site, Bureau, and Frontier.
+
+Importing a map does not add its browser scripts or new renderer features.
+Custom assets outside the bundled OBJ registry, including GLB/glTF/FBX assets,
+are currently omitted. Surface variant numbers outside the browser texture
+registry use the base texture directly. The map geometry, spawn points, and environment data are
+retained in the downloaded JSON.
+
+Scoped weapons hide the first-person weapon and hands at full ADS and use the
+bundled default scope image. All class primary models are registered, including
+Crossbow, Build Tool, and Charge Rifle. Building and weapon charge mechanics
+still require a separate gameplay implementation.
+
 ## Controls
 
 | Input | Action |
@@ -266,8 +289,8 @@ loadout = ["awp"]
 ```
 
 The same file controls the match timer, objective rotation and scoring, regeneration, respawning,
-and player limit. The standard map rotation is `sandstorm`, `undergrowth`, `industry`, and
-`evacuation`; all other bundled maps remain available for local play through `--map`. The class
+and player limit. The standard map rotation is `burg`, `sandstorm`, `undergrowth`, `subzero`,
+`industry`, `site`, `bureau`, and `frontier`; all other bundled maps remain available for local play through `--map`. The class
 picker uses the standard nine-class pool, while every configured class remains addressable through
 `--class` for custom play.
 

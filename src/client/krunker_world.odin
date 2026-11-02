@@ -6,7 +6,7 @@ import shared "../shared"
 import kproto "../krunker"
 
 // Live map indexes refer to the complete official registry, not the native
-// client's four-map rotation. Sandstorm resolves through map_asset_name.
+// client's practice rotation. Sandstorm resolves through map_asset_name.
 krunker_client_load_world_map :: proc(client: ^Client) -> bool {
 	world := &client.krunker_world
 	state := &client.krunker
