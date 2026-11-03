@@ -19,7 +19,7 @@ Server :: struct {
 
 main :: proc() {
 	fmt.println("==================================================")
-	fmt.println("  KrunkNative Odin Dedicated Server v1.0.0")
+	fmt.println("  Krodin Odin Dedicated Server v1.0.0")
 	fmt.println("==================================================")
 
 	server := Server {

@@ -1,4 +1,4 @@
-# KrunkNative gameplay configuration.
+# Krodin gameplay configuration.
 #
 # Weapons and classes are defined by NAME inside the [weapons] and [classes]
 # tables. The section key determines which built-in weapon/class is being

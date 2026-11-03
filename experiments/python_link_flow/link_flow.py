@@ -31,7 +31,7 @@ from krunker_msgpack import AhNum, HosterAhNum, decode_packets
 
 MATCHMAKER = "https://matchmaker.krunker.io"
 ORIGIN = "https://krunker.io"
-USER_AGENT = "Mozilla/5.0 (KrunkNative Python link-flow experiment)"
+USER_AGENT = "Mozilla/5.0 (Krodin Python link-flow experiment)"
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 

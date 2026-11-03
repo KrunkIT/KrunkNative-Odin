@@ -252,6 +252,41 @@ when ODIN_TEST {
 			"fresh spawn coordinates must move the camera directly to the new life")
 		testing.expect(t, krunker_client_render_sample(&client).position == client.me.position && len(client.predicted_inputs) == 0,
 			"respawning must not interpolate or replay inputs from the death position")
+		// Live loadout changes arrive as rg, without a new spawn/roster. Exercise
+		// local and remote Commando -> Run N Gun, then a same-class reset.
+		items: [19]kproto.Krunker_Msgpack_Value
+		items[14] = i64(15)
+		for sid in ([]i32{7,8}) {
+			player := client_find_player(&client, sid)
+			position, direction := player.position, player.direction
+			for class in ([]i32{12,2,2}) {
+				if sid == 7 {
+					clear(&client.krunker.input_commands)
+					append(&client.krunker.input_commands, shared.Input{seq=777, delta=0.007}, shared.Input{seq=778, delta=0.007})
+					append(&client.predicted_inputs, shared.Input{seq=776})
+				}
+				items[15] = i64(class)
+				gameplay_packet(&client.krunker_world, "rg", i64(sid), true, items[:])
+				krunker_client_sync_world(&client)
+				testing.expect(t, player.class_index == class && player.wall_jump == (class == 2) && player.loadout[0] == (class == 2 ? 3 : 14) && player.mesh != nil,
+					"rg must regenerate class physics, primary weapon, and visible meshes for local and remote players")
+				testing.expect(t, player.position == position && player.direction == direction && player.loadout_index == 0 && player.ammo[0] == player.weapon.ammo,
+					"live changes must reset the loadout in place without snapping to old server or offline spawn coordinates")
+				if sid == 7 {
+					testing.expect(t, len(client.predicted_inputs) == 0 && len(client.krunker.input_commands) == 2 && client.krunker.input_commands[0].seq == 777 && client.krunker.input_commands[1].seq == 778,
+						"live changes must invalidate old prediction while preserving the outgoing sequence")
+				}
+				player.ammo[0] = 1
+			}
+		}
+		items[15] = i64(0)
+		for secondary in ([]i32{15,21}) {
+			items[14] = i64(secondary)
+			gameplay_packet(&client.krunker_world, "rg", i64(7), true, items[:])
+			krunker_client_sync_world(&client)
+			testing.expect(t, client.me.class_index == 0 && client.me.secondary_id == secondary && client.me.loadout[1] == secondary && client.me.mesh != nil,
+				"same-class secondary changes must rebuild the equipped sidearm and its mesh")
+		}
 		// Render the map and player view model once to catch GL/resource issues.
 		client.camera.position = client.me.position
 		client.camera.position.y += client.me.height - shared.GAME_CONSTANTS.camera_height

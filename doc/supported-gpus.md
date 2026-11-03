@@ -1,6 +1,6 @@
 # GPU Compatibility
 
-KrunkNative requests an OpenGL 4.5 core context. Support depends on the operating system and
+Krodin requests an OpenGL 4.5 core context. Support depends on the operating system and
 installed driver, so the families below are practical examples rather than an exhaustive certified
 hardware list.
 

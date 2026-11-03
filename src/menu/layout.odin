@@ -8,6 +8,15 @@ selected :: proc(view: View) -> Class {
 	return {}
 }
 
+// Keep the complete registry in View for equipped/selected class details. Only
+// the competitive pickers hide classes excluded by the server's rules.
+visible_classes :: proc(view: View) -> []Class {
+	if view.presentation != .COMPETITIVE { return view.classes }
+	classes := make([dynamic]Class, 0, len(view.classes), context.temp_allocator)
+	for class in view.classes { if class.available { append(&classes, class) } }
+	return classes[:]
+}
+
 class_selectable :: proc(view: View, class: Class) -> bool {
 	return class.available && (class.limit == 0 || class.used < class.limit || view.confirmed_class == class.id)
 }
@@ -41,18 +50,19 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 	state.control_count = 0
 	state.scale = max(0.4, min(width / 1600, height / 900))
 	s := state.scale
+	gap: f32 = view.presentation == .COMPETITIVE ? 16 : 24
 	clay.BeginLayout()
-	if clay.UI(clay.ID("MenuRoot"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(32*s)), childGap = u16(24*s)}}) {
+	if clay.UI(clay.ID("MenuRoot"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(32*s)), childGap = u16(gap*s)}}) {
 		if clay.UI(clay.ID("Header"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(48*s)}, childGap = u16(16*s), childAlignment = {y = .Center}}}) {
-			text("KRUNK NATIVE", 28, s)
+			text("KRODIN", 28, s)
 			spacer()
 			text(fmt.tprintf("%s / %s", view.map_name, view.mode), 20, s, MUTED)
 			spacer()
 			text(view.online && view.ready ? (view.ranked ? "Ranked" : view.presentation == .COMPETITIVE ? "Competitive" : "Connected") : view.local_practice ? "Local practice" : view.online || view.connecting ? "Connecting" : "Join a lobby", 16, s)
 		}
-		if clay.UI(clay.ID("Page"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = u16(24*s), childAlignment = {x = .Center}}}) {
+		if clay.UI(clay.ID("Page"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = u16(gap*s), childAlignment = {x = .Center}}}) {
 			if view.online && view.ready || view.local_practice {
-				if view.presentation == .COMPETITIVE { lobby(state, view) }
+				if view.presentation == .COMPETITIVE { lobby(state, view, width-64*s) }
 				else { standard_lobby(state, view) }
 			}
 			else {
@@ -103,18 +113,26 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 	return clay.EndLayout(max(0, delta))
 }
 
-lobby :: proc(state: ^State, view: View) {
+lobby :: proc(state: ^State, view: View, available_width: f32) {
 	s := state.scale
-	if clay.UI(clay.ID("ClassStrip"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(144*s)}, childGap = u16(8*s)}, clip = {horizontal = true, childOffset = clay.GetScrollOffset()}}) {
-		for class in view.classes {
-			class_tile(state, view, class, "Class")
+	classes := visible_classes(view)
+	// A lobby allowing every class still needs room for four padded roster rows.
+	tile_size := clamp((available_width/s+8)/f32(max(1,len(classes)))-8, 88, 112)
+	columns := max(1, int((available_width/s+8)/(tile_size+8)))
+	rows := max(1, (len(classes)+columns-1)/columns)
+	if clay.UI(clay.ID("ClassStrip"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed((f32(rows)*tile_size+f32(rows-1)*8)*s)}, layoutDirection = .TopToBottom, childGap = u16(8*s)}}) {
+		for start := 0; start < len(classes); start += columns {
+			if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(tile_size*s)}, childGap = u16(8*s), childAlignment = {x = .Center}}}) {
+				for class in classes[start:min(start+columns, len(classes))] { class_tile(state, view, class, "Class", compact = true, compact_size = tile_size) }
+			}
 		}
+		if len(classes) == 0 { text("No classes are allowed in this lobby", 20, s, MUTED) }
 	}
 	detail := selected(view)
-	for class in view.classes {
+	for class in classes {
 		if clay.PointerOver(clay.ID("Class", u32(class.id))) || state.focus == clay.ID("Class", u32(class.id)).id { detail = class }
 	}
-	if clay.UI(clay.ID("ClassHint"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(52*s)}, childGap = u16(16*s), childAlignment = {y = .Center}}}) {
+	if clay.UI(clay.ID("ClassHint"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(32*s)}, childGap = u16(16*s), childAlignment = {y = .Center}}}) {
 		text(detail.name, 20, s)
 		text(detail.weapon, 16, s, MUTED)
 		if !detail.available { text(len(detail.reason) > 0 ? detail.reason : "Unavailable in this lobby", 16, s, MUTED) }
@@ -134,8 +152,8 @@ lobby :: proc(state: ^State, view: View) {
 			button(state, label, "Play", {kind = .PLAY}, primary = true, enabled = len(reason) == 0)
 			class := selected(view)
 			text(fmt.tprintf("%s / %s", class.name, class.weapon), 18, s)
-			if view.active && view.confirmed_class != view.selected_class { text("Selected for next spawn", 16, s, MUTED) }
-			else if view.secondary_pending { text("Secondary selected for next spawn", 16, s, MUTED) }
+			if view.active && !view.live_class_changes && view.confirmed_class != view.selected_class { text("Selected for next spawn", 16, s, MUTED) }
+			else if view.secondary_pending { text(view.live_class_changes ? "Secondary awaiting server confirmation" : "Secondary selected for next spawn", 16, s, MUTED) }
 			if len(view.secondary_reason) > 0 { text(view.secondary_reason, 16, s, MUTED) }
 			if view.class_pending { text("Class awaiting server confirmation", 16, s, MUTED) }
 			if len(reason) > 0 { text(reason, 16, s, MUTED) }
@@ -146,42 +164,49 @@ lobby :: proc(state: ^State, view: View) {
 		}
 		roster(state, view, view.teams[1])
 	}
-	if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(40*s)}, childGap = u16(16*s)}}) {
+	if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(28*s)}, childGap = u16(16*s)}}) {
 		text(view.lobby_name, 16, s)
 		spacer()
 		text(view.join_status, 16, s, MUTED)
 	}
 }
 
-class_tile :: proc(state: ^State, view: View, class: Class, prefix: string) {
+class_tile :: proc(state: ^State, view: View, class: Class, prefix: string, compact: bool = false, compact_size: f32 = 112) {
 	s := state.scale
+	size: f32 = compact ? compact_size : 144
+	portrait_size: f32 = compact ? compact_size-48 : 88
+	name_height: f32 = compact ? 28 : 32
 	id := clay.ID(prefix, u32(class.id))
 	// Restricted tiles stay focusable so keyboard users can read why.
 	available := class_selectable(view, class)
 	register(state, {id = id, enabled = true, action = {kind = available ? .SELECT_CLASS : .INSPECT_CLASS, index = class.id}})
 	chosen := class.id == view.selected_class
-	if clay.UI(id)({layout = {sizing = {width = clay.SizingFixed(144*s), height = clay.SizingFixed(144*s)}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(8*s)), childGap = u16(4*s), childAlignment = {x = .Center}}, backgroundColor = chosen ? SELECTED : PANEL, border = {color = chosen || state.focus == id.id ? WHITE : clay.Color{60,64,72,180}, width = clay.BorderOutside(chosen || state.focus == id.id ? 2 : 1)}, cornerRadius = clay.CornerRadiusAll(4*s)}) {
-		if clay.UI()({layout = {sizing = {width = clay.SizingFixed(88*s), height = clay.SizingFixed(88*s)}, childAlignment = {x = .Center, y = .Center}}, image = {imageData = class.portrait}}) {
+	if clay.UI(id)({layout = {sizing = {width = clay.SizingFixed(size*s), height = clay.SizingFixed(size*s)}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(8*s)), childGap = u16(4*s), childAlignment = {x = .Center}}, backgroundColor = chosen ? SELECTED : PANEL, border = {color = chosen || state.focus == id.id ? WHITE : clay.Color{60,64,72,180}, width = clay.BorderOutside(chosen || state.focus == id.id ? 2 : 1)}, cornerRadius = clay.CornerRadiusAll(4*s)}) {
+		if clay.UI()({layout = {sizing = {width = clay.SizingFixed(portrait_size*s), height = clay.SizingFixed(portrait_size*s)}, childAlignment = {x = .Center, y = .Center}}, image = {imageData = class.portrait}}) {
 			if class.portrait == nil { text(fmt.tprintf("%02d", class.id + 1), 32, s, class.available ? WHITE : MUTED) }
 		}
-		if clay.UI(clay.ID(fmt.tprintf("%sName", prefix), u32(class.id)))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(32*s)}, childAlignment = {x = .Center, y = .Center}}}) {
-			text(class.name, 16, s, available ? WHITE : MUTED)
+		if clay.UI(clay.ID(fmt.tprintf("%sName", prefix), u32(class.id)))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(name_height*s)}, childAlignment = {x = .Center, y = .Center}}}) {
+			text(class.name, compact && compact_size < 100 ? 14 : 16, s, available ? WHITE : MUTED)
 		}
 	}
 }
 
 class_picker :: proc(state: ^State, view: View) {
 	s := state.scale
+	classes := visible_classes(view)
+	compact := view.presentation == .COMPETITIVE
+	columns := compact ? 6 : 5
+	tile_size: f32 = compact ? 112 : 144
 	text("Choose class", 32, s)
 	if clay.UI(clay.ID("ClassPicker"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = u16(16*s), childAlignment = {x = .Center}}, clip = {vertical = true, childOffset = clay.GetScrollOffset()}}) {
-		for start := 0; start < len(view.classes); start += 5 {
-			if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(144*s)}, childGap = u16(16*s), childAlignment = {x = .Center}}}) {
-				for class in view.classes[start:min(start+5, len(view.classes))] { class_tile(state, view, class, "ClassChoice") }
+		for start := 0; start < len(classes); start += columns {
+			if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(tile_size*s)}, childGap = u16(16*s), childAlignment = {x = .Center}}}) {
+				for class in classes[start:min(start+columns, len(classes))] { class_tile(state, view, class, "ClassChoice", compact) }
 			}
 		}
 	}
 	detail := selected(view)
-	for class in view.classes {
+	for class in classes {
 		if clay.PointerOver(clay.ID("ClassChoice", u32(class.id))) || state.focus == clay.ID("ClassChoice", u32(class.id)).id { detail = class }
 	}
 	if clay.UI(clay.ID("PickerHint"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(80*s)}, layoutDirection = .TopToBottom, childGap = u16(4*s)}}) {
@@ -224,7 +249,8 @@ class_loadout :: proc(state: ^State, view: View) {
 			}
 			if clay.UI(clay.ID("LoadoutStatus"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(88*s)}, layoutDirection = .TopToBottom, childGap = u16(8*s)}}) {
 				if len(view.secondary_reason) == 0 { text(fmt.tprintf("Selected: %s", view.secondary_name), 18, s, MUTED) }
-				if view.active { text("Changes apply on your next spawn", 16, s, MUTED) }
+				if view.active && view.live_class_changes { text(view.class_pending || view.secondary_pending ? "Loadout awaiting server confirmation" : "Changes apply immediately during this break", 16, s, MUTED) }
+				else if view.active { text("Changes apply on your next spawn", 16, s, MUTED) }
 				else if view.class_pending { text("Class awaiting server confirmation", 16, s, MUTED) }
 				text(view.selection_status, 16, s)
 			}
@@ -283,7 +309,7 @@ standard_lobby :: proc(state: ^State, view: View) {
 			}
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(48*s)}, layoutDirection = .TopToBottom, childGap = u16(4*s)}}) {
 				if len(view.secondary_reason) > 0 { text(view.secondary_reason, 16, s, MUTED) }
-				else if view.active && (view.confirmed_class != view.selected_class || view.secondary_pending) { text("Selected for next spawn", 16, s, MUTED) }
+				else if view.active && (view.confirmed_class != view.selected_class || view.secondary_pending) { text(view.live_class_changes ? "Loadout awaiting server confirmation" : "Selected for next spawn", 16, s, MUTED) }
 				else if view.class_pending { text("Class awaiting server confirmation", 16, s, MUTED) }
 				else { text(view.match_status, 16, s, MUTED) }
 			}
@@ -310,17 +336,17 @@ roster :: proc(state: ^State, view: View, team: Team) {
 	accent := team.id == 1 ? clay.Color{240,101,108,255} : clay.Color{104,167,245,255}
 	count := 0
 	for player in view.players { if player.team == team.id { count += 1 } }
-	panel_height := f32(200 + clamp(max(count, team.capacity), 1, 4)*60)*s
-	if clay.UI(clay.ID("Team", u32(team.id)))({layout = {sizing = {width = clay.SizingGrow({0,440*s}), height = clay.SizingGrow({0,panel_height})}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(16*s)), childGap = u16(12*s)}, backgroundColor = PANEL, border = {color = accent, width = {top = 2}}, cornerRadius = clay.CornerRadiusAll(4*s)}) {
+	panel_height := f32(144 + clamp(max(count, team.capacity), 1, 4)*88)*s
+	if clay.UI(clay.ID("Team", u32(team.id)))({layout = {sizing = {width = clay.SizingGrow({0,440*s}), height = clay.SizingGrow({0,panel_height})}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(12*s)), childGap = u16(8*s)}, backgroundColor = PANEL, border = {color = accent, width = {top = 2}}, cornerRadius = clay.CornerRadiusAll(4*s)}) {
 		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(8*s), childAlignment = {y = .Center}}}) {
 			text(shorten(team.name,24), 32, s, accent)
 			spacer()
 			text(team.capacity > 0 ? fmt.tprintf("%d / %d", count, team.capacity) : fmt.tprintf("%d players", count), 20, s, MUTED)
 		}
-		if clay.UI(clay.ID("Roster", u32(team.id)))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow({0,f32(clamp(max(count, team.capacity),1,4)*60-4)*s})}, layoutDirection = .TopToBottom, childGap = u16(4*s)}, clip = {vertical = true, childOffset = clay.GetScrollOffset()}}) {
-			for player in view.players {
+		if clay.UI(clay.ID("Roster", u32(team.id)))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow({0,f32(clamp(max(count, team.capacity),1,4)*88-4)*s})}, layoutDirection = .TopToBottom, childGap = u16(4*s)}, clip = {vertical = true, childOffset = clay.GetScrollOffset()}}) {
+			for player, i in view.players {
 				if player.team != team.id { continue }
-				if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(56*s)}, childGap = u16(8*s), childAlignment = {y = .Center}}, backgroundColor = player.is_you ? SELECTED : clay.Color{}}) {
+				if clay.UI(clay.ID("RosterPlayer", u32(i)))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(84*s)}, padding = {left = u16(12*s), right = u16(12*s), top = u16(8*s), bottom = u16(8*s)}, childGap = u16(8*s), childAlignment = {y = .Center}}, backgroundColor = player.is_you ? SELECTED : clay.Color{}}) {
 					if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 						text(shorten(player.name, 22), 26, s)
 						text(player.class_name, 20, s, MUTED)
@@ -329,15 +355,11 @@ roster :: proc(state: ^State, view: View, team: Team) {
 				}
 			}
 			for _ in 0 ..< clamp(team.capacity-count,0,32) {
-				if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(56*s)}, childAlignment = {y = .Center}}}) { text("Open slot", 24, s, MUTED) }
+				if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(84*s)}, padding = {left = u16(12*s), right = u16(12*s)}, childAlignment = {y = .Center}}}) { text("Open slot", 24, s, MUTED) }
 			}
 		}
-		mine := view.confirmed_team == team.id
-		pending := view.team_pending && (view.requested_team == team.id || mine)
-		label := pending ? "Joining..." : mine ? "Leave Team" : fmt.tprintf("Join %s", shorten(team.name,20))
-		button(state, label, "JoinTeam", {kind = .SELECT_TEAM, index = mine ? 0 : team.id}, selected = mine, enabled = team.available && !view.team_pending && (mine || team.capacity <= 0 || count < team.capacity))
+		team_button(state, view, team)
 		if len(team.reason) > 0 { text(team.reason, 16, s, MUTED) }
-		else if !mine && team.capacity > 0 && count >= team.capacity { text("Team is full", 16, s, MUTED) }
 	}
 }
 

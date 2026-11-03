@@ -2,6 +2,7 @@ package krunker
 
 import shared "../shared"
 import "core:strings"
+import "core:strconv"
 
 // INIT_GAME carries the actual lobby config as its seventh argument. Comp
 // presets and custom hosts can change these independently of the map/mode.
@@ -10,6 +11,8 @@ krunker_world_apply_game_config :: proc(state: ^Krunker_World_State, packet: []K
 	state.lobby_capacity = 0
 	state.lobby_team_capacity = 0
 	state.lobby_select_team = true
+	state.has_allowed_classes, state.allowed_classes = false, {}
+	state.limit_classes, state.class_limits = false, {}
 	for &name in state.lobby_team_names { delete(name); name = "" }
 	state.has_game_config = true
 	if len(packet) <= 7 { return }
@@ -19,7 +22,22 @@ krunker_world_apply_game_config :: proc(state: ^Krunker_World_State, packet: []K
 	for entry in entries {
 		key, textual := entry.key.(string)
 		if !textual { continue }
+		if strings.has_prefix(key, "classLim") {
+			if id, valid := strconv.parse_int(key[len("classLim"):]); valid && id >= 0 && id < len(state.class_limits) {
+				state.class_limits[id] = clamp(krunker_world_i32(entry.value), 0, 64)
+			}
+			continue
+		}
 		switch key {
+		case "limitClasses": state.limit_classes = krunker_world_bool(entry.value)
+		case "classes":
+			if classes, valid := krunker_world_array(entry.value); valid {
+				state.has_allowed_classes, state.allowed_classes = true, {}
+				for value in classes {
+					id := krunker_world_i32(value, -1)
+					if id >= 0 && int(id) < len(state.allowed_classes) { state.allowed_classes[id] = true }
+				}
+			}
 		case "maxPlayers": state.lobby_capacity = clamp(krunker_world_i32(entry.value), 0, 64)
 		case "tmSize":
 			// Competitive size is a zero-based selector: 0 = 1v1, 3 = 4v4.

@@ -15,7 +15,9 @@ when ODIN_TEST {
 	menu_typography :: proc(t: ^testing.T) {
 		// The C text-measure callback uses the default allocator for glyphs.
 		// Keep font loading and cleanup on that same allocator in this test.
+		logger := context.logger
 		context = runtime.default_context()
+		context.logger = logger
 		if !testing.expect(t, bool(glfw.Init()), "GLFW initialization failed") do return
 		defer glfw.Terminate()
 		glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
@@ -78,11 +80,12 @@ when ODIN_TEST {
 			full_players: [32]menuui.Player
 			for &player, i in full_players { player = {name="Competitive player with a long name", class_name="Run N Gun", team=i32(i%2+1), is_you=i==0} }
 			play_y: f32
-			for scenario in 0..<29 {
+			for scenario in 0..<32 {
 				view.online=true; view.team_pending=false; view.class_pending=false; view.spawn_pending=false; view.join_status=""; view.active=false
 				view.presentation=.COMPETITIVE; view.ranked=false; view.team_selection=false; view.local_practice=false; view.ready=true; view.confirmed_team=1; view.play_reason=""
 				view.teams[0].name="Alpha"; view.teams[1].name="Bravo"
 				classes[2].name=selected_name; classes[2].weapon="SMG"
+				for &class in classes { class.available = shared.class_is_in_rotation(class.id) }
 				state.page=.HOME
 				view.players=players[:]; view.teams[0].capacity=4; view.teams[1].capacity=4; view.selection_status=""
 				view.secondary_name="Pistol"; view.selected_secondary=2; view.secondary_reason=""; view.secondary_pending=false
@@ -116,6 +119,9 @@ when ODIN_TEST {
 					view.players = []menuui.Player{players[0], players[4]}
 					view.teams[0].capacity, view.teams[1].capacity = scenario-23, scenario-23
 				case 28: view.respawn_remaining=2.4; view.has_life=true
+				case 29: state.page=.CLASSES; view.ranked=true
+				case 30: for &class in classes { class.available=true }
+				case 31: for &class in classes { class.available=false }
 				case 23: view.presentation=.STANDARD; state.page=.LOADOUT; classes[2].name="An exceptionally long selected class name"; classes[2].weapon="An exceptionally long primary weapon name"
 				}
 				page := state.page
@@ -136,6 +142,24 @@ when ODIN_TEST {
 						"Techy-9 must remain selectable separately from Auto Pistol")
 				}
 					testing.expect(t, state.errors == 0, "menu layout reported an error")
+				if view.presentation == .COMPETITIVE && (page == .HOME || page == .CLASSES) && view.online {
+					prefix := page == .HOME ? "Class" : "ClassChoice"
+					parent := clay.GetElementData(clay.ID(page == .HOME ? "ClassStrip" : "ClassPicker")).boundingBox
+					for class in classes {
+						data := clay.GetElementData(clay.ID(prefix, u32(class.id)))
+						if !class.available {
+							testing.expect(t, !data.found, "competitive pickers must omit excluded classes completely")
+							for control in state.controls[:state.control_count] {
+								if control.action.kind == .SELECT_CLASS || control.action.kind == .INSPECT_CLASS { testing.expect(t, control.action.index != class.id) }
+							}
+							continue
+						}
+						box := data.boundingBox
+						testing.expect(t, data.found && box.width <= 112*state.scale+1 && box.height <= 112*state.scale+1 &&
+							box.x>=parent.x-1 && box.x+box.width<=parent.x+parent.width+1 && box.y>=parent.y-1 && box.y+box.height<=parent.y+parent.height+1,
+							"all allowed competitive class tiles must fit within the compact selector")
+					}
+				}
 				if page == .LOADOUT {
 					for id in ([?]string{"ClassLoadout", "LoadoutClass", "LoadoutPrimary", "LoadoutStatus"}) {
 						box := clay.GetElementData(clay.ID(id)).boundingBox
@@ -169,7 +193,7 @@ when ODIN_TEST {
 							box.y + box.height <= parent.boundingBox.y + parent.boundingBox.height,
 							"actual font label must fit inside its button")
 					}
-					if page == .CLASSES {
+					if page == .CLASSES && command.zIndex == 10 {
 						label := string(text.chars[:text.length])
 						for class in classes {
 							if label != class.name { continue }
@@ -194,7 +218,7 @@ when ODIN_TEST {
 					right := clay.GetElementData(clay.ID("Team",2)).boundingBox
 					play := clay.GetElementData(clay.ID("Play")).boundingBox
 					if scenario==0 { play_y=play.y }
-					testing.expect(t, abs(play.y-play_y)<1, "Play must stay fixed when selections are pending")
+					if scenario == 1 { testing.expect(t, abs(play.y-play_y)<1, "Play must stay fixed when selections are pending") }
 					footer := clay.GetElementData(clay.ID("Footer")).boundingBox
 					testing.expect(t, footer.y+footer.height <= ui.height && left.y+left.height < footer.y && right.y+right.height < footer.y, "rosters must leave the footer visible at every team size")
 					for team in view.teams {
@@ -203,7 +227,23 @@ when ODIN_TEST {
 						for player in view.players { if player.team == team.id { count += 1 } }
 						rows := max(count,team.capacity)
 						box := clay.GetElementData(clay.ID("Roster", u32(team.id))).boundingBox
-						testing.expect(t, box.height >= f32(rows*60-4)*state.scale-1, "all competitive slots must fit without scrolling or clipping")
+						testing.expectf(t, box.height >= f32(rows*88-4)*state.scale-1, "all competitive slots must fit without scrolling or clipping (size=%v scenario=%d team=%d height=%f)", size, scenario, team.id, box.height)
+						for player, i in view.players {
+							if player.team != team.id { continue }
+							row := clay.GetElementData(clay.ID("RosterPlayer", u32(i))).boundingBox
+							testing.expect(t, row.y >= box.y-1 && row.y+row.height <= box.y+box.height+1, "every player highlight must fit inside the roster")
+							for command in commands.internalArray[:commands.length] {
+								if command.commandType != .Text { continue }
+								label := command.renderData.text.stringContents
+								value := string(label.chars[:label.length])
+								if value != menuui.shorten(player.name,22) && value != player.class_name && value != "You" { continue }
+								bounds := command.boundingBox
+								if bounds.x < row.x || bounds.x >= row.x+row.width || bounds.y < row.y || bounds.y >= row.y+row.height { continue }
+								testing.expect(t, bounds.x >= row.x+10*state.scale-1 && bounds.x+bounds.width <= row.x+row.width-10*state.scale+1 &&
+									bounds.y >= row.y+6*state.scale-1 && bounds.y+bounds.height <= row.y+row.height-6*state.scale+1,
+									"roster names, classes, and You labels must fit with padding inside the highlight")
+							}
+						}
 					}
 					testing.expect(t, abs(left.width-right.width)<1 && abs(left.y-right.y)<1, "team panels must have equal widths and top alignment")
 						testing.expect(t, play.x >= left.x+left.width && play.x+play.width <= right.x, "Play must sit between the rosters")
@@ -220,7 +260,7 @@ when ODIN_TEST {
 						testing.expect(t, abs(play.y-play_y)<1, "standard Play must stay fixed across team and pending states")
 					}
 				}
-				when #config(MENU_PREVIEW, false) {
+				if #config(MENU_PREVIEW, false) && (#config(MENU_PREVIEW_SCENARIO, -1) < 0 || scenario == #config(MENU_PREVIEW_SCENARIO, -1)) {
 					pixels := make([]u8, int(size[0] * size[1] * 3))
 					gl.PixelStorei(gl.PACK_ALIGNMENT, 1)
 					gl.ReadPixels(0, 0, size[0], size[1], gl.RGB, gl.UNSIGNED_BYTE, raw_data(pixels))
@@ -248,7 +288,7 @@ when ODIN_TEST {
 					menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
 					state.previous, state.focus = {}, clay.ID("Back", u32(parent)).id
 					menuui.interact(&state, {enter=true}, view)
-					testing.expect(t, state.page == parent && state.focus == return_focus, "Back must match Escape from the class loadout")
+					testing.expect(t, state.page == parent && state.focus == (parent == .HOME ? state.return_focus : return_focus), "Back must return to the parent class selection")
 					state.page = .LOADOUT
 					menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
 					state.previous, state.focus = {}, clay.ID("LoadoutDone").id

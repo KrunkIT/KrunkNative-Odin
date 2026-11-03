@@ -20,7 +20,7 @@ krunker_client_apply_ammo :: proc(client: ^Client, player: ^shared.Player, sourc
 	}
 }
 
-// Render a little over one server interval behind. Keeping both endpoints
+// Match the browser's one-interval delay and the q shot-history timing. Keeping both endpoints
 // avoids the repeated start/stop motion of chasing the newest packet directly.
 krunker_client_interpolate_remotes :: proc(client: ^Client, now: f64, delta: f32) {
 	for &source in client.krunker_world.players {
@@ -28,7 +28,7 @@ krunker_client_interpolate_remotes :: proc(client: ^Client, now: f64, delta: f32
 		player := client_find_player(client, source.sid)
 		if player == nil || !player.active { continue }
 		rate := source.send_rate > 0 ? source.send_rate : 10
-		display_time := now - 1.25/f64(rate)
+		display_time := kproto.krunker_display_time(now, rate)
 		for source.pose_count >= 2 && source.poses[1].time <= display_time {
 			copy(source.poses[:], source.poses[1:source.pose_count])
 			source.pose_count -= 1

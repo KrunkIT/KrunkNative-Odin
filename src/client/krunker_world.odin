@@ -25,6 +25,7 @@ krunker_client_load_world_map :: proc(client: ^Client) -> bool {
 	client_clear_players(client)
 	client_clear_impacts(client)
 	clear(&state.player_revisions)
+	clear(&state.player_loadout_revisions)
 	krunker_client_reset_prediction(client)
 	state.local_sync_revision = 0
 	state.local_ammo_revision = 0
@@ -47,6 +48,24 @@ krunker_client_load_world_map :: proc(client: ^Client) -> bool {
 	return true
 }
 
+// rg changes equipment in place. player_spawn also chooses an offline spawn,
+// so preserve the currently displayed coordinates and mouse look explicitly.
+krunker_client_regenerate_loadout :: proc(client: ^Client, player: ^shared.Player, source: ^kproto.Krunker_World_Player) {
+	position, direction := player.position, player.direction
+	shared.player_spawn(player, source.class_index, source.secondary_id)
+	player.position, player.direction = position, direction
+	player.on_ground, player.crouch_val, player.aim_val = source.on_ground, source.crouch_val, source.aim_val
+	player.swap_timer = 0
+	shared.player_update_height(player)
+	if player.is_you {
+		clear(&client.predicted_inputs)
+		client.krunker.render_sample_ready = false
+		client.krunker.local_ammo_revision = source.ammo_revision
+		// Keep unsent commands and their sequences: dropping them here leaves
+		// a gap in q and makes the server reject otherwise valid movement.
+	}
+}
+
 krunker_client_sync_world :: proc(client: ^Client) {
 	world := &client.krunker_world
 	state := &client.krunker
@@ -60,6 +79,7 @@ krunker_client_sync_world :: proc(client: ^Client) {
 		client.mouse_state.locked = false
 	}
 	if state.player_revisions == nil { state.player_revisions = make(map[i32]u64) }
+	if state.player_loadout_revisions == nil { state.player_loadout_revisions = make(map[i32]u64) }
 	for &source in world.players {
 		is_you := source.sid == world.local_sid
 		if !source.has_position || is_you && !world.in_game && source.active do continue
@@ -71,7 +91,10 @@ krunker_client_sync_world :: proc(client: ^Client) {
 		player := client_find_player(client, source.sid)
 		created := player == nil
 		was_active := player != nil && player.active
-		respawned := created || player != nil && (player.class_index != source.class_index || player.secondary_id != shared.secondary_weapon_id(client.game.weapons, source.secondary_id) || !was_active && source.active)
+		loadout_changed := !created && source.loadout_revision != state.player_loadout_revisions[source.sid]
+		state.player_loadout_revisions[source.sid] = source.loadout_revision
+		live_change := loadout_changed && was_active && source.active
+		respawned := created || player != nil && (loadout_changed || player.class_index != source.class_index || player.secondary_id != shared.secondary_weapon_id(client.game.weapons, source.secondary_id) || !was_active && source.active)
 		if created {
 			player = shared.player_init(&client.game)
 			if player == nil { kproto.network_log("world-player", "ERROR player allocation failed"); continue }
@@ -86,13 +109,14 @@ krunker_client_sync_world :: proc(client: ^Client) {
 				scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
 				player_meshes_fini(player)
 			}
-			shared.player_spawn(player, source.class_index, source.secondary_id)
+			if live_change { krunker_client_regenerate_loadout(client, player, &source) }
+			else { shared.player_spawn(player, source.class_index, source.secondary_id) }
 		}
 		if respawned {
 			// As with native snapshots, spawning projects a server-owned entity.
 			// Its offline spawn/swap timer would never advance during prediction.
 			player.swap_timer = 0
-			if is_you { krunker_client_reset_prediction(client); state.local_ammo_revision = 0 }
+			if is_you && !live_change { krunker_client_reset_prediction(client); state.local_ammo_revision = 0 }
 		}
 		player.team = source.team
 		player.active = source.active
@@ -100,7 +124,7 @@ krunker_client_sync_world :: proc(client: ^Client) {
 			scene_remove_player_mesh(player.render_you ? client.fps_scene : client.scene, cast(^Player_Mesh)player.mesh, int(player.loadout_size))
 		}
 		krunker_client_apply_metadata(client, player, &source)
-		// Only a fresh roster can confirm the requested sidearm. START/SYNC
+		// Only a fresh roster or live regeneration can confirm the requested sidearm. START/SYNC
 		// may arrive first and still refer to the previous life's loadout.
 		if is_you && state.secondary_response_pending && source.secondary_revision > state.secondary_request_revision {
 			state.secondary_response_pending = false
@@ -108,7 +132,7 @@ krunker_client_sync_world :: proc(client: ^Client) {
 				client_selection_status(client, fmt.tprintf("Server equipped %s; requested secondary was not accepted.", client.game.weapons[player.secondary_id].name))
 			}
 		}
-		krunker_client_apply_motion(client, player, &source, respawned)
+		krunker_client_apply_motion(client, player, &source, respawned && !live_change)
 		if is_you { krunker_client_apply_ammo(client, player, &source) }
 		if player.mesh == nil && player.active {
 			player_generate_meshes(player, is_you)

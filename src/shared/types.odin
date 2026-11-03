@@ -242,6 +242,10 @@ Input :: struct {
 	swap:     u8,
 	// Client-only replay metadata; never encoded into network input packets.
 	predicted_weapon_impulse: Vec3,
+	// Live Krunker lag compensation metadata, captured when a shot actually
+	// fires. The native server's explicit input serializer does not send these.
+	krunker_shot_timed: bool,
+	krunker_shot_time, krunker_shot_progress: f64,
 }
 
 Player_Skins :: struct {

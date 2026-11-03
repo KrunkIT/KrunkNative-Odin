@@ -16,6 +16,7 @@ Krunker_World_Player :: struct {
 	class_index: i32,
 	secondary_id: i32,
 	secondary_revision: u64,
+	loadout_revision: u64,
 	score, kills, deaths: u32,
 	noclip, frozen, unlimited_ammo: bool,
 	speed_boost: f32,
@@ -71,6 +72,10 @@ Krunker_World_State :: struct {
 	game_config: shared.Game_Config,
 	has_game_config: bool,
 	server_time: f64,
+	has_server_time: bool,
+	sync_received_at, previous_sync_received_at: f64,
+	has_previous_sync: bool,
+	send_rate: f32,
 	received_at: f64,
 	local_sid:   i32,
 	local_socket_id: string,
@@ -81,6 +86,10 @@ Krunker_World_State :: struct {
 	lobby_capacity: i32,
 	lobby_team_capacity: i32,
 	lobby_select_team: bool,
+	has_allowed_classes: bool,
+	allowed_classes: [len(shared.CLASSES_LIST)]bool,
+	limit_classes: bool,
+	class_limits: [len(shared.CLASSES_LIST)]i32,
 	lobby_team_names: [2]string,
 	shots:       [dynamic]Krunker_World_Shot,
 	match: shared.Match_State,
@@ -190,6 +199,9 @@ krunker_world_apply_init :: proc(state: ^Krunker_World_State, packet: []Krunker_
 	if opcode, ok := packet[0].(string); !ok || opcode != "init" { return false }
 	state.map_index = krunker_world_i32(packet[1], -1)
 	state.map_revision += 1
+	state.server_time, state.has_server_time = 0, false
+	state.sync_received_at, state.previous_sync_received_at = 0, 0
+	state.has_previous_sync, state.send_rate = false, 0
 	krunker_world_apply_game_config(state, packet)
 	for player in state.players { delete(player.name); delete(player.socket_id) }
 	clear(&state.players)
@@ -279,8 +291,19 @@ krunker_world_apply_update_players :: proc(state: ^Krunker_World_State, packet: 
 	if state.has_match && state.match.phase == .ENDED { return false }
 	if len(packet) < 2 { return false }
 	if opcode, ok := packet[0].(string); !ok || opcode != "k" { return false }
-	records, ok := krunker_world_array(packet[1]); if !ok { return false }
-	if len(packet) > 3 { state.server_time, _ = krunker_world_number(packet[3]) }
+	records, ok := krunker_world_array(packet[1])
+	if !ok {
+		if _, empty := packet[1].(Krunker_Msgpack_Nil); !empty && krunker_world_i32(packet[1], -1) != 0 { return false }
+	}
+	if len(packet) > 2 { state.send_rate = clamp(krunker_world_f32(packet[2], 10), 1, 128) }
+	if len(packet) > 3 {
+		if stamp, valid := krunker_world_number(packet[3]); valid && !math.is_nan(stamp) && !math.is_inf(stamp) && stamp >= 0 {
+			state.previous_sync_received_at = state.sync_received_at
+			state.has_previous_sync = state.has_server_time && state.received_at > state.sync_received_at
+			state.sync_received_at = state.received_at
+			state.server_time, state.has_server_time = stamp, true
+		}
+	}
 	for offset := 0; offset + 13 <= len(records); offset += 13 {
 		sid := krunker_world_i32(records[offset], -1)
 		if sid < 0 { continue }
@@ -317,6 +340,7 @@ krunker_world_apply_sync_player :: proc(state: ^Krunker_World_State, packet: []K
 	player := krunker_world_upsert_player(state, state.local_sid)
 	if player.life_ended { return false }
 	player.position = {krunker_world_f32(values[2]), krunker_world_f32(values[3]), krunker_world_f32(values[4])}
+	player.ping = krunker_world_i32(values[1], player.ping)
 	player.velocity = {krunker_world_f32(values[6]), krunker_world_f32(values[5]), krunker_world_f32(values[7])}
 	player.direction.y = krunker_world_f32(values[8])
 	player.weapon_slot = krunker_world_i32(values[17], player.weapon_slot)
@@ -339,6 +363,37 @@ krunker_world_apply_sync_player :: proc(state: ^Krunker_World_State, packet: []K
 	player.has_ack = true
 	player.sync_revision += 1
 	return true
+}
+
+// REGEN_PLAYER carries the confirmed equipped loadout only when resetClass is
+// true. A cosmetic/preferences update must not change live physics or refill it.
+krunker_world_apply_regen :: proc(state: ^Krunker_World_State, packet: []Krunker_Msgpack_Value) -> bool {
+	if len(packet) < 4 { return false }
+	items, valid := krunker_world_array(packet[3])
+	if !valid || len(items) < 16 { return false }
+	class := krunker_world_i32(items[15], -1)
+	if class < 0 || int(class) >= len(shared.CLASSES_LIST) { return false }
+	sid := krunker_world_i32(packet[1], -1)
+	for &player in state.players {
+		if player.sid != sid { continue }
+		if !krunker_world_bool(packet[2]) { return true }
+		player.class_index = class
+		player.secondary_id = krunker_world_i32(items[14], 2)
+		player.secondary_revision += 1
+		player.loadout_revision += 1
+		player.max_health = f32(shared.CLASSES_LIST[class].health) * (state.has_game_config ? state.game_config.health_mlt : 1)
+		if !player.life_ended { player.health = player.max_health }
+		player.weapon_slot, player.ammo_count = 0, 0
+		player.velocity, player.cylinder_velocity = {}, {}
+		player.did_jump, player.did_wall_jump, player.on_ladder, player.on_terrain = false, false, false, false
+		player.on_wall, player.slide_timer, player.can_slide_timer = 0, 0, 0
+		player.can_slide = true
+		// l may still describe the old loadout. Do not replay it on regeneration.
+		player.has_ack = false
+		player.revision += 1
+		return true
+	}
+	return false
 }
 
 krunker_world_apply_ready :: proc(state: ^Krunker_World_State, packet: []Krunker_Msgpack_Value) -> bool {
@@ -392,6 +447,7 @@ krunker_world_apply_packet :: proc(state: ^Krunker_World_State, packet: []Krunke
 	case "0": return krunker_world_apply_add_players(state, packet)
 	case "k": return krunker_world_apply_update_players(state, packet)
 	case "l": return krunker_world_apply_sync_player(state, packet)
+	case "rg": return krunker_world_apply_regen(state, packet)
 	case "uamo": return krunker_world_apply_ammo(state, packet)
 	case "9": return krunker_world_apply_shot(state, packet)
 	case "h": return krunker_world_apply_health(state, packet)

@@ -24,7 +24,7 @@ texture_manager_init :: proc() -> Texture_Manager {
 	tm.textures = make(map[u32]u32)
 
 	// These indices are the same prefab texture indices used by the original
-	// KrunkNative client. Keep the list in index order; map JSON stores only the
+	// Krodin client. Keep the list in index order; map JSON stores only the
 	// numeric index in its "t" field.
 	texture_names := [?]string{
 		"wall", "dirt", "floor", "grid", "grey", "default", "roof", "flag",

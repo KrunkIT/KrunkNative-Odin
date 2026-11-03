@@ -135,5 +135,70 @@ when ODIN_TEST {
 		client.krunker.connected = true
 		view = menu_view(&client)
 		testing.expect(t, !view.classes[4].available, "returning to an online lobby must restore its class restrictions")
+		// A custom comp ruleset must replace the built-in rotation, including
+		// classes that the default competitive list excludes.
+		allowed := []kproto.Krunker_Msgpack_Value{i64(4), i64(2), i64(999), i64(-1)}
+		config := []kproto.Krunker_Msgpack_Map_Entry{{"classes", allowed}}
+		packet: [18]kproto.Krunker_Msgpack_Value
+		packet[0], packet[1], packet[2], packet[7], packet[16] = "init", i64(2), i64(4), config, true
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		view = menu_view(&client)
+		visible := menuui.visible_classes(view)
+		testing.expect(t, client.krunker_world.has_allowed_classes && !view.classes[0].available && view.classes[4].available &&
+			len(visible) == 2 && visible[0].id == 2 && visible[1].id == 4, "competitive selection must follow the server's allowed IDs and retain their stable action IDs")
+		view.classes[2].used, view.classes[2].limit = 1, 1
+		visible = menuui.visible_classes(view)
+		testing.expect(t, len(visible) == 2 && !menuui.class_selectable(view, visible[0]), "an allowed class at capacity stays visible with its restriction")
+		client.local_practice = true
+		view = menu_view(&client)
+		testing.expect(t, len(menuui.visible_classes(view)) == len(shared.CLASSES_LIST), "practice must keep access to every class")
+		client.local_practice = false
+		config[0].value = allowed[:0]
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		testing.expect(t, len(menuui.visible_classes(menu_view(&client))) == 0, "an explicit empty allowed list must not enable default classes")
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:3])
+		view = menu_view(&client)
+		testing.expect(t, !client.krunker_world.has_allowed_classes && !view.classes[4].available && view.classes[0].available,
+			"a new lobby without an allowed list must clear previous restrictions and restore the fallback")
+		// Actual comp configuration can list EVERY class, while classLimN=0
+		// removes most of them. This reproduced the user's full-strip screenshot.
+		all_classes: [len(shared.CLASSES_LIST)]kproto.Krunker_Msgpack_Value
+		for &value, i in all_classes { value = i64(i) }
+		limits := []kproto.Krunker_Msgpack_Map_Entry{
+			{"classLim2", i64(1)}, {"classes", all_classes[:]}, {"classLim0", i64(1)}, {"limitClasses", true}, {"classLim4", i64(0)}, {"classLim999", i64(2)},
+		}
+		packet[7] = limits
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		gameplay_packet(&client.krunker_world, "uid", "you")
+		roster := []kproto.Krunker_Msgpack_Map_Entry{
+			{"you", []kproto.Krunker_Msgpack_Map_Entry{{"a", true}, {"t", i64(1)}, {"c", i64(0)}}},
+			{"teammate", []kproto.Krunker_Msgpack_Map_Entry{{"a", true}, {"t", i64(1)}, {"c", i64(2)}}},
+			{"opponent", []kproto.Krunker_Msgpack_Map_Entry{{"a", true}, {"t", i64(2)}, {"c", i64(2)}}},
+			{"spectator", []kproto.Krunker_Msgpack_Map_Entry{{"a", false}, {"t", i64(1)}, {"c", i64(2)}}},
+		}
+		gameplay_packet(&client.krunker_world, "cd", roster)
+		client.lobby_team = 1
+		view = menu_view(&client)
+		visible = menuui.visible_classes(view)
+		testing.expect(t, len(visible) == 2 && visible[0].id == 0 && visible[1].id == 2 && !view.classes[4].available,
+			"zero-limit classes must be hidden even when the server's general allowed list contains them")
+		testing.expect(t, view.classes[0].limit == 1 && view.classes[0].used == 1 && menuui.class_selectable(view, view.classes[0]),
+			"the current player's assigned class must remain selectable at its limit")
+		testing.expect(t, view.classes[2].limit == 1 && view.classes[2].used == 1 && !menuui.class_selectable(view, view.classes[2]),
+			"class occupancy must count active teammates, excluding opponents and spectators")
+		limits[3].value = false
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		view = menu_view(&client)
+		testing.expect(t, len(menuui.visible_classes(view)) == len(all_classes) && view.classes[2].limit == 0,
+			"classLimN must have no effect when limitClasses is disabled")
+		limits[3].value = true
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:])
+		client.local_practice = true
+		view = menu_view(&client)
+		testing.expect(t, len(menuui.visible_classes(view)) == len(all_classes) && view.classes[2].limit == 0)
+		client.local_practice = false
+		kproto.krunker_world_apply_init(&client.krunker_world, packet[:3])
+		testing.expect(t, !client.krunker_world.limit_classes && client.krunker_world.class_limits == [len(shared.CLASSES_LIST)]i32{},
+			"moving to a new lobby must clear class limits")
 	}
 }

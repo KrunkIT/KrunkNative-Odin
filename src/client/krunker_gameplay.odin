@@ -4,6 +4,14 @@ import shared "../shared"
 import kproto "../krunker"
 import "core:fmt"
 
+krunker_client_live_class_window :: proc(client: ^Client, now: f64) -> bool {
+	world := &client.krunker_world
+	if !client.krunker.connected || !(world.is_comp || world.is_ranked) { return false }
+	if world.countdown == .WAITING { return true }
+	return (world.countdown == .WARMUP || world.countdown == .INTERMISSION) &&
+		world.countdown_remaining > f32(max(0, now-world.countdown_received_at))
+}
+
 krunker_client_respawn_remaining :: proc(client: ^Client, now: f64) -> f32 {
 	if !client.krunker.connected { return 0 }
 	return f32(max(0, client.krunker_world.respawn_available_at-now))

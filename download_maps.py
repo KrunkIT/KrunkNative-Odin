@@ -36,7 +36,7 @@ def map_filename(map_id):
 def fetch_json(url, timeout=30):
     for attempt in range(3):
         try:
-            request = Request(url, headers={"User-Agent": "KrunkNative-map-downloader/1.0", "Accept": "application/json"})
+            request = Request(url, headers={"User-Agent": "Krodin-map-downloader/1.0", "Accept": "application/json"})
             with urlopen(request, timeout=timeout) as response:
                 return json.load(response)
         except (HTTPError, URLError, TimeoutError) as error:

@@ -1,10 +1,10 @@
-# KrunkNative (Odin)
+# Krodin
 
 A Krunker.io Fantasy - A rewrite of the game to target direct binaries. Initially ported into a native-C
 implementation, but has been fully ported and removed for the sake of simplicity and ease of development. The entire engine lives in `src/` and is now built
 with Odin! 
 
-![KrunkNative running Littletown](doc/demo.png)
+![Krodin running Littletown](doc/demo.png)
 
 > [!NOTE]
 > The Odin port is actively developed. The client starts on a connection screen and exposes an explicit
@@ -74,8 +74,8 @@ Then:
 
 ```bash
 make          # build client and server
-make client   # build bin/krunknative_client
-make server   # build bin/krunknative_server
+make client   # build bin/krodin_client
+make server   # build bin/krodin_server
 make check    # type-check client and server
 make test     # build and run the deterministic simulation tests
 ```
@@ -114,7 +114,8 @@ To build the client and server and package them with the minimum curated runtime
 .\package-windows.ps1
 ```
 
-The packager uses `KrunkNative-Windows.zip` as its asset seed, then adds the current binaries,
+The packager uses `Krodin-Windows.zip` as its asset seed (also accepting the legacy
+`KrunkNative-Windows.zip` filename), then adds the current binaries,
 configuration, and current models, textures, icons and sights for every supported weapon.
 Both packagers use `assets/config/weapon-assets.txt` to refresh weapon assets from your installed pack.
 Use `-SkipBuild` to package existing binaries or `-AssetArchive`
@@ -133,10 +134,10 @@ Run the binaries from the repository root so every asset path resolves consisten
 ### Offline
 
 ```bash
-./bin/krunknative_client --offline
+./bin/krodin_client --offline
 ```
 
-On Windows, use `.\bin\krunknative_client.exe --offline`.
+On Windows, use `.\bin\krodin_client.exe --offline`.
 
 Shotgun, Sawed Off and Rocket Launcher shots boost you away from nearby map
 surfaces. Aim at the floor to gain height or at a wall to push away from it;
@@ -148,11 +149,11 @@ the boost weakens with distance. Servers can adjust it with `impulseMlt`
 Start the server in one terminal, then start one or more clients from other terminals:
 
 ```bash
-./bin/krunknative_server
-./bin/krunknative_client
+./bin/krodin_server
+./bin/krodin_client
 ```
 
-On Windows, use `.\bin\krunknative_server.exe` and `.\bin\krunknative_client.exe`. The
+On Windows, use `.\bin\krodin_server.exe` and `.\bin\krodin_client.exe`. The
 client remains offline until the join control is used. Passing `--map` always starts a local
 custom-map session.
 
@@ -179,7 +180,7 @@ player flags, interaction progress, hit confirmations, and standard projectile
 notifications are also handled. See [packet coverage](doc/live-packets.md) for
 supported schemas, validation, and remaining protocol work.
 
-Join diagnostics are always enabled in the client. Launch `.\bin\krunknative_client.exe`
+Join diagnostics are always enabled in the client. Launch `.\bin\krodin_client.exe`
 from this worktree directory, retry **PASTE & JOIN LINK**, and inspect
 `logs/krunker-network.log` (also printed to the console). Each attempt records the parsed
 invite, token source/expiry, matchmaker URLs, HTTP status/response headers/error body,
@@ -195,7 +196,7 @@ The diagnostic regression test uses a local HTTP server and needs no account or 
 odin build tools/network_diagnostics_test -out:bin/network_diagnostics_test.exe -o:none
 python tools/test_network_diagnostics.py
 # Optional: tests the map/player handoff using a hidden OpenGL window.
-odin test src/client -out:bin/krunknative_client_tests.exe
+odin test src/client -out:bin/krodin_client_tests.exe
 ```
 
 The standalone flow diagnostic requires a fresh `KRUNKER_ACCESS_TOKEN` because the `/seek-game`

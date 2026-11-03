@@ -173,7 +173,7 @@ Client_Options :: struct {
 }
 
 print_client_help :: proc() {
-	fmt.println("KrunkNative Odin client")
+	fmt.println("Krodin Odin client")
 	fmt.println()
 	fmt.printf("Usage: %s [options]\n", os.args[0])
 	fmt.println()
@@ -1141,7 +1141,7 @@ main :: proc() {
 		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 5)
 	}
 
-	client.window = glfw.CreateWindow(1280, 720, "KrunkNative", nil, nil)
+	client.window = glfw.CreateWindow(1280, 720, "Krodin", nil, nil)
 	if client.window == nil {
 		fmt.eprintln("Failed to create window")
 		return
@@ -1298,7 +1298,7 @@ cpu_model_name :: proc() -> string {
 
 print_startup_info :: proc(client: ^Client) {
 	fmt.println("======================================================")
-	fmt.println("  KrunkNative (Odin) - Startup Info")
+	fmt.println("  Krodin (Odin) - Startup Info")
 	fmt.println("======================================================")
 
 	major, minor, rev := glfw.GetVersion()

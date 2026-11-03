@@ -2,8 +2,8 @@
 rem Build helper for Windows (requires Odin compiler in PATH).
 rem
 rem Usage:
-rem   build.bat client            build the client      -> bin\krunknative_client.exe
-rem   build.bat server            build the server      -> bin\krunknative_server.exe
+rem   build.bat client            build the client      -> bin\krodin_client.exe
+rem   build.bat server            build the server      -> bin\krodin_server.exe
 rem   build.bat tests             build + run the sim tests
 rem   build.bat check             typecheck client + server without linking
 rem   build.bat all               build client + server
@@ -53,17 +53,17 @@ if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 goto:%TARGET%
 
 :client
-%ODIN% build src/client -out:%BIN_DIR%\krunknative_client.exe -o:%PROFILE%
+%ODIN% build src/client -out:%BIN_DIR%\krodin_client.exe -o:%PROFILE%
 exit /b %errorlevel%
 
 :server
-%ODIN% build src/server -out:%BIN_DIR%\krunknative_server.exe -o:%PROFILE%
+%ODIN% build src/server -out:%BIN_DIR%\krodin_server.exe -o:%PROFILE%
 exit /b %errorlevel%
 
 :tests
-%ODIN% build src/tests -out:%BIN_DIR%\krunknative_tests.exe -o:%PROFILE%
+%ODIN% build src/tests -out:%BIN_DIR%\krodin_tests.exe -o:%PROFILE%
 if errorlevel 1 exit /b %errorlevel%
-"%BIN_DIR%\krunknative_tests.exe"
+"%BIN_DIR%\krodin_tests.exe"
 exit /b %errorlevel%
 
 :check
@@ -80,9 +80,9 @@ call :server
 exit /b %errorlevel%
 
 :clean
-if exist "%BIN_DIR%\krunknative_client.exe" del "%BIN_DIR%\krunknative_client.exe"
-if exist "%BIN_DIR%\krunknative_server.exe" del "%BIN_DIR%\krunknative_server.exe"
-if exist "%BIN_DIR%\krunknative_tests.exe" del "%BIN_DIR%\krunknative_tests.exe"
+if exist "%BIN_DIR%\krodin_client.exe" del "%BIN_DIR%\krodin_client.exe"
+if exist "%BIN_DIR%\krodin_server.exe" del "%BIN_DIR%\krodin_server.exe"
+if exist "%BIN_DIR%\krodin_tests.exe" del "%BIN_DIR%\krodin_tests.exe"
 echo Cleaned %BIN_DIR%\
 exit /b 0
 

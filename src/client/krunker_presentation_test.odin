@@ -128,13 +128,13 @@ when ODIN_TEST {
 		kproto.krunker_world_apply_packet(&client.krunker_world, packet)
 		krunker_client_apply_motion(&client, peer, source, false)
 		testing.expect(t, peer.position.x == 0, "a newly arrived k must not snap a visible remote player")
-		krunker_client_interpolate_remotes(&client, 1.175, 0.005)
+		krunker_client_interpolate_remotes(&client, 1.15, 0.005)
 		testing.expect(t, abs(peer.position.x-5) < 0.001 && abs(peer.crouch_val-0.5) < 0.001 && abs(peer.aim_val-0.5) < 0.001,
 			"remote position, crouch, and ADS must render between the buffered samples")
 		testing.expect(t, abs(abs(peer.direction.y)-math.PI) < 0.001, "yaw interpolation must cross 180 degrees by the short path")
 		previous := peer.position.x
 		for frame in 1..=9 {
-			krunker_client_interpolate_remotes(&client, 1.175+f64(frame)*0.005, 0.005)
+			krunker_client_interpolate_remotes(&client, 1.15+f64(frame)*0.005, 0.005)
 			testing.expect(t, peer.position.x > previous && peer.position.x-previous < 0.501, "every display frame must advance smoothly between 10 Hz packets")
 			previous = peer.position.x
 		}

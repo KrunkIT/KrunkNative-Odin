@@ -46,13 +46,17 @@ def main() -> int:
         epilog="NOTE: the client links libglfw.so.3 dynamically; targets need libglfw3 installed.",
     )
     parser.add_argument("--skip-build", action="store_true", help="reuse existing binaries in bin/")
-    parser.add_argument("--assets", default=os.path.join(ROOT, "KrunkNative-Linux.zip"),
-                        help="base asset archive (default: KrunkNative-Linux.zip)")
+    parser.add_argument("--assets", default=None,
+                        help="base asset archive (default: Krodin-Linux.zip; accepts the legacy KrunkNative-Linux.zip seed)")
     parser.add_argument("--output", default=None,
-                        help="output archive (default: KrunkNative-Linux-<version>.zip)")
+                        help="output archive (default: Krodin-Linux-<version>.zip)")
     args = parser.parse_args()
 
-    asset_archive = os.path.abspath(args.assets)
+    asset_archive = os.path.abspath(args.assets) if args.assets else os.path.join(ROOT, "Krodin-Linux.zip")
+    if args.assets is None and not os.path.isfile(asset_archive):
+        legacy_archive = os.path.join(ROOT, "KrunkNative-Linux.zip")
+        if os.path.isfile(legacy_archive):
+            asset_archive = legacy_archive
 
     version_file = os.path.join(ROOT, "VERSION")
     if not os.path.isfile(version_file):
@@ -64,7 +68,7 @@ def main() -> int:
         print(f"error: VERSION file is empty: {version_file}", file=sys.stderr)
         return 1
 
-    output_archive = os.path.abspath(args.output) if args.output else os.path.join(ROOT, f"KrunkNative-Linux-{version}.zip")
+    output_archive = os.path.abspath(args.output) if args.output else os.path.join(ROOT, f"Krodin-Linux-{version}.zip")
 
     if not os.path.isfile(asset_archive):
         print(f"error: missing asset archive: {asset_archive}", file=sys.stderr)
@@ -76,21 +80,25 @@ def main() -> int:
             print(f"error: build failed with exit code {result.returncode}", file=sys.stderr)
             return result.returncode
 
-    client_bin = os.path.join(ROOT, "bin", "krunknative_client")
-    server_bin = os.path.join(ROOT, "bin", "krunknative_server")
+    client_bin = os.path.join(ROOT, "bin", "krodin_client")
+    server_bin = os.path.join(ROOT, "bin", "krodin_server")
     for required in (client_bin, server_bin):
         if not os.path.isfile(required):
             print(f"error: missing binary: {required}", file=sys.stderr)
             return 1
 
-    stage = tempfile.mkdtemp(prefix="KrunkNative-package-")
+    stage = tempfile.mkdtemp(prefix="Krodin-package-")
     try:
         with zipfile.ZipFile(asset_archive) as zf:
             zf.extractall(stage)
+        for name in ("krunknative_client", "krunknative_server"):
+            legacy_binary = os.path.join(stage, name)
+            if os.path.isfile(legacy_binary):
+                os.remove(legacy_binary)
 
         overlays = [
-            (client_bin, "krunknative_client"),
-            (server_bin, "krunknative_server"),
+            (client_bin, "krodin_client"),
+            (server_bin, "krodin_server"),
             (os.path.join(ROOT, "assets/config/game.toml"), "assets/config/game.toml"),
             (os.path.join(ROOT, "assets/shaders/basic.frag"), "assets/shaders/basic.frag"),
             (os.path.join(ROOT, "assets/textures/objective_4.png"), "assets/textures/objective_4.png"),

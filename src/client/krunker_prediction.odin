@@ -4,6 +4,7 @@ import "core:math"
 import "core:fmt"
 import shared "../shared"
 import kproto "../krunker"
+import glfw "vendor:glfw"
 
 // Integer milliseconds match Krunker's simulation clock. This is close to the
 // browser's default 144 Hz input rate, independently of rendering and sending.
@@ -36,8 +37,9 @@ krunker_client_reset_prediction :: proc(client: ^Client) {
 
 // Store and predict exactly the commands that q will transmit. Rendering frames
 // never acquire sequence numbers or enter the authoritative replay history.
-krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input) {
+krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input, now: f64 = -1) {
 	state := &client.krunker
+	shot_time := now < 0 ? glfw.GetTime() : now
 	if frame.swap != 0 { state.input_swap = frame.swap }
 	look := shared.Vec2{clamp(frame.x_dir, -math.PI/2, math.PI/2), frame.y_dir}
 	if !state.bootstrapped || !state.spawned {
@@ -64,10 +66,14 @@ krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input) {
 		command.swap = state.input_swap
 		state.input_swap = 0
 		if client.krunker_world.move_lock { command.move_dir = -1; command.jump = false }
-		append(&state.input_commands, command)
+		command.krunker_shot_timed = false
+		command.krunker_shot_time, command.krunker_shot_progress = 0, 0
 		state.render_previous = {client.me.position, client.me.aim_val}
 		client.me.direction = state.command_direction
+		shot_seq := client.me.shot_seq
 		shared.player_proc_input(client.me, &command, true, client.krunker_world.move_lock, true, true)
+		if client.me.shot_seq != shot_seq { kproto.krunker_input_stamp_shot(&client.krunker_world, &command, shot_time) }
+		append(&state.input_commands, command)
 		// Keep client-only impulse metadata produced by prediction for replay.
 		append(&client.predicted_inputs, command)
 		if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }

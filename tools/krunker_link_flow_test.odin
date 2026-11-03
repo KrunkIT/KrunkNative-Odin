@@ -43,7 +43,7 @@ curl_http_request :: proc(url, method, request_body: string) -> (body: [dynamic]
 	headers: ^curl.slist
 	origin := strings.clone_to_cstring("Origin: https://krunker.io")
 	referer := strings.clone_to_cstring("Referer: https://krunker.io/")
-	user_agent := strings.clone_to_cstring("User-Agent: Mozilla/5.0 (KrunkNative link-flow test)")
+	user_agent := strings.clone_to_cstring("User-Agent: Mozilla/5.0 (Krodin link-flow test)")
 	defer delete(origin)
 	defer delete(referer)
 	defer delete(user_agent)
@@ -148,7 +148,7 @@ curl_websocket_probe :: proc(url: string) -> (code: curl.code, status: i64, ok: 
 	headers: ^curl.slist
 	origin := strings.clone_to_cstring("Origin: https://krunker.io")
 	referer := strings.clone_to_cstring("Referer: https://krunker.io/")
-	user_agent := strings.clone_to_cstring("User-Agent: Mozilla/5.0 (KrunkNative link-flow test)")
+	user_agent := strings.clone_to_cstring("User-Agent: Mozilla/5.0 (Krodin link-flow test)")
 	defer delete(origin)
 	defer delete(referer)
 	defer delete(user_agent)

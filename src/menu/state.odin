@@ -23,6 +23,7 @@ View :: struct {
 	selected_secondary: i32,
 	secondary_name, secondary_reason: string,
 	secondary_pending: bool,
+	live_class_changes: bool,
 	respawn_remaining: f32,
 	confirmed_class, confirmed_team, requested_team: i32,
 	team_pending, class_pending, local_practice, has_life, connecting: bool,

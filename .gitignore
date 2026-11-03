@@ -92,3 +92,7 @@ RANKED_MODE_FLOW_REPORT.md
 mod.zip
 __pycache__/
 *.pyc
+
+Krodin-*.zip
+Krodin-Windows/
+Krodin-Linux/

@@ -1,5 +1,5 @@
 param(
-    [string]$AssetArchive = (Join-Path $PSScriptRoot "KrunkNative-Windows.zip"),
+    [string]$AssetArchive = (Join-Path $PSScriptRoot "Krodin-Windows.zip"),
     [string]$OutputArchive = "",
     [switch]$SkipBuild
 )
@@ -15,12 +15,17 @@ if ([string]::IsNullOrEmpty($version)) {
     throw "Version file is empty: $versionFile"
 }
 if ([string]::IsNullOrEmpty($OutputArchive)) {
-    $OutputArchive = Join-Path $PSScriptRoot ("KrunkNative-Windows-" + $version + ".zip")
+    $OutputArchive = Join-Path $PSScriptRoot ("Krodin-Windows-" + $version + ".zip")
 }
 
 $root = (Resolve-Path $PSScriptRoot).Path
+# Existing asset seeds predate the Krodin name.
+if (-not $PSBoundParameters.ContainsKey("AssetArchive") -and -not (Test-Path -LiteralPath $AssetArchive -PathType Leaf)) {
+    $legacyArchive = Join-Path $root "KrunkNative-Windows.zip"
+    if (Test-Path -LiteralPath $legacyArchive -PathType Leaf) { $AssetArchive = $legacyArchive }
+}
 $assetArchive = (Resolve-Path $AssetArchive).Path
-$stage = Join-Path ([IO.Path]::GetTempPath()) ("KrunkNative-package-" + [guid]::NewGuid().ToString("N"))
+$stage = Join-Path ([IO.Path]::GetTempPath()) ("Krodin-package-" + [guid]::NewGuid().ToString("N"))
 
 try {
     if (-not $SkipBuild) {
@@ -30,8 +35,8 @@ try {
         }
     }
 
-    $clientBinary = Join-Path $root "bin\krunknative_client.exe"
-    $serverBinary = Join-Path $root "bin\krunknative_server.exe"
+    $clientBinary = Join-Path $root "bin\krodin_client.exe"
+    $serverBinary = Join-Path $root "bin\krodin_server.exe"
     foreach ($required in @($clientBinary, $serverBinary)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Missing binary: $required"
@@ -40,10 +45,14 @@ try {
 
     New-Item -ItemType Directory -Path $stage | Out-Null
     Expand-Archive -LiteralPath $assetArchive -DestinationPath $stage
+    foreach ($name in @("krunknative_client.exe", "krunknative_server.exe")) {
+        $legacyBinary = Join-Path $stage $name
+        if (Test-Path -LiteralPath $legacyBinary -PathType Leaf) { Remove-Item -LiteralPath $legacyBinary }
+    }
 
     $copies = @{
-        $clientBinary = (Join-Path $stage "krunknative_client.exe")
-        $serverBinary = (Join-Path $stage "krunknative_server.exe")
+        $clientBinary = (Join-Path $stage "krodin_client.exe")
+        $serverBinary = (Join-Path $stage "krodin_server.exe")
         (Join-Path $root "assets\config\game.toml") = (Join-Path $stage "assets\config\game.toml")
         (Join-Path $root "assets\shaders\basic.frag") = (Join-Path $stage "assets\shaders\basic.frag")
         (Join-Path $root "assets\textures\objective_4.png") = (Join-Path $stage "assets\textures\objective_4.png")

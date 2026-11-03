@@ -63,7 +63,7 @@ network_http_info :: proc(handle: ^curl.CURL, stage: string, code: curl.code, de
 // libcurl global initialization is owned by the caller.
 network_http :: proc(url, method, body, stage: string) -> (result: [dynamic]byte, status: i64, ok: bool) {
 	network_log(stage, fmt.tprintf("REQUEST %s %s connect_timeout=8000ms timeout=15000ms", method, url))
-	network_log(stage, "request headers: Origin=https://krunker.io Referer=https://krunker.io/ User-Agent=Mozilla/5.0 (KrunkNative)")
+	network_log(stage, "request headers: Origin=https://krunker.io Referer=https://krunker.io/ User-Agent=Mozilla/5.0 (Krodin)")
 	handle := curl.easy_init()
 	if handle == nil { network_log(stage, "ERROR curl.easy_init returned nil"); return }
 	defer curl.easy_cleanup(handle)
@@ -77,7 +77,7 @@ network_http :: proc(url, method, body, stage: string) -> (result: [dynamic]byte
 	headers: ^curl.slist
 	headers = curl.slist_append(headers, "Origin: https://krunker.io")
 	headers = curl.slist_append(headers, "Referer: https://krunker.io/")
-	headers = curl.slist_append(headers, "User-Agent: Mozilla/5.0 (KrunkNative)")
+	headers = curl.slist_append(headers, "User-Agent: Mozilla/5.0 (Krodin)")
 	defer curl.slist_free_all(headers)
 	setup := []curl.code{
 		curl.easy_setopt(handle, .URL, url_c),

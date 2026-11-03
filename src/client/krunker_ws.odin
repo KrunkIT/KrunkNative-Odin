@@ -32,12 +32,15 @@ Krunker_WS_State :: struct {
 	rx_logged:    int,
 	decode_errors: int,
 	send_blocked: bool,
+	input_blocked: bool,
+	recv_budget_hits: int,
 	error_buffer: [curl.ERROR_SIZE]byte,
 	upgrade_capture: kproto.Network_HTTP_Capture,
 	message: kproto.Krunker_WS_Message,
 	rendered_map_revision: u64,
 	render_map_ready: bool,
 	player_revisions: map[i32]u64,
+	player_loadout_revisions: map[i32]u64,
 	local_sync_revision: u64,
 	local_ammo_revision: u64,
 	local_position_revision: u64,
@@ -341,6 +344,19 @@ krunker_ws_bootstrap_tick :: proc(client: ^Client, send_control: proc(^Krunker_W
 	}
 }
 
+// Keep initial protocol discovery and all unknown/error/lifecycle packets.
+// Routine traffic otherwise caused thousands of synchronous console/file writes
+// on the gameplay thread during a single match.
+krunker_ws_routine_packet :: proc(value: kproto.Krunker_Msgpack_Value) -> bool {
+	if numeric, ok := value.(i64); ok { return numeric >= 4 && numeric <= 9 }
+	if opcode, ok := value.(string); ok {
+		switch opcode {
+		case "k", "l", "gmsg", "ai", "t", "h", "s", "4", "5", "6", "7", "8", "9", "ts", "pi", "pir", "uamo", "uobj": return true
+		}
+	}
+	return false
+}
+
 krunker_ws_apply_world :: proc(client: ^Client, payload: []byte, send_control: proc(^Krunker_WS_State, string) -> bool = krunker_ws_send) {
 	state := &client.krunker
 	messages, counter, error_text := kproto.krunker_msgpack_decode_packet(payload)
@@ -355,7 +371,7 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte, send_control: p
 		opcode, is_text := packet[0].(string)
 		// Only suppress routine updates. A late disconnect/error/challenge must
 		// remain visible after the initial packet trace has reached its limit.
-		if state.rx_logged <= 40 || (opcode != "k" && opcode != "l" && opcode != "gmsg") {
+		if state.rx_logged <= 40 || !krunker_ws_routine_packet(packet[0]) {
 			kproto.network_log("msgpack", fmt.tprintf("RECV opcode=%v args=%d trailer=%d complete_message_bytes=%d", packet[0], len(packet)-1, counter, len(payload)))
 		}
 		client.krunker_world.received_at = glfw.GetTime()
@@ -388,13 +404,15 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte, send_control: p
 				if len(packet) > 7 {
 					if entries, ok := packet[7].([]kproto.Krunker_Msgpack_Map_Entry); ok {
 						for entry in entries {
-							if key, text := entry.key.(string); text && (key == "tmSize" || key == "maxPlayers" || key == "specSlots" || key == "lives") {
+							if key, text := entry.key.(string); text && (key == "tmSize" || key == "maxPlayers" || key == "specSlots" || key == "lives" || key == "classes" || key == "limitClasses" || strings.has_prefix(key, "classLim")) {
 								kproto.network_log("lobby-config", fmt.tprintf("%s=%v type=%T", key, entry.value, entry.value))
 							}
 						}
 					}
 				}
 				kproto.network_log("lobby-config", fmt.tprintf("total_capacity=%d team_capacity=%d", client.krunker_world.lobby_capacity, client.krunker_world.lobby_team_capacity))
+			case "rg":
+				if len(packet) > 2 { kproto.network_log("loadout", fmt.tprintf("sid=%v reset=%v applied=%v countdown=%v", packet[1], packet[2], applied, client.krunker_world.countdown)) }
 			case "ready":
 				state.ready_received = client.krunker_world.ready
 				if !state.ready_received { state.connected = false; krunker_ws_set_status(client, "Lobby sent ready(false); connection rejected."); return }
@@ -458,7 +476,7 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte, send_control: p
 					}
 				}
 			case "f":
-				kproto.network_log("input", fmt.tprintf("server reported input synchronization failure args=%v; next q will reset input synchronization", packet[1:]))
+				kproto.network_log("input", fmt.tprintf("server reported input synchronization failure args=%v next_seq=%d unsent=%d predicted=%d; next q will reset input synchronization", packet[1:], state.input_sequence, len(state.input_commands), len(client.predicted_inputs)))
 				krunker_client_reset_prediction(client)
 				state.input_reset = true
 			}
@@ -497,7 +515,11 @@ krunker_ws_send_input :: proc(client: ^Client) {
 	defer delete(packet)
 	sent: c.size_t
 	code := curl.ws_send(state.handle, rawptr(&packet[0]), c.size_t(len(packet)), &sent, 0, curl.WS_BINARY)
-	if code == .E_AGAIN && sent == 0 do return
+	if code == .E_AGAIN && sent == 0 {
+		if !state.input_blocked { kproto.network_log("input", fmt.tprintf("q send would block: next_seq=%d unsent=%d", state.input_sequence, len(state.input_commands))) }
+		state.input_blocked = true
+		return
+	}
 	if code != .E_OK || int(sent) != len(packet) {
 		kproto.network_log("input", fmt.tprintf("ERROR q curl=%v sent=%d expected=%d", code, sent, len(packet)))
 		krunker_ws_set_status(client, "Live input send failed; see logs/krunker-network.log")
@@ -506,6 +528,10 @@ krunker_ws_send_input :: proc(client: ^Client) {
 	}
 	// Keep commands intact on E_AGAIN; only successful sends consume the queue.
 	krunker_ws_input_sent(state, count, counter)
+	if state.input_blocked || len(state.input_commands) > kproto.KRUNKER_MAX_INPUT_BATCH {
+		kproto.network_log("input", fmt.tprintf("q send resumed/backlog: seq=%d remaining=%d", first_sequence, len(state.input_commands)))
+	}
+	state.input_blocked = false
 	if reset || state.input_logged <= 3 || state.input_logged % 120 == 0 { kproto.network_log("input", fmt.tprintf("SENT live q seq=%d samples=%d last_seq=%d bytes=%d counter=%d reset=%v", first_sequence, count, first_sequence+i32(count)-1, sent, counter, reset)) }
 }
 
@@ -514,7 +540,15 @@ krunker_ws_poll :: proc(client: ^Client) {
 	if !state.connected do return
 	if !krunker_ws_flush_pending(state) { state.connected = false; krunker_ws_set_status(client, "Krunker WebSocket send failed."); return }
 	buffer: [4096]byte
-	for iterations := 0; iterations < 8; iterations += 1 {
+	// Drain bursts promptly instead of imposing an eight-chunk-per-frame lag.
+	// A time budget and chunk ceiling still leave time for prediction/rendering.
+	deadline := glfw.GetTime() + 0.004
+	for iterations := 0; iterations < 128; iterations += 1 {
+		if iterations > 0 && glfw.GetTime() >= deadline {
+			state.recv_budget_hits += 1
+			if state.recv_budget_hits <= 3 || state.recv_budget_hits % 120 == 0 { kproto.network_log("ws-recv", fmt.tprintf("receive budget reached: chunks=%d count=%d unsent=%d", iterations, state.recv_budget_hits, len(state.input_commands))) }
+			break
+		}
 		received: c.size_t
 		meta: ^curl.ws_frame
 		code := curl.ws_recv(state.handle, rawptr(&buffer[0]), c.size_t(len(buffer)), &received, &meta)
@@ -564,6 +598,7 @@ krunker_ws_disconnect :: proc(state: ^Krunker_WS_State) {
 	delete(state.upgrade_capture.headers)
 	delete(state.message.buffer)
 	delete(state.player_revisions)
+	delete(state.player_loadout_revisions)
 	delete(state.input_commands)
 	delete(state.last_server_message)
 	delete(state.server_error)
@@ -601,7 +636,7 @@ krunker_ws_connect :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
 	headers: ^curl.slist
 	origin := strings.clone_to_cstring("Origin: https://krunker.io")
 	referer := strings.clone_to_cstring("Referer: https://krunker.io/")
-	user_agent := strings.clone_to_cstring("User-Agent: Mozilla/5.0 (KrunkNative)")
+	user_agent := strings.clone_to_cstring("User-Agent: Mozilla/5.0 (Krodin)")
 	defer delete(origin); defer delete(referer); defer delete(user_agent)
 	headers = curl.slist_append(headers, origin); headers = curl.slist_append(headers, referer); headers = curl.slist_append(headers, user_agent)
 	defer curl.slist_free_all(headers)
@@ -621,7 +656,7 @@ krunker_ws_connect :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
 	}
 	option_names := []string{"ERRORBUFFER", "HEADERFUNCTION", "HEADERDATA", "WRITEFUNCTION", "WRITEDATA", "DEBUGFUNCTION", "VERBOSE", "URL", "CONNECTTIMEOUT_MS", "TIMEOUT_MS", "CONNECT_ONLY", "HTTPHEADER"}
 	for code, i in setup { if code != .E_OK { kproto.network_log("websocket", fmt.tprintf("ERROR curl option=%s code=%v (%s)", option_names[i], code, string(curl.easy_strerror(code)))); krunker_ws_set_status(client, "Could not configure WebSocket; see logs/krunker-network.log"); krunker_ws_disconnect(state); return false } }
-	kproto.network_log("websocket", "upgrade connect_timeout=8000ms timeout=1000ms Origin=https://krunker.io Referer=https://krunker.io/ User-Agent=Mozilla/5.0 (KrunkNative)")
+	kproto.network_log("websocket", "upgrade connect_timeout=8000ms timeout=1000ms Origin=https://krunker.io Referer=https://krunker.io/ User-Agent=Mozilla/5.0 (Krodin)")
 	code := curl.easy_perform(handle)
 	status := kproto.network_http_info(handle, "websocket", code, string(cast(cstring)&state.error_buffer[0]))
 	kproto.network_log("websocket", fmt.tprintf("upgrade response headers=%s body=%s", string(state.upgrade_capture.headers[:]), string(state.upgrade_capture.body[:])))

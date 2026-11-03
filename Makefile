@@ -26,24 +26,24 @@ endif
 
 client:
 	mkdir -p $(BIN_DIR)
-	$(ODIN) build src/client -out:$(BIN_DIR)/krunknative_client -o:$(PROFILE)
+	$(ODIN) build src/client -out:$(BIN_DIR)/krodin_client -o:$(PROFILE)
 
 server:
 	mkdir -p $(BIN_DIR)
-	$(ODIN) build src/server -out:$(BIN_DIR)/krunknative_server -o:$(PROFILE)
+	$(ODIN) build src/server -out:$(BIN_DIR)/krodin_server -o:$(PROFILE)
 
 test:
 	# Tests are correctness checks; always compile fast with -o:none.
 	mkdir -p $(BIN_DIR)
-	$(ODIN) build src/tests -out:$(BIN_DIR)/krunknative_tests -o:none
-	./$(BIN_DIR)/krunknative_tests
+	$(ODIN) build src/tests -out:$(BIN_DIR)/krodin_tests -o:none
+	./$(BIN_DIR)/krodin_tests
 
 check:
 	$(ODIN) check src/client
 	$(ODIN) check src/server
 
 clean:
-	rm -f $(BIN_DIR)/krunknative_client $(BIN_DIR)/krunknative_server $(BIN_DIR)/krunknative_tests
+	rm -f $(BIN_DIR)/krodin_client $(BIN_DIR)/krodin_server $(BIN_DIR)/krodin_tests
 
 dist-windows: client
 	@echo "Windows builds statically by default (vendor links glfw3_mt.lib); no DLL needed."

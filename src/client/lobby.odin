@@ -164,8 +164,29 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 			delete(path)
 			menu_portraits[class.icon_index] = texture
 		}
-		classes[i] = {id = i32(i), name = class.name, weapon = weapon, health = class.health, wall_jump = class.wall_jump, available = client.local_practice || shared.class_is_in_rotation(i32(i)), portrait = rawptr(uintptr(texture)), weapon_icon = weapon_icon}
+		available := client.local_practice || shared.class_is_in_rotation(i32(i))
+		if client.krunker.connected && !client.local_practice && client.krunker_world.has_allowed_classes {
+			available = i < len(client.krunker_world.allowed_classes) && client.krunker_world.allowed_classes[i]
+		}
+		classes[i] = {id = i32(i), name = class.name, weapon = weapon, health = class.health, wall_jump = class.wall_jump, available = available, portrait = rawptr(uintptr(texture)), weapon_icon = weapon_icon}
 		if !classes[i].available { classes[i].reason = "Outside this lobby's class rotation" }
+		if client.krunker.connected && !client.local_practice && client.krunker_world.limit_classes {
+			// In the browser's comp selector, a zero classLimN excludes the
+			// class even when it appears in the general `classes` array.
+			classes[i].limit = int(client.krunker_world.class_limits[i])
+			if classes[i].limit == 0 { classes[i].available = false; classes[i].reason = "Disabled by lobby class limits" }
+			if client.lobby_team > 0 {
+				if len(client.krunker_world.lobby_players) > 0 {
+					for player in client.krunker_world.lobby_players {
+						if player.active && player.team == client.lobby_team && player.class_index == i32(i) { classes[i].used += 1 }
+					}
+				} else {
+					for player in client.krunker_world.players {
+						if player.active && player.team == client.lobby_team && player.class_index == i32(i) { classes[i].used += 1 }
+					}
+				}
+			}
+		}
 	}
 	players := make([dynamic]menuui.Player, 0, len(client.game.players), context.temp_allocator)
 	confirmed_class: i32 = -1
@@ -206,6 +227,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 	}
 	if client.net.connected { team_selection = client.net.lobby_received && client.net.lobby.select_team; capacity = int(client.net.lobby.capacity); team_names = client.net.lobby.team_names }
 	view := menuui.View{
+		live_class_changes = krunker_client_live_class_window(client, glfw.GetTime()),
 		presentation = client_lobby_presentation(client), ranked = client.krunker.connected && client.krunker_world.is_ranked,
 		team_selection = team_selection,
 		classes = classes, selected_class = client.selected_class, confirmed_class = confirmed_class,
@@ -236,7 +258,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		view.players = make([]menuui.Player, len(client.krunker_world.lobby_players), context.temp_allocator)
 		for player, i in client.krunker_world.lobby_players {
 			is_you := player.id == client.krunker_world.local_connection_uid
-			if is_you { view.confirmed_class = player.class_index }
+			if is_you && !view.active { view.confirmed_class = player.class_index }
 			view.players[i] = {name = len(player.name)>0 ? player.name : (is_you ? "You" : "Player"), class_name = menu_class_name(client, player.class_index), team = player.team, is_you = is_you}
 		}
 	}
@@ -246,6 +268,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 			view.players[i] = {name = record.id == client.net.lobby.local_id ? "You" : fmt.tprintf("Player %d", record.id), class_name = menu_class_name(client, record.class_id), team = record.team, is_you = record.id == client.net.lobby.local_id}
 		}
 	}
+	view.class_pending = view.confirmed_class != view.selected_class && (view.spawn_pending || view.active && view.live_class_changes)
 	return view
 }
 
