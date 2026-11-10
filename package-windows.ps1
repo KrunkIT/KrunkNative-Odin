@@ -54,6 +54,7 @@ try {
         $clientBinary = (Join-Path $stage "krodin_client.exe")
         $serverBinary = (Join-Path $stage "krodin_server.exe")
         (Join-Path $root "assets\config\game.toml") = (Join-Path $stage "assets\config\game.toml")
+        (Join-Path $root "assets\config\sound-assets.txt") = (Join-Path $stage "assets\config\sound-assets.txt")
         (Join-Path $root "assets\shaders\basic.frag") = (Join-Path $stage "assets\shaders\basic.frag")
         (Join-Path $root "assets\textures\objective_4.png") = (Join-Path $stage "assets\textures\objective_4.png")
         (Join-Path $root "assets\textures\objective_5.png") = (Join-Path $stage "assets\textures\objective_5.png")
@@ -78,6 +79,13 @@ try {
 
     # Hosted map art is absent from mod.zip and older seed archives.
     foreach ($asset in Get-Content -LiteralPath (Join-Path $root "assets\config\map-assets.txt")) {
+        $asset = $asset.Trim()
+        if (-not $asset -or $asset.StartsWith("#")) { continue }
+        $relative = Join-Path "assets" $asset
+        $copies[(Join-Path $root $relative)] = Join-Path $stage $relative
+    }
+
+    foreach ($asset in Get-Content -LiteralPath (Join-Path $root "assets\config\sound-assets.txt")) {
         $asset = $asset.Trim()
         if (-not $asset -or $asset.StartsWith("#")) { continue }
         $relative = Join-Path "assets" $asset

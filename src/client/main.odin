@@ -36,6 +36,10 @@ Client :: struct {
 	scene:  ^Scene,
 	fps_scene: ^Scene,
 	ui:     ^UI,
+	audio: ^Audio_System,
+	audio_settings: Audio_Settings,
+	audio_settings_dirty: bool,
+	audio_save_delay: f32,
 
 	mouse_state: struct {
 		locked:  bool,
@@ -544,6 +548,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		player.velocity = state.velocity
 		client_apply_movement_state(player, state)
 	}
+	if state.health < player.health { shared.player_emit_presentation(player, .DAMAGE) }
 	player.health = state.health
 	player.max_health = state.max_health
 	player.input_seq = state.ack_seq
@@ -584,6 +589,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 	}
 	player.shot_seq = state.shot_seq
 	for shot_index in 0 ..< int(new_shots) {
+		shared.player_emit_presentation(player, .FIRE)
 		if player.weapon.melee {
 			is_throw := player.can_throw && player.aim_val >= 1 && player.game.config.throwable_melees
 			shared.player_start_melee_animation(player, is_throw ? 3 : player.can_throw ? 1 : 2)
@@ -656,6 +662,8 @@ set_window_icon :: proc(client: ^Client) {
 }
 
 client_unload_map :: proc(client: ^Client) {
+	audio_stop_all(client.audio)
+	clear(&client.game.presentation_events)
 	if client.game.map_inst == nil || !client.map_loaded {
 		return
 	}
@@ -738,7 +746,13 @@ client_update_objective_visuals :: proc(client: ^Client) {
 }
 
 client_tick_impacts :: proc(client: ^Client, delta: f32) {
+	impact_sounds := 0
 	for &impact in client.game.impacts {
+		// Limit pellet/packet bursts without affecting the visual impact pool.
+		if impact.kind == .World && impact_sounds < 6 {
+			audio_play_effect(client.audio, "impact_0", gain = 0.18, position = impact.position, spatial = true, radius = 120, priority = 0)
+			impact_sounds += 1
+		}
 		client_add_tracer(client, &impact)
 		client_add_bullet_hole(client, &impact)
 	}
@@ -908,6 +922,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 	escape_key := glfw.GetKey(client.window, glfw.KEY_ESCAPE) == glfw.PRESS
 	if client.mouse_state.locked && escape_key && !client.last_escape_key {
+		audio_play_effect(client.audio, "menu_open", .UI, 0.35)
 		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 		client.mouse_state.locked = false
 		client.menu.page = .HOME
@@ -1063,6 +1078,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			player_update_meshes(client.me, false)
 		}
 	}
+	audio_update_listener(client.audio, &client.camera)
 	client_tick_impacts(client, delta)
 	client_tick_projectiles(client)
 	krunker_client_tick_explosions(client, delta)
@@ -1189,6 +1205,13 @@ main :: proc() {
 	defer delete(config_path)
 	gameplay_config := shared.config_load_gameplay(config_path)
 	defer shared.config_destroy_gameplay(gameplay_config)
+	client.audio_settings = audio_settings_load()
+	client.audio = audio_create(gameplay_config.weapons, client.audio_settings)
+	defer {
+		if client.audio_settings_dirty { audio_settings_save(client.audio_settings) }
+		audio_destroy(client.audio)
+	}
+	client.game.presentation_enabled = client.audio != nil
 
 	if len(options.class_name) > 0 {
 		client.selected_class = i32(shared.class_config_index(options.class_name))
@@ -1234,6 +1257,7 @@ main :: proc() {
 		last_tick = now
 
 		client_tick(client, now, delta)
+		client_audio_tick(client, delta)
 		glfw.SwapBuffers(client.window)
 		client_poll_events()
 		free_all(context.temp_allocator)

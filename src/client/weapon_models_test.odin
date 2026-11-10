@@ -111,6 +111,7 @@ when ODIN_TEST {
 					camera.zoom = 1 + (weapon.zoom - 1) * aim
 					player_update_meshes(player, false)
 					weapon_movement_alignment_check(t, player, &camera, first_person && aim == 1)
+					weapon_firing_alignment_check(t, player, &camera, first_person)
 					scoped := first_person && weapon.scope && aim == 1
 					testing.expect(t, gun.visible != scoped, "ADS must hide scoped first-person weapons and restore them when unscoped")
 					if scoped {
@@ -226,17 +227,55 @@ when ODIN_TEST {
 		}
 		if aligned {
 			player^ = saved
-			player.recoil.x = 0.2
-			player_update_meshes(player, false)
-			mesh_update_transform_matrix(arms.weapon_right)
-			testing.expect(t, weapon_pose_difference(references[0], camera.world_inverse_matrix * arms.weapon_right.transform_matrix) > 0.001,
-				"ADS alignment must preserve firing recoil")
-			player^ = saved
 			player.view_kick[3] = 0.2
 			player_update_meshes(player, false)
 			mesh_update_transform_matrix(arms.weapon_right)
 			testing.expect(t, weapon_pose_difference(references[0], camera.world_inverse_matrix * arms.weapon_right.transform_matrix) > 0.001,
 				"ADS alignment must preserve weapon kick")
+		}
+	}
+
+	weapon_firing_alignment_check :: proc(t: ^testing.T, player: ^shared.Player, camera: ^Camera, first_person: bool) {
+		saved, saved_camera := player^, camera^
+		defer {
+			player^, camera^ = saved, saved_camera
+			player_update_meshes(player, false)
+		}
+		rig := cast(^Player_Mesh)player.mesh
+		arms := rig.arms[player.loadout_index]
+		meshes := [?]^Mesh{arms.weapon_right, arms.weapon_left, arms.attachment}
+		references: [3]shared.Mat4
+		camera_update_world_inverse_matrix(camera)
+		for mesh, i in meshes {
+			if mesh == nil { continue }
+			mesh_update_transform_matrix(mesh)
+			references[i] = camera.world_inverse_matrix * mesh.transform_matrix
+		}
+		for scenario in 0 ..< 5 {
+			player^, camera^ = saved, saved_camera
+			switch scenario {
+			case 0: player.recoil.x, player.recoil.z = 0.2, -0.1
+			case 1: player.recoil_anim = 0.2
+			case 2:
+				player.recoil_anim_y = 0.05
+				if first_person {
+					camera.rotation.x += player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt
+				}
+			case 3: player.spread = 120
+			case 4: player.view_kick[3] = 0.2
+			}
+			player_update_meshes(player, false)
+			camera_update_world_inverse_matrix(camera)
+			for mesh, i in meshes {
+				if mesh == nil { continue }
+				mesh_update_transform_matrix(mesh)
+				difference := weapon_pose_difference(references[i], camera.world_inverse_matrix * mesh.transform_matrix)
+				stable := scenario == 3 || (scenario == 1 && player.weapon.recoil_z == 0) || (first_person && scenario != 4)
+				testing.expect(t, difference < 0.001 if stable else difference > 0.001,
+					fmt.tprintf("%s firing %d mesh %d first-person=%v aim=%f must %s (delta %f)",
+						player.weapon.name, scenario, i, first_person, player.aim_val,
+						"keep pose relative to camera" if stable else "preserve firing animation", difference))
+			}
 		}
 	}
 }

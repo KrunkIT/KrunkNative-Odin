@@ -92,6 +92,7 @@ RANKED_MODE_FLOW_REPORT.md
 mod.zip
 __pycache__/
 *.pyc
+audio-settings.json
 
 Krodin-*.zip
 Krodin-Windows/

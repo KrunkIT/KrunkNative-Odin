@@ -156,6 +156,8 @@ hud_render :: proc(client: ^Client, delta: f32) {
 	commands := menuui.build(&client.menu, view, input, client.ui.width, client.ui.height, delta)
 	ui_fill_rect(client.ui, {0.015, 0.025, 0.035, 0.55}, 0, 0, client.ui.width, client.ui.height)
 	menu_render_commands(client.ui, commands)
+	previous_page := client.menu.page
 	action := menuui.interact(&client.menu, input, view)
+	if client.menu.page != previous_page { audio_play_effect(client.audio, "tick_0", .UI, 0.6) }
 	menu_apply_action(client, action)
 }

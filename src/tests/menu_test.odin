@@ -100,6 +100,25 @@ test_menu :: proc() -> bool {
 	state.focus = clay.ID("Sensitivity").id
 	value = menu_test_frame(&state, view, {right=true})
 	if value.kind != .SENSITIVITY || abs(value.value-1.05)>0.001 { return false }
+	// Audio sliders retain their own channel and range when using the keyboard.
+	view.audio_volumes = {0.8, 1, 0.5, 0}
+	for name, i in ([4]string{"MasterVolume", "EffectsVolume", "FootstepsVolume", "UiVolume"}) {
+		menu_test_frame(&state, view, {})
+		state.focus = clay.ID(name).id
+		value = menu_test_frame(&state, view, {right = true})
+		if value.kind != .AUDIO_VOLUME || value.index != i32(i) || abs(value.value - min(1, view.audio_volumes[i]+0.05)) > 0.001 {
+			fmt.println("Audio slider keyboard routing failed", name, value); return false
+		}
+	}
+	// Tab scrolls focused audio controls into view; dragging adjusts that channel.
+	menu_test_frame(&state, view, {})
+	state.focus = clay.ID("FootstepsVolume").id
+	menu_test_frame(&state, view, {tab = true})
+	menu_test_frame(&state, view, {})
+	box = clay.GetElementData(clay.ID("UiVolume")).boundingBox
+	value = menu_test_frame(&state, view, {pointer = {box.x+box.width*0.25, box.y+box.height/2}, down = true})
+	if value.kind != .AUDIO_VOLUME || value.index != 3 || abs(value.value-0.25)>0.001 { fmt.println("Audio slider dragging failed", value); return false }
+	menu_test_frame(&state, view, {})
 	view.active = true
 	if menu_test_frame(&state, view, {escape=true}).kind != .NONE || state.page != .HOME { return false }
 	menu_test_frame(&state, view, {})

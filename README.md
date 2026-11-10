@@ -50,6 +50,17 @@ The port has one build toolchain: **Odin** (`make` is just a thin wrapper). The 
 vendor or build separate C dependencies; GLFW, OpenGL, and the image/font loaders come from Odin's
 own `vendor/` bindings.
 
+Audio uses Odin's bundled `vendor:miniaudio`, with MP3 decoding and stereo
+positional playback. Windows includes the static library. On a fresh Linux or
+macOS Odin install, build that library once before building the client:
+
+```bash
+sh "$(odin root)/vendor/miniaudio/src/build_miniaudio.sh"
+```
+
+This uses a C compiler and the platform's system audio APIs; no audio DLLs need
+to be shipped with the Windows client.
+
 ### Linux
 
 On Debian or Ubuntu, install GLFW and its `pkg-config` metadata:
@@ -130,6 +141,25 @@ If you ever build the client with `-define:GLFW_SHARED=true`, copy
 ## Running
 
 Run the binaries from the repository root so every asset path resolves consistently.
+
+### Audio
+
+Weapon and melee attacks, reloads, swaps, footsteps, jumps, landings, slides,
+world impacts, explosions, damage and confirmed hits use the installed sounds
+in `assets/sound/`. Remote effects use the camera's position and orientation for
+stereo direction and distance attenuation. Movement reconciliation and local
+shot echoes do not repeat sounds. Live hit sounds require server confirmation.
+
+Settings provides Master, Effects, Footsteps and UI volume sliders. Drag them or
+use Left/Right with keyboard focus; Tab scrolls controls into view. Changes take
+effect immediately and save to the ignored `audio-settings.json` beside the
+working directory's assets folder. Zero Master volume mutes all output.
+
+Short effects are decoded at startup from `assets/config/sound-assets.txt` and
+share a bounded pool of 64 voices; both packagers refresh those assets. Weapon
+`sound` configuration supports a sound name (for example `weapon_4`) or an asset
+path (for example `mods/weapons/fire.wav`). Missing effects are logged once and
+remain silent. If no output device is available, the client continues silently.
 
 ### Offline
 

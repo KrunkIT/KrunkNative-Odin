@@ -38,6 +38,7 @@ krunker_client_interpolate_remotes :: proc(client: ^Client, now: f64, delta: f32
 		alpha: f32
 		if b.time > a.time { alpha = clamp(f32((display_time-a.time)/(b.time-a.time)), 0, 1) }
 		previous := player.position
+		was_grounded := player.on_ground
 		player.last_position = previous
 		player.position = a.position + (b.position-a.position)*alpha
 		player.direction.x = a.direction.x + (b.direction.x-a.direction.x)*alpha
@@ -49,6 +50,10 @@ krunker_client_interpolate_remotes :: proc(client: ^Client, now: f64, delta: f32
 		displacement := player.position - previous
 		distance := math.sqrt(displacement.x*displacement.x + displacement.z*displacement.z)
 		if player.on_ground && distance < 64 { shared.player_step(player, distance) }
+		if distance < 64 {
+			if was_grounded && !player.on_ground && displacement.y > 0 { shared.player_emit_presentation(player, .JUMP) }
+			if !was_grounded && player.on_ground { shared.player_emit_presentation(player, .LAND) }
+		}
 		player.step_chase += (player.step_val-player.step_chase)*min(1, delta*20)
 		for &cooldown in player.reloads { cooldown = max(0, cooldown-delta) }
 	}
@@ -87,6 +92,9 @@ krunker_client_present_shots :: proc(client: ^Client) {
 			}
 		}
 		if player.reloads[player.loadout_index] <= 0 {
+			if !player.weapon.projectile || player.weapon.projectile_disable && !client.game.config.bullet_drop {
+				shared.player_emit_presentation(player, .FIRE)
+			}
 			shared.player_apply_recoil(player)
 			shared.player_start_view_kick(player)
 			player.reloads[player.loadout_index] = player.weapon.rate * client.game.config.fire_rate

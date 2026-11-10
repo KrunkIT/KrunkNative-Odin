@@ -100,6 +100,7 @@ def main() -> int:
             (client_bin, "krodin_client"),
             (server_bin, "krodin_server"),
             (os.path.join(ROOT, "assets/config/game.toml"), "assets/config/game.toml"),
+            (os.path.join(ROOT, "assets/config/sound-assets.txt"), "assets/config/sound-assets.txt"),
             (os.path.join(ROOT, "assets/shaders/basic.frag"), "assets/shaders/basic.frag"),
             (os.path.join(ROOT, "assets/textures/objective_4.png"), "assets/textures/objective_4.png"),
             (os.path.join(ROOT, "assets/textures/objective_5.png"), "assets/textures/objective_5.png"),
@@ -120,6 +121,12 @@ def main() -> int:
                     overlays.append((os.path.join(ROOT, rel), rel))
         # Hosted map art is not included in mod.zip or older seed archives.
         with open(os.path.join(ROOT, "assets/config/map-assets.txt"), encoding="utf-8") as fh:
+            for line in fh:
+                asset = line.strip()
+                if asset and not asset.startswith("#"):
+                    rel = "assets/" + asset
+                    overlays.append((os.path.join(ROOT, rel), rel))
+        with open(os.path.join(ROOT, "assets/config/sound-assets.txt"), encoding="utf-8") as fh:
             for line in fh:
                 asset = line.strip()
                 if asset and not asset.startswith("#"):

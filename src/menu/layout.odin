@@ -400,7 +400,7 @@ session :: proc(state: ^State, view: View) {
 settings :: proc(state: ^State, view: View) {
 	s := state.scale
 	text("Settings", 32, s)
-	text("Video / Input / HUD", 16, s, MUTED)
+	text("Video / Input / Audio / HUD", 16, s, MUTED)
 	button(state, "Controls", "Controls", {index = i32(Page.CONTROLS)})
 	if clay.UI(clay.ID("SettingsPanel"))({
 		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(26 * s)), childGap = u16(18 * s)},
@@ -421,24 +421,36 @@ settings :: proc(state: ^State, view: View) {
 			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(55 * s)}}}) { button(state, ">", "ResolutionPlus", {kind = .RESOLUTION, index = 1}) }
 		}
 		rule(s)
-		stat("Mouse sensitivity", fmt.tprintf("%d%%", i32(view.sensitivity * 100 + 0.5)), s)
-		id := clay.ID("Sensitivity")
-		register(state, {id = id, enabled = true, slider = true})
-		if clay.UI(id)({
-			layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(38 * s)}, childAlignment = {y = .Center}},
-			border = {color = ACCENT, width = clay.BorderOutside(state.focus == id.id ? 1 : 0)},
-		}) {
-			progress := clamp((view.sensitivity - 0.1) / 1.9, 0.001, 0.999)
-			if clay.UI()({layout = {sizing = {width = clay.SizingPercent(progress), height = clay.SizingFixed(8 * s)}}, backgroundColor = ACCENT}) {}
-			if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(8 * s)}}, backgroundColor = SURFACE}) {}
-		}
+		settings_slider(state, "Mouse sensitivity", "Sensitivity", view.sensitivity, 0.1, 2, {kind = .SENSITIVITY})
 		text("Drag to adjust. Use Left / Right when focused.", 12, s, MUTED)
+		rule(s)
+		text("Audio", 22, s)
+		labels := [4]string{"Master volume", "Effects volume", "Footsteps volume", "UI volume"}
+		ids := [4]string{"MasterVolume", "EffectsVolume", "FootstepsVolume", "UiVolume"}
+		for label, i in labels {
+			settings_slider(state, label, ids[i], view.audio_volumes[i], 0, 1, {kind = .AUDIO_VOLUME, index = i32(i)})
+		}
 		rule(s)
 		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childAlignment = {y = .Center}}}) {
 			text("Show FPS", 15, s)
 			spacer()
 			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(140 * s)}}}) { button(state, view.show_fps ? "ON" : "OFF", "Fps", {kind = .FPS}, view.show_fps) }
 		}
+	}
+}
+
+settings_slider :: proc(state: ^State, label, name: string, value, minimum, maximum: f32, action: Action) {
+	s := state.scale
+	stat(label, fmt.tprintf("%d%%", i32(value * 100 + 0.5)), s)
+	id := clay.ID(name)
+	register(state, {id = id, enabled = true, slider = true, action = action, slider_min = minimum, slider_max = maximum, slider_step = 0.05})
+	if clay.UI(id)({
+		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(38 * s)}, childAlignment = {y = .Center}},
+		border = {color = ACCENT, width = clay.BorderOutside(state.focus == id.id ? 1 : 0)},
+	}) {
+		progress := clamp((value - minimum) / (maximum - minimum), 0.001, 0.999)
+		if clay.UI()({layout = {sizing = {width = clay.SizingPercent(progress), height = clay.SizingFixed(8 * s)}}, backgroundColor = ACCENT}) {}
+		if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(8 * s)}}, backgroundColor = SURFACE}) {}
 	}
 }
 

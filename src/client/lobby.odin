@@ -27,6 +27,8 @@ client_selection_status :: proc(client: ^Client, value: string) {
 }
 
 client_leave_session :: proc(client: ^Client, reset_map: bool = true) {
+	audio_stop_all(client.audio)
+	if client.audio != nil { client.audio.hit_revision = 0 }
 	net_client_disconnect(&client.net)
 	krunker_ws_disconnect(&client.krunker)
 	kproto.krunker_world_reset(&client.krunker_world)
@@ -239,6 +241,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		map_name = map_name, mode = mode, lobby_name = online ? (len(client.join_link.game_id) > 0 ? client.join_link.game_id : client.join_link.host) : "Local practice",
 		connecting = client.join_queued > 0, current_invite = client.join_link.raw, join_status = client.join_status, selection_status = client.selection_status,
 		display_mode = i32(client.display_mode), sensitivity = client.sensitivity, show_fps = client.show_fps,
+		audio_volumes = {client.audio_settings.master, client.audio_settings.effects, client.audio_settings.footsteps, client.audio_settings.ui},
 		resolution = fmt.tprintf("%d x %d", DISPLAY_RESOLUTIONS[client.resolution_index].width, DISPLAY_RESOLUTIONS[client.resolution_index].height),
 		match_status = client.game.move_lock ? "Waiting for match to start" : "Match in progress",
 		respawn_remaining = krunker_client_respawn_remaining(client, glfw.GetTime()),
@@ -281,6 +284,9 @@ client_lobby_presentation :: proc(client: ^Client) -> menuui.Lobby_Presentation 
 }
 
 menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: proc(^Krunker_WS_State, string) -> bool = krunker_ws_send) {
+	if action.kind != .NONE && action.kind != .EDIT_INVITE && action.kind != .INSPECT_CLASS && action.kind != .AUDIO_VOLUME && action.kind != .SENSITIVITY {
+		audio_play_effect(client.audio, "tick_0", .UI, 0.6)
+	}
 	switch action.kind {
 	case .NONE, .EDIT_INVITE, .INSPECT_CLASS:
 	case .PASTE:
@@ -386,6 +392,17 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: pr
 		client.resolution_index = (client.resolution_index + action.index + i32(len(DISPLAY_RESOLUTIONS))) % i32(len(DISPLAY_RESOLUTIONS))
 		client_apply_display_settings(client)
 	case .SENSITIVITY: client.sensitivity = math.round(action.value * 100) / 100
+	case .AUDIO_VOLUME:
+		switch action.index {
+		case 0: client.audio_settings.master = action.value
+		case 1: client.audio_settings.effects = action.value
+		case 2: client.audio_settings.footsteps = action.value
+		case 3: client.audio_settings.ui = action.value
+		case: return
+		}
+		client.audio_settings = audio_settings_clamp(client.audio_settings)
+		audio_set_settings(client.audio, client.audio_settings)
+		client.audio_settings_dirty, client.audio_save_delay = true, 0.5
 	case .FPS: client.show_fps = !client.show_fps
 	}
 }

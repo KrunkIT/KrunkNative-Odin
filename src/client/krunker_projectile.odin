@@ -26,6 +26,9 @@ krunker_client_present_projectiles :: proc(client: ^Client) {
 			duplicate := false
 			for projectile in client.game.projectiles { if projectile.networked && projectile.network_id == event.id { duplicate = true; break } }
 			if duplicate { continue }
+			if event.owner_sid != world.local_sid {
+				shared.game_emit_presentation(&client.game, {kind = .FIRE, uid = event.owner_sid, weapon_id = event.weapon_id, position = event.position})
+			}
 			// The normal server excludes the predicting shooter from pr. Its
 			// pre packet addresses that player's local projectile shot counter.
 			if len(client.game.projectiles) >= 256 { ordered_remove(&client.game.projectiles, 0) }
@@ -36,6 +39,7 @@ krunker_client_present_projectiles :: proc(client: ^Client) {
 				remaining = weapon.projectile_range,
 			})
 		case .EXPLOSION:
+			shared.game_emit_presentation(&client.game, {kind = .EXPLOSION, position = event.position})
 			krunker_client_add_explosion(client, event.position, event.radius)
 		}
 	}

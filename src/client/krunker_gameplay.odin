@@ -32,6 +32,7 @@ krunker_client_countdown_label :: proc(client: ^Client, now: f64) -> string {
 }
 
 krunker_client_apply_metadata :: proc(client: ^Client, player: ^shared.Player, source: ^kproto.Krunker_World_Player) {
+	if source.health < player.health { shared.player_emit_presentation(player, .DAMAGE) }
 	player.health, player.max_health = source.health, i32(source.max_health)
 	player.score, player.kills, player.deaths = source.score, source.kills, source.deaths
 	if source.controls_revision > 0 {

@@ -498,6 +498,10 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	weapon_offset_mlt := shared.Vec3{1.0, 1.0, 1.0}
 
 	third_person := player_uses_third_person_camera(player)
+	// Ballistic recoil controls spread and camera pitch, not first-person gun
+	// sway. Keep its legacy mesh offsets for world models; view_kick supplies
+	// the independent first-person firing animation.
+	ballistic_motion_mlt: f32 = player.render_you && !third_person ? 0.0 : 1.0
 	view_aim := player.aim_val
 	view_position := player.position
 	if g_client != nil && g_client.krunker.connected && g_client.me == player && !is_preview {
@@ -517,8 +521,8 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	anim_mlt := (1.0 - (1.0 - shared.GAME_CONSTANTS.aim_anim_mlt) * aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt * weapon_bobbing_mlt
 	anim_mlt_crouch := 1.0 - player.crouch_val * 0.8
 	anim_mlt_lean := player.render_you ? (1.0 - aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt : 0.0
-	recoil_y_mlt := (1.0 - aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt
-	recoil_z_mlt := 1.0 - (player.weapon.recoil_z_mlt != 0 ? player.weapon.recoil_z_mlt : 0.5) * aim_mlt
+	recoil_y_mlt := (1.0 - aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt * ballistic_motion_mlt
+	recoil_z_mlt := (1.0 - (player.weapon.recoil_z_mlt != 0 ? player.weapon.recoil_z_mlt : 0.5) * aim_mlt) * ballistic_motion_mlt
 	anim_rotate_mlt := (1.0 - (player.weapon.z_rotation != 0 ? player.weapon.z_rotation : 0.3) * aim_mlt) * (player.weapon.z_rotation_mlt != 0 ? player.weapon.z_rotation_mlt : 1.0) * weapon_bobbing_mlt
 	anim_y_mlt := 1.0 - (player.weapon.jump_y_mlt != 0 ? player.weapon.jump_y_mlt : 1.0) * aim_mlt
 	lean_aim_mlt := 1.0 - aim_mlt * 0.45
@@ -538,7 +542,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	}
 
 	jump_bob_y := player.jump_bob_y * (player.weapon.jump_bob_y_mlt != 0 ? player.weapon.jump_bob_y_mlt : 1.0) * anim_mlt_lean * bob_crouch_mlt * weapon_bobbing_mlt
-	recoil_aim_mlt := 1.0 - aim_mlt * 0.75
+	recoil_aim_mlt := (1.0 - aim_mlt * 0.75) * ballistic_motion_mlt
 	recoil_mlt := 1.0 - (player.weapon.aim_recoil_mlt != 0 ? player.weapon.aim_recoil_mlt : 1.0) * aim_mlt
 	step_mlt := is_preview ? 0.05 : shared.GAME_CONSTANTS.step_anim
 	step_anim := math.sin(player.step_val) * step_mlt
@@ -639,6 +643,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	}
 
 	reload_mlt: f32 = third_person ? 0.4 : 1.0
+	// Match camera pitch here so camera recoil does not displace the sight.
 	player_mesh.upper_body_anchor.rotation.x = (bob_anim_y * -0.2 + land_bob_ya) * movement_mlt + reload_anim * (reload_mlt * -2.8) +
 		player.direction.x * (player.render_you && !third_person ? 1.0 : 0.5) +
 		(-math.PI * 0.25 * swap_anim + player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt) +

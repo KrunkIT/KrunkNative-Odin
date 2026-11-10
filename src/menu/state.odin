@@ -8,7 +8,7 @@ Page :: enum { HOME, SETTINGS, CONTROLS, SESSION, CLASSES, LOADOUT }
 Lobby_Presentation :: enum { STANDARD, COMPETITIVE }
 // The client owns clipboard access and session changes. The menu emits actions
 // and renders requested selections separately from confirmed lobby state.
-Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
+Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS, AUDIO_VOLUME }
 Action :: struct { kind: Action_Kind, index: i32, value: f32 }
 Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_jump, available: bool, reason: string, used, limit: int, portrait, weapon_icon: rawptr }
 Secondary :: struct { id: i32, name: string, icon: rawptr }
@@ -38,6 +38,7 @@ View :: struct {
 	player_count: int,
 	display_mode: i32,
 	sensitivity: f32,
+	audio_volumes: [4]f32,
 	show_fps: bool,
 }
 Input :: struct {
@@ -47,7 +48,7 @@ Input :: struct {
 	text: string,
 	scroll: clay.Vector2,
 }
-Control :: struct { id: clay.ElementId, action: Action, enabled, slider: bool }
+Control :: struct { id: clay.ElementId, action: Action, enabled, slider: bool, slider_min, slider_max, slider_step: f32 }
 State :: struct {
 	page: Page,
 	ctx: ^clay.Context,
@@ -148,7 +149,13 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 	}
 	if focused_index >= 0 && state.controls[focused_index].slider {
 		direction := (input.right && !state.previous.right ? 1 : 0) - (input.left && !state.previous.left ? 1 : 0)
-		if direction != 0 { return {kind = .SENSITIVITY, value = clamp(view.sensitivity + f32(direction) * 0.05, 0.1, 2)} }
+		if direction != 0 {
+			control := state.controls[focused_index]
+			value := control.action.kind == .AUDIO_VOLUME ? view.audio_volumes[control.action.index] : view.sensitivity
+			action := control.action
+			action.value = clamp(value + f32(direction) * control.slider_step, control.slider_min, control.slider_max)
+			return action
+		}
 	}
 	for control in state.controls[:state.control_count] {
 		if !control.enabled { continue }
@@ -161,7 +168,9 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 		if state.pressed == control.id.id {
 			if control.slider && input.down {
 				progress := clamp((input.pointer[0] - data.boundingBox.x) / data.boundingBox.width, 0, 1)
-				return {kind = .SENSITIVITY, value = 0.1 + progress * 1.9}
+				action := control.action
+				action.value = control.slider_min + progress * (control.slider_max - control.slider_min)
+				return action
 			}
 			if !input.down && state.previous.down && over {
 				state.pressed = 0

@@ -65,6 +65,9 @@ game_tick_projectiles :: proc(game: ^Game, delta: f32) {
 			}
 		}
 		if nearest <= 1 {
+			if weapon.physical_power > 0 && game_is_authority(game) {
+				game_emit_presentation(game, {kind = .EXPLOSION, position = projectile.position + segment * nearest})
+			}
 			if target != nil && game_is_authority(game) {
 				player_apply_damage(target, owner, weapon.projectile_damage, projectile.weapon_id, false)
 			}
