@@ -505,6 +505,14 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		view_aim, view_position = sample.aim, sample.position
 	}
 	aim_val_mlt: f32 = animate_aim && player.is_you ? view_aim : 0.0
+	// Keep the calibrated sight pose fixed at full first-person ADS. Residual
+	// step bob and speed-dependent lean otherwise move it away from the aim ray.
+	// Apply this at the cosmetic transforms so smoothed jump/landing state also
+	// fades out, without changing recoil, reloads, swaps or third-person motion.
+	movement_mlt: f32 = 1.0
+	if player.render_you && !third_person && !player.weapon.melee && !player.weapon.no_aim {
+		movement_mlt = 1.0 - clamp(aim_val_mlt, 0.0, 1.0)
+	}
 	aim_mlt: f32 = player.weapon.animate_while_aiming ? 0.0 : aim_val_mlt
 	anim_mlt := (1.0 - (1.0 - shared.GAME_CONSTANTS.aim_anim_mlt) * aim_val_mlt) * shared.GAME_CONSTANTS.anim_mlt * weapon_bobbing_mlt
 	anim_mlt_crouch := 1.0 - player.crouch_val * 0.8
@@ -631,7 +639,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	}
 
 	reload_mlt: f32 = third_person ? 0.4 : 1.0
-	player_mesh.upper_body_anchor.rotation.x = bob_anim_y * -0.2 + land_bob_ya + reload_anim * (reload_mlt * -2.8) +
+	player_mesh.upper_body_anchor.rotation.x = (bob_anim_y * -0.2 + land_bob_ya) * movement_mlt + reload_anim * (reload_mlt * -2.8) +
 		player.direction.x * (player.render_you && !third_person ? 1.0 : 0.5) +
 		(-math.PI * 0.25 * swap_anim + player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt) +
 		(player.weapon.y_rotation != 0 ? player.weapon.y_rotation : 0.0)
@@ -651,38 +659,38 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	arm_anchor := &arms.anchor
 	aim_offset_y := player.weapon.has_attachment ? REFLEX_SIGHT_AIM_OFFSET_Y + player.weapon.aim_offset_y : 0.0
 
-	arm_anchor.rotation.x = -math.cos(player.idle_anim) * bob_crouch_mlt * 0.01 * idle_anim +
-		player.weapon.rotation_offset * anim_mlt_lean + player.weapon.rotation_offset_aim * (1.0 - anim_mlt_lean) -
+	arm_anchor.rotation.x = (-math.cos(player.idle_anim) * bob_crouch_mlt * 0.01 * idle_anim -
 		player.land_bob_yr * 0.4 +
-		player.view_kick[0] * recoil_mlt +
 		player.lean_anim.y * lean_aim_mlt * (player.weapon.lean_mlt != 0 ? player.weapon.lean_mlt : 1.0) * weapon_lean_mlt +
-		step_half_rotate * -0.9 * anim_mlt
+		step_half_rotate * -0.9 * anim_mlt) * movement_mlt +
+		player.weapon.rotation_offset * anim_mlt_lean + player.weapon.rotation_offset_aim * (1.0 - anim_mlt_lean) +
+		player.view_kick[0] * recoil_mlt
 
-	arm_anchor.rotation.y = player.jump_rotate_mlt * 0.2 +
+	arm_anchor.rotation.y = (player.jump_rotate_mlt * 0.2 +
 		player.lean_anim.x * lean_aim_mlt * (player.weapon.lean_mlt != 0 ? player.weapon.lean_mlt : 1.0) * weapon_lean_mlt +
-		(-step_anim_rotate * 0.16 * anim_mlt_lean * anim_mlt_crouch + player.lean_anim.z * 0.2) * anim_mlt
+		(-step_anim_rotate * 0.16 * anim_mlt_lean * anim_mlt_crouch + player.lean_anim.z * 0.2) * anim_mlt) * movement_mlt
 
-	arm_anchor.rotation.z = jump_rotate + aim_lean +
-		player.view_kick[1] * recoil_mlt +
+	arm_anchor.rotation.z = (jump_rotate +
 		player.lean_anim.z * 0.7 * anim_rotate_mlt +
-		player.weapon.crouch_lean * left_hand_mlt * player.crouch_val * anim_mlt_lean * anim_mlt
+		player.weapon.crouch_lean * left_hand_mlt * player.crouch_val * anim_mlt_lean * anim_mlt) * movement_mlt +
+		aim_lean + player.view_kick[1] * recoil_mlt
 
-	arm_anchor.position.x = player.recoil.x * recoil_aim_mlt -
-		player.jump_rotate_mlt * anim_mlt_lean * 1.3 +
-		(player.lean_anim.z * 0.35 - player.weapon.crouch_rotation * left_hand_mlt * player.crouch_val * anim_mlt_lean + step_anim * 0.5 * anim_mlt_crouch * anim_mlt_lean) * (1.0 - aim_val_mlt) * anim_mlt +
+	arm_anchor.position.x = player.recoil.x * recoil_aim_mlt +
+		(-player.jump_rotate_mlt * anim_mlt_lean * 1.3 +
+		(player.lean_anim.z * 0.35 - player.weapon.crouch_rotation * left_hand_mlt * player.crouch_val * anim_mlt_lean + step_anim * 0.5 * anim_mlt_crouch * anim_mlt_lean) * (1.0 - aim_val_mlt) * anim_mlt) * movement_mlt +
 		weapon_offset.x - (weapon_offset.x - player.weapon.origin.x * left_hand_mlt) * aim_val
 
 	arm_anchor.position.y = player.recoil.z * recoil_aim_mlt +
 		player.view_kick[2] * recoil_mlt +
-		math.sin(player.idle_anim) * 0.02 * idle_anim +
-		jump_bob_y + land_bob_y * 0.5 - bob_anim_y * 1.5 -
+		(math.sin(player.idle_anim) * 0.02 * idle_anim +
+		jump_bob_y + land_bob_y * 0.5 - bob_anim_y * 1.5 +
+		(step_half * 0.85 - player.weapon.crouch_drop * player.crouch_val * anim_mlt_lean) * anim_mlt) * movement_mlt -
 		(player.weapon.bomb ? player.interact_progress * 3.0 : 0.0) +
-		(step_half * 0.85 - player.weapon.crouch_drop * player.crouch_val * anim_mlt_lean) * anim_mlt +
 		weapon_offset.y - (weapon_offset.y - player.weapon.origin.y + aim_offset_y) * aim_val
 
 	arm_anchor.position.z = weapon_offset.z - (weapon_offset.z - player.weapon.origin.z) * aim_val +
 		player.view_kick[3] +
-		player.bob_anim.z * anim_mlt + player.recoil_anim * player.weapon.recoil_z * recoil_z_mlt
+		player.bob_anim.z * anim_mlt * movement_mlt + player.recoil_anim * player.weapon.recoil_z * recoil_z_mlt
 
 	if arms.right != nil {
 		arms.right.pivot.position = {}

@@ -13,7 +13,9 @@ import shared "../shared"
 when ODIN_TEST {
 	@(test)
 	all_weapon_models_render :: proc(t: ^testing.T) {
+		logger := context.logger
 		context = runtime.default_context()
+		context.logger = logger
 		if !testing.expect(t, bool(glfw.Init()), "GLFW initialization failed") do return
 		defer glfw.Terminate()
 		glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
@@ -102,12 +104,13 @@ when ODIN_TEST {
 					camera.position = {14, 11, 20}
 					camera.rotation = {-0.15, math.atan2(f32(14), f32(20)), 0}
 				}
-				aims := [?]f32{0, 1}
+				aims := [?]f32{0, 0.5, 1}
 				for aim in aims {
-					if aim == 1 && (!first_person || weapon.no_aim || weapon.melee) { continue }
+					if aim > 0 && (!first_person || weapon.no_aim || weapon.melee) { continue }
 					player.aim_val = aim
 					camera.zoom = 1 + (weapon.zoom - 1) * aim
 					player_update_meshes(player, false)
+					weapon_movement_alignment_check(t, player, &camera, first_person && aim == 1)
 					scoped := first_person && weapon.scope && aim == 1
 					testing.expect(t, gun.visible != scoped, "ADS must hide scoped first-person weapons and restore them when unscoped")
 					if scoped {
@@ -123,6 +126,7 @@ when ODIN_TEST {
 					if first_person && aim == 1 {
 						// Sight/weapon pose in camera space must remain stable when
 						// looking around; testing only straight ahead hides rig errors.
+						mesh_update_transform_matrix(gun)
 						reference := camera.world_inverse_matrix * gun.transform_matrix * shared.Vec4{0, 0, 0, 1}
 						for direction in ([]shared.Vec2{{0.6, 1.4}, {-0.5, -2.8}}) {
 							player.direction = direction
@@ -162,5 +166,77 @@ when ODIN_TEST {
 			}
 		}
 		testing.expect(t, supported == 21, "render check must cover all 21 supported weapons")
+	}
+
+	weapon_pose_difference :: proc(a, b: shared.Mat4) -> f32 {
+		delta := a * shared.Vec4{0, 0, 0, 1} - b * shared.Vec4{0, 0, 0, 1}
+		difference := max(abs(delta.x), abs(delta.y), abs(delta.z))
+		// Check orientation as well as translation, including the sight's axis.
+		// Normalize out model scale: imported guns and sights use different units.
+		for point in ([]shared.Vec4{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}) {
+			axis := a * point
+			delta := (axis - b * point) / math.sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z)
+			difference = max(difference, abs(delta.x), abs(delta.y), abs(delta.z))
+		}
+		return difference
+	}
+
+	weapon_movement_alignment_check :: proc(t: ^testing.T, player: ^shared.Player, camera: ^Camera, aligned: bool) {
+		saved := player^
+		defer {
+			player^ = saved
+			player_update_meshes(player, false)
+		}
+		rig := cast(^Player_Mesh)player.mesh
+		arms := rig.arms[player.loadout_index]
+		meshes := [?]^Mesh{arms.weapon_right, arms.weapon_left, arms.attachment}
+		references: [3]shared.Mat4
+		camera_update_world_inverse_matrix(camera)
+		for mesh, i in meshes {
+			if mesh == nil { continue }
+			mesh_update_transform_matrix(mesh)
+			references[i] = camera.world_inverse_matrix * mesh.transform_matrix
+		}
+		for scenario in 0 ..< 5 {
+			player^ = saved
+			switch scenario {
+			case 0: // Step and breathing phases.
+				player.step_val, player.step_chase, player.idle_anim = 1.3, 0.7, 2.1
+			case 1: // Speed-dependent strafe/forward lean, including fast slides.
+				player.lean_anim.z = 0.9
+				player.bob_anim = {0.1, 0.3, 0.4}
+			case 2: // Mouse sway while turning.
+				player.lean_anim.x, player.lean_anim.y = 0.16, -0.16
+			case 3: // Jump and existing smoothed rotation when entering ADS.
+				player.jump_bob_y, player.jump_rotate, player.jump_rotate_mlt = 0.26, 0.15, 0.12
+			case 4: // Landing and existing smoothed pitch when entering ADS.
+				player.land_bob_y, player.land_bob_yr = -0.8, -0.3
+			}
+			player_update_meshes(player, false)
+			for mesh, i in meshes {
+				if mesh == nil { continue }
+				mesh_update_transform_matrix(mesh)
+				difference := weapon_pose_difference(references[i], camera.world_inverse_matrix * mesh.transform_matrix)
+				// Third-person rigs do not use the first-person jump twist.
+				if !aligned && !player.render_you && scenario == 3 { continue }
+				testing.expect(t, difference < 0.001 if aligned else difference > 0.001,
+					fmt.tprintf("%s motion %d mesh %d must %s (delta %f)", player.weapon.name, scenario, i,
+						"keep ADS aligned" if aligned else "animate outside ADS", difference))
+			}
+		}
+		if aligned {
+			player^ = saved
+			player.recoil.x = 0.2
+			player_update_meshes(player, false)
+			mesh_update_transform_matrix(arms.weapon_right)
+			testing.expect(t, weapon_pose_difference(references[0], camera.world_inverse_matrix * arms.weapon_right.transform_matrix) > 0.001,
+				"ADS alignment must preserve firing recoil")
+			player^ = saved
+			player.view_kick[3] = 0.2
+			player_update_meshes(player, false)
+			mesh_update_transform_matrix(arms.weapon_right)
+			testing.expect(t, weapon_pose_difference(references[0], camera.world_inverse_matrix * arms.weapon_right.transform_matrix) > 0.001,
+				"ADS alignment must preserve weapon kick")
+		}
 	}
 }

@@ -12,7 +12,9 @@ import shared "../shared"
 when ODIN_TEST {
 	@(test)
 	trooper_blaster_render :: proc(t: ^testing.T) {
+		logger := context.logger
 		context = runtime.default_context()
+		context.logger = logger
 		if !testing.expect(t, bool(glfw.Init()), "GLFW initialization failed") do return
 		defer glfw.Terminate()
 		glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
@@ -71,7 +73,7 @@ when ODIN_TEST {
 			player_update_meshes(player, false)
 			if aim == 1 {
 				testing.expect(t, abs(mesh.arms[0].anchor.position.y - (-0.722)) < 0.0001, "Blaster ADS must include both the reflex and weapon aim offsets")
-				testing.expect(t, abs(mesh.arms[0].anchor.rotation.x - (-0.02056)) < 0.0001, "ADS rig must match reference rotation without inverted animation weight")
+				testing.expect(t, abs(mesh.arms[0].anchor.rotation.x - player.weapon.rotation_offset_aim) < 0.0001, "ADS rig must use the calibrated rotation without residual idle or step bob")
 			}
 			gl.ClearColor(0, 0, 0, 1)
 			gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
