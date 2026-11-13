@@ -193,11 +193,34 @@ when ODIN_TEST {
 	}
 
 	@(test)
+	krunker_current_entry_matches_official_packet_shape :: proc(t: ^testing.T) {
+		counter: u8
+		encoded := krunker_ws_message("en", &counter, 0, 2, 5, 13)
+		defer delete(encoded)
+		messages, decoded_counter, err := kproto.krunker_msgpack_decode_packet(encoded[:])
+		if !testing.expect(t, len(err) == 0 && len(messages) == 1) { return }
+		packet, _ := messages[0].([]kproto.Krunker_Msgpack_Value)
+		if !testing.expect(t, len(packet) == 13, "official entry has opcode plus 12 arguments") { return }
+		loadout, _ := packet[1].([]kproto.Krunker_Msgpack_Value)
+		if !testing.expect(t, len(loadout) == 35, "current loadout includes titleIndex as its final field") { return }
+		testing.expect(t, kproto.krunker_world_i32(loadout[0], -1) == 5 && kproto.krunker_world_i32(loadout[5], -1) == 13, "class and secondary choices must survive the schema update")
+		testing.expect(t, kproto.krunker_world_i32(loadout[34], 0) == -1, "default entry has no equipped title")
+		testing.expect(t, kproto.krunker_world_i32(packet[2], -1) == 16 && kproto.krunker_world_i32(packet[3], -1) == 18, "entry version fields match the captured official bundle")
+		testing.expect(t, decoded_counter == 225 && encoded[len(encoded)-2] == 14 && encoded[len(encoded)-1] == 1, "first entry uses the captured 5fHFc trailer")
+		_, header_is_nil := packet[10].(kproto.Krunker_Msgpack_Nil)
+		testing.expect(t, header_is_nil)
+		for index in ([]int{4, 5, 6, 7, 8, 9, 11, 12}) {
+			flag, ok := packet[index].(bool)
+			testing.expect(t, ok && !flag, "entry flags retain the official argument positions")
+		}
+	}
+
+	@(test)
 	krunker_outgoing_counter_parity :: proc(t: ^testing.T) {
-		// Independent reference: the Rust hoster emits (x,y) before updating
-		// y by 5 and x by 2 plus its carry. Exercise multiple complete cycles,
+		// Official build 5fHFc: high nibble +14, low nibble +1 with carry.
+		// Exercise multiple complete cycles,
 		// interleaving control packets, bootstrap q and the live q encoder.
-		x, y: u8 = 2, 5
+		x, y: u8 = 14, 1
 		counter: u8
 		for index in 0 ..< 600 {
 			expected := (x << 4) | y
@@ -218,8 +241,8 @@ when ODIN_TEST {
 			testing.expect(t, ok && decoded == expected && counter == expected, "all send paths must follow the reference hoster's counter, including wraps")
 			delete(packet)
 			testing.expect(t, kproto.krunker_msgpack_counter_next(counter, "cptR") == counter, "CAPTCHA replies preserve the current counter")
-			x = (x + (y + 5 >= 16 ? 3 : 2)) & 15
-			y = (y + 5) & 15
+			x = (x + (y + 1 >= 16 ? 15 : 14)) & 15
+			y = (y + 1) & 15
 		}
 	}
 }

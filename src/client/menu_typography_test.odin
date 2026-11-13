@@ -69,6 +69,12 @@ when ODIN_TEST {
 		view := menuui.View{classes=classes[:],players=players[:],online=true,ready=true,selected_class=2,confirmed_class=0,confirmed_team=1,map_name="Sandstorm",mode="Hardpoint",lobby_name="EU competitive / A1B2",match_status="Waiting for players",resolution="1920 x 1080",sensitivity=1,
 			teams={{id=1,name="Alpha",capacity=4,available=true,score=42},{id=2,name="Bravo",capacity=4,available=true,score=38}}}
 		view.presentation = .COMPETITIVE
+		view.bindings = menuui.default_bindings()
+		view.audio_volumes = {0.8, 1, 0.8, 0.6}
+		view.resolution_options = []string{"1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440"}
+		view.monitor_names = []string{"Primary monitor", "Second monitor with a long name"}
+		view.visuals = menuui.DEFAULT_VISUAL_SETTINGS
+		view.max_anisotropy = 16
 		view.secondaries = secondaries[:]
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		sizes := [?][2]i32{{1280,720}, {1920,1080}, {2560,1600}}
@@ -80,13 +86,16 @@ when ODIN_TEST {
 			full_players: [32]menuui.Player
 			for &player, i in full_players { player = {name="Competitive player with a long name", class_name="Run N Gun", team=i32(i%2+1), is_you=i==0} }
 			play_y: f32
-			for scenario in 0..<32 {
+			for scenario in 0..<42 {
 				view.online=true; view.team_pending=false; view.class_pending=false; view.spawn_pending=false; view.join_status=""; view.active=false
 				view.presentation=.COMPETITIVE; view.ranked=false; view.team_selection=false; view.local_practice=false; view.ready=true; view.confirmed_team=1; view.play_reason=""
 				view.teams[0].name="Alpha"; view.teams[1].name="Bravo"
 				classes[2].name=selected_name; classes[2].weapon="SMG"
 				for &class in classes { class.available = shared.class_is_in_rotation(class.id) }
 				state.page=.HOME
+				state.settings_dropdown=.NONE; state.binding_capture=0
+				view.visuals = menuui.DEFAULT_VISUAL_SETTINGS
+				view.advanced_sensitivity = false
 				view.players=players[:]; view.teams[0].capacity=4; view.teams[1].capacity=4; view.selection_status=""
 				view.secondary_name="Pistol"; view.selected_secondary=2; view.secondary_reason=""; view.secondary_pending=false
 				view.respawn_remaining=0
@@ -94,7 +103,7 @@ when ODIN_TEST {
 				switch scenario {
 				case 0:
 				case 1: view.team_pending=true; view.requested_team=2; view.class_pending=true; view.spawn_pending=true; view.selection_status="Awaiting server confirmation"
-				case 2: state.page=.SETTINGS
+				case 2: state.page=.SETTINGS; state.settings_tab=.MAIN
 				case 3: state.page=.SESSION; menuui.set_invite(&state,"https://krunker.io/?game=FRA:long-invite-code")
 				case 4: view.online=false; view.join_status="Connection failed. Check your invite and try again."; menuui.set_invite(&state,"")
 				case 5: view.active=true
@@ -106,7 +115,7 @@ when ODIN_TEST {
 				case 11: view.presentation=.STANDARD; view.active=true
 				case 12: view.presentation=.STANDARD; state.page=.CLASSES
 				case 13: view.presentation=.STANDARD; state.page=.CLASSES; view.selection_status="Could not send class selection. Please try again."; state.focus=clay.ID("ClassChoice",4).id
-				case 14: view.presentation=.STANDARD; state.page=.SETTINGS
+				case 14: view.presentation=.STANDARD; state.page=.SETTINGS; state.settings_tab=.MAIN
 				case 15: view.presentation=.STANDARD; view.online=false; view.local_practice=true; view.team_selection=true
 				case 16: view.presentation=.STANDARD; view.ready=false
 				case 17: view.ranked=true
@@ -122,10 +131,30 @@ when ODIN_TEST {
 				case 29: state.page=.CLASSES; view.ranked=true
 				case 30: for &class in classes { class.available=true }
 				case 31: for &class in classes { class.available=false }
+				case 32: state.page=.SETTINGS; state.settings_tab=.VIDEO
+				case 33: state.page=.SETTINGS; state.settings_tab=.AUDIO
+				case 34: state.page=.SETTINGS; state.settings_tab=.HUD
+				case 35: state.page=.SETTINGS; state.settings_tab=.VIDEO; state.settings_dropdown=.DISPLAY_MODE; state.focus=clay.ID("SettingsOption",1).id
+				case 36: state.page=.SETTINGS; state.settings_tab=.INPUT; state.binding_capture=1
+				case 37: state.page=.SETTINGS; state.settings_tab=.VISUALS
+				case 38:
+					state.page=.SETTINGS; state.settings_tab=.VISUALS; state.settings_active=false
+					for group in menuui.Visual_Color { view.visuals.color_override[group]=true }
+				case 39: state.page=.SETTINGS; state.settings_tab=.GAMEPLAY
+				case 40: state.page=.SETTINGS; state.settings_tab=.VIDEO
+				case 41: state.page=.SETTINGS; state.settings_tab=.MAIN; state.settings_active=false; view.advanced_sensitivity=true
 				case 23: view.presentation=.STANDARD; state.page=.LOADOUT; classes[2].name="An exceptionally long selected class name"; classes[2].weapon="An exceptionally long primary weapon name"
 				}
 				page := state.page
 				commands := menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+				if scenario == 40 {
+					for control in state.controls[:state.control_count] {
+						if control.id.id == clay.ID("Anisotropy").id { menuui.focus_visible(control, .SETTINGS) }
+					}
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+					menuui.activate(&state, {id=clay.ID("Anisotropy"), action={kind=.SETTINGS_DROPDOWN, index=i32(menuui.Settings_Dropdown.ANISOTROPY)}})
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+				}
 				if scenario == 21 {
 					// The final secondary must remain reachable in the loadout grid.
 					state.focus = clay.ID("SecondaryChoice", 16).id
@@ -141,7 +170,36 @@ when ODIN_TEST {
 					testing.expect(t, action.kind == .SELECT_SECONDARY && action.index == 21,
 						"Techy-9 must remain selectable separately from Auto Pistol")
 				}
-					testing.expect(t, state.errors == 0, "menu layout reported an error")
+				testing.expect(t, state.errors == 0, "menu layout reported an error")
+				if page == .SETTINGS || page == .CONTROLS {
+					overlay := clay.GetElementData(clay.ID("Overlay")).boundingBox
+					for id in ([]string{"SettingsSidebar", "SettingsHeading", "SettingsPanel", "SettingsFooter", "SettingsSave", "SettingsCancel"}) {
+						box := clay.GetElementData(clay.ID(id)).boundingBox
+						testing.expectf(t, box.width > 0 && box.height > 0 && box.x >= overlay.x-1 && box.y >= overlay.y-1 && box.x+box.width <= overlay.x+overlay.width+1 && box.y+box.height <= overlay.y+overlay.height+1,
+							"settings section %s must fit at %v", id, size)
+					}
+					for control in state.controls[:state.control_count] {
+						box := clay.GetElementData(control.id).boundingBox
+						if control.action.kind == .BIND_KEY {
+							testing.expect(t, box.width > 200*state.scale && box.height >= 44*state.scale && box.x >= overlay.x && box.x+box.width <= overlay.x+overlay.width,
+								"both binding columns must fit horizontally and remain large enough to click")
+							continue // The full action list scrolls vertically.
+						}
+						if state.settings_dropdown == .NONE && (state.settings_tab == .VISUALS || state.settings_tab == .VIDEO || state.settings_tab == .MAIN) && control.action.kind != .SETTINGS_TAB && control.action.kind != .SETTINGS_SAVE && control.action.kind != .SETTINGS_CANCEL {
+							testing.expect(t, box.width > 0 && box.height > 0 && box.x >= overlay.x-1 && box.x+box.width <= overlay.x+overlay.width+1, "scrolling settings must fit horizontally")
+							continue
+						}
+						testing.expectf(t, box.width > 0 && box.height > 0 && box.x >= overlay.x-1 && box.y >= overlay.y-1 && box.x+box.width <= overlay.x+overlay.width+1 && box.y+box.height <= overlay.y+overlay.height+1,
+							"settings controls must remain accessible at %v", size)
+					}
+					if state.settings_tab == .MAIN || state.settings_tab == .AUDIO {
+						name := "MasterVolume"
+						track := clay.GetElementData(clay.ID(name)).boundingBox
+						thumb := clay.GetElementData(clay.ID(fmt.tprintf("%sThumb", name))).boundingBox
+						testing.expect(t, thumb.height > track.height*0.5 && thumb.y >= track.y && thumb.y+thumb.height <= track.y+track.height,
+							"sliders need a visible thumb centered inside the interactive track")
+					}
+				}
 				if view.presentation == .COMPETITIVE && (page == .HOME || page == .CLASSES) && view.online {
 					prefix := page == .HOME ? "Class" : "ClassChoice"
 					parent := clay.GetElementData(clay.ID(page == .HOME ? "ClassStrip" : "ClassPicker")).boundingBox
@@ -178,6 +236,7 @@ when ODIN_TEST {
 				labels := [?][2]string{
 					{"Quit", "Quit"}, {"Enter Game", "Play"}, {"Respawn", "Play"}, {"Resume", "Play"}, {"Join", "JoinLink"}, {"Paste", "Paste"},
 					{"Change class", "ChangeClass"}, {"Done", "LoadoutDone"},
+					{"Save", "SettingsSave"}, {"Cancel", "SettingsCancel"},
 				}
 				for command in commands.internalArray[:commands.length] {
 					if command.commandType != .Text { continue }

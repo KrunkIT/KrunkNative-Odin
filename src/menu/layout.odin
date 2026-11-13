@@ -44,6 +44,7 @@ play_reason :: proc(view: View) -> string {
 
 build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32) -> clay.ClayArray(clay.RenderCommand) {
 	clay.SetCurrentContext(state.ctx)
+	prepare_settings(state, view)
 	clay.SetLayoutDimensions({width, height})
 	clay.SetPointerState(input.pointer, input.down)
 	clay.UpdateScrollContainers(false, input.scroll, min(delta, 0.1))
@@ -58,7 +59,7 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 			spacer()
 			text(fmt.tprintf("%s / %s", view.map_name, view.mode), 20, s, MUTED)
 			spacer()
-			text(view.online && view.ready ? (view.ranked ? "Ranked" : view.presentation == .COMPETITIVE ? "Competitive" : "Connected") : view.local_practice ? "Local practice" : view.online || view.connecting ? "Connecting" : "Join a lobby", 16, s)
+			text(view.online && view.ready ? (view.ranked ? "Ranked" : view.presentation == .COMPETITIVE ? "Competitive" : "Connected") : view.local_practice ? "Local practice" : view.auth_pending && !view.connecting ? "Logging in" : view.online || view.connecting ? "Connecting" : "Join a lobby", 16, s)
 		}
 		if clay.UI(clay.ID("Page"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = u16(gap*s), childAlignment = {x = .Center}}}) {
 			if view.online && view.ready || view.local_practice {
@@ -68,7 +69,7 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 			else {
 				spacer()
 				if clay.UI(clay.ID("ConnectionScreen"))({layout = {sizing = {width = clay.SizingFixed(760*s)}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(32*s)), childGap = u16(24*s)}, backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(4*s)}) {
-					text(view.online || view.connecting ? "Connecting to lobby" : "Join a lobby", 32, s)
+					text(view.auth_pending && !view.connecting ? "Logging in" : view.online || view.connecting ? "Connecting to lobby" : "Join a lobby", 32, s)
 					if state.page == .HOME { session(state, view) }
 					button(state, "Local practice", "Practice", {kind = .LOCAL_PRACTICE})
 				}
@@ -87,7 +88,9 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 			// Modal controls replace the lobby's interaction list (mouse and Tab).
 			state.control_count = 0
 			if clay.UI(clay.ID("ModalScrim"))({layout = {sizing = {width = clay.SizingFixed(width), height = clay.SizingFixed(height)}, childAlignment = {x = .Center, y = .Center}}, backgroundColor = {0,0,0,160}, floating = {attachTo = .Root, zIndex = 10}}) {
-				if clay.UI(clay.ID("Overlay"))({layout = {sizing = {width = clay.SizingFixed((state.page == .LOADOUT ? 1040 : 880)*s), height = clay.SizingFixed(752*s)}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(32*s)), childGap = u16(16*s)}, backgroundColor = {20,23,28,255}, cornerRadius = clay.CornerRadiusAll(4*s), border = {color = {75,80,88,255}, width = clay.BorderOutside(1)}}) {
+				if state.page == .SETTINGS || state.page == .CONTROLS {
+					settings_window(state, view)
+				} else if clay.UI(clay.ID("Overlay"))({layout = {sizing = {width = clay.SizingFixed((state.page == .LOADOUT ? 1040 : 880)*s), height = clay.SizingFixed(752*s)}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(32*s)), childGap = u16(16*s)}, backgroundColor = {20,23,28,255}, cornerRadius = clay.CornerRadiusAll(4*s), border = {color = {75,80,88,255}, width = clay.BorderOutside(1)}}) {
 					if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(52*s)}}}) {
 						if clay.UI()({layout = {sizing = {width = clay.SizingFixed(136*s)}}}) { button(state, "Back", "Back", {index = i32(back_page(state))}) }
 						if state.page == .LOADOUT {
@@ -97,8 +100,7 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 					}
 					switch state.page {
 					case .HOME:
-					case .SETTINGS: settings(state, view)
-					case .CONTROLS: controls(state)
+					case .SETTINGS, .CONTROLS:
 					case .CLASSES: class_picker(state, view)
 					case .LOADOUT: class_loadout(state, view)
 					case .SESSION:
@@ -110,7 +112,13 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 			}
 		}
 	}
-	return clay.EndLayout(max(0, delta))
+	commands := clay.EndLayout(max(0, delta))
+	if state.settings_dropdown != .NONE {
+		for control in state.controls[:state.control_count] {
+			if control.id.id == state.focus { focus_visible(control, state.page); break }
+		}
+	}
+	return commands
 }
 
 lobby :: proc(state: ^State, view: View, available_width: f32) {
@@ -370,6 +378,12 @@ shorten :: proc(value: string, limit: int) -> string {
 
 session :: proc(state: ^State, view: View) {
 	s := state.scale
+	if view.browser_access_supported {
+		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(16*s)}}) {
+			button(state, view.auth_pending ? "Logging in..." : "Login", "Login", {kind = .LOGIN}, enabled = !view.auth_pending && !view.connecting)
+			button(state, "Forget browser session", "ForgetBrowserSession", {kind = .FORGET_BROWSER_SESSION})
+		}
+	}
 	text("Invite link", 18, s, MUTED)
 	id := clay.ID("Invite")
 	register(state, {id = id, enabled = true, action = {kind = .EDIT_INVITE}})
@@ -384,8 +398,9 @@ session :: proc(state: ^State, view: View) {
 	}
 	if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(16*s)}}) {
 		button(state, "Paste", "Paste", {kind = .PASTE})
-		button(state, view.connecting ? "Connecting..." : "Join", "JoinLink", {kind = .JOIN_LINK}, primary = true, enabled = len(invite(state)) > 0 && !view.connecting)
+		button(state, view.auth_pending && view.connecting ? "Preparing access..." : view.connecting ? "Connecting..." : "Join", "JoinLink", {kind = .JOIN_LINK}, primary = true, enabled = len(invite(state)) > 0 && !view.connecting && !view.auth_pending)
 	}
+	if view.connecting || view.auth_pending { button(state, "Cancel", "CancelJoin", {kind = .CANCEL_JOIN}) }
 	text(len(view.join_status) > 0 ? view.join_status : "Enter an invite to connect to a lobby.", 18, s, MUTED)
 	if view.online || view.local_practice {
 		rule(s)
@@ -394,79 +409,5 @@ session :: proc(state: ^State, view: View) {
 			button(state, "Copy current invite", "CopyInvite", {kind = .COPY_INVITE}, enabled = len(view.current_invite) > 0)
 			button(state, "Leave session", "LeaveSession", {kind = .LEAVE_SESSION})
 		}
-	}
-}
-
-settings :: proc(state: ^State, view: View) {
-	s := state.scale
-	text("Settings", 32, s)
-	text("Video / Input / Audio / HUD", 16, s, MUTED)
-	button(state, "Controls", "Controls", {index = i32(Page.CONTROLS)})
-	if clay.UI(clay.ID("SettingsPanel"))({
-		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(26 * s)), childGap = u16(18 * s)},
-		backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(8 * s), clip = {vertical = true, childOffset = clay.GetScrollOffset()},
-	}) {
-		text("Display mode", 13, s, MUTED)
-		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(12 * s)}}) {
-			labels := [3]string{"Windowed", "Borderless", "Fullscreen"}
-			for label, i in labels {
-				button(state, label, "DisplayMode", {kind = .DISPLAY_MODE, index = i32(i)}, view.display_mode == i32(i))
-			}
-		}
-		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childGap = u16(12 * s), childAlignment = {y = .Center}}}) {
-			text("Resolution", 15, s)
-			spacer()
-			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(55 * s)}}}) { button(state, "<", "ResolutionMinus", {kind = .RESOLUTION, index = -1}) }
-			text(view.resolution, 17, s, ACCENT)
-			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(55 * s)}}}) { button(state, ">", "ResolutionPlus", {kind = .RESOLUTION, index = 1}) }
-		}
-		rule(s)
-		settings_slider(state, "Mouse sensitivity", "Sensitivity", view.sensitivity, 0.1, 2, {kind = .SENSITIVITY})
-		text("Drag to adjust. Use Left / Right when focused.", 12, s, MUTED)
-		rule(s)
-		text("Audio", 22, s)
-		labels := [4]string{"Master volume", "Effects volume", "Footsteps volume", "UI volume"}
-		ids := [4]string{"MasterVolume", "EffectsVolume", "FootstepsVolume", "UiVolume"}
-		for label, i in labels {
-			settings_slider(state, label, ids[i], view.audio_volumes[i], 0, 1, {kind = .AUDIO_VOLUME, index = i32(i)})
-		}
-		rule(s)
-		if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childAlignment = {y = .Center}}}) {
-			text("Show FPS", 15, s)
-			spacer()
-			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(140 * s)}}}) { button(state, view.show_fps ? "ON" : "OFF", "Fps", {kind = .FPS}, view.show_fps) }
-		}
-	}
-}
-
-settings_slider :: proc(state: ^State, label, name: string, value, minimum, maximum: f32, action: Action) {
-	s := state.scale
-	stat(label, fmt.tprintf("%d%%", i32(value * 100 + 0.5)), s)
-	id := clay.ID(name)
-	register(state, {id = id, enabled = true, slider = true, action = action, slider_min = minimum, slider_max = maximum, slider_step = 0.05})
-	if clay.UI(id)({
-		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(38 * s)}, childAlignment = {y = .Center}},
-		border = {color = ACCENT, width = clay.BorderOutside(state.focus == id.id ? 1 : 0)},
-	}) {
-		progress := clamp((value - minimum) / (maximum - minimum), 0.001, 0.999)
-		if clay.UI()({layout = {sizing = {width = clay.SizingPercent(progress), height = clay.SizingFixed(8 * s)}}, backgroundColor = ACCENT}) {}
-		if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(8 * s)}}, backgroundColor = SURFACE}) {}
-	}
-}
-
-controls :: proc(state: ^State) {
-	s := state.scale
-	text("LEARN THE CONTROLS", 32, s)
-	text("Keyboard and mouse", 16, s, MUTED)
-	if clay.UI(clay.ID("ControlsPanel"))({
-		layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(u16(26 * s)), childGap = u16(15 * s)},
-		backgroundColor = PANEL, cornerRadius = clay.CornerRadiusAll(8 * s), clip = {vertical = true, childOffset = clay.GetScrollOffset()},
-	}) {
-		rows := [9][2]string{{"MOVE", "W / A / S / D"}, {"JUMP", "SPACE"}, {"CROUCH / SLIDE", "LEFT SHIFT"}, {"FIRE / AIM", "LEFT / RIGHT MOUSE"}, {"RELOAD", "R"}, {"SECONDARY / MELEE", "E / Q"}, {"MENU / RESUME", "ESC"}, {"FULLSCREEN", "F11"}, {"WALL JUMP", "RELEASE + PRESS SPACE AT A WALL"}}
-		for row in rows {
-			stat(row[0], row[1], s)
-			rule(s)
-		}
-		text("Wall jumping is available to Run N Gun, Agent, and Runner. Hold crouch against a wall while falling to slow your descent.", 14, s, MUTED)
 	}
 }

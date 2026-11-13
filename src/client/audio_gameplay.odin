@@ -26,7 +26,7 @@ client_audio_present :: proc(client: ^Client, event: shared.Presentation_Event) 
 	case .RELOAD:
 		if local { audio_play_effect(audio, "reload_1", .EFFECTS, 0.7) }
 	case .SWAP:
-		if local { audio_play_effect(audio, "select_0", .EFFECTS, 0.45) }
+		// Weapon switching is silent.
 	case .DAMAGE:
 		if local { audio_play_effect(audio, fmt.tprintf("takedmg_%d", variant), .EFFECTS, 0.65, priority = 4) }
 	case .HIT:

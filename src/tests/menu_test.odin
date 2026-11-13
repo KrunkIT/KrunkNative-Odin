@@ -86,28 +86,65 @@ test_menu :: proc() -> bool {
 	state.focus = clay.ID("Play").id
 	if menu_test_frame(&state, view, {enter=true}).kind != .PLAY { return false }
 	menu_test_frame(&state, view, {})
+	view.audio_volumes = {0.8, 1, 0.5, 0}
+	view.bindings = menuui.default_bindings()
+	view.resolution_options = []string{"1280 x 720", "1920 x 1080", "2560 x 1440"}
+	view.monitor_names = []string{"Primary monitor", "Second monitor"}
 	menu_test_click(&state, view, clay.ID("Settings",u32(menuui.Page.SETTINGS)))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.MAIN)))
 	menu_test_frame(&state, view, {})
 	if state.page != .SETTINGS { return false }
 	// Lobby controls cannot activate through an overlay.
+	draft_before_lobby_click := state.settings_draft
 	if menu_test_click(&state, view, clay.ID("Play")).kind != .NONE { return false }
+	// The same coordinates can legitimately hit a settings control.
+	state.settings_draft = draft_before_lobby_click
 	menu_test_frame(&state, view, {})
-	box = clay.GetElementData(clay.ID("Sensitivity")).boundingBox
-	input := menuui.Input{pointer={box.x+box.width*0.75,box.y+box.height/2},down=true}
-	value := menu_test_frame(&state, view, input)
-	if value.kind != .SENSITIVITY || abs(value.value-1.525)>0.001 { return false }
+	menu_test_click(&state, view, clay.ID("MouseDPI"))
+	menu_test_frame(&state, view, {text="1600"})
+	menu_test_frame(&state, view, {enter=true})
 	menu_test_frame(&state, view, {})
-	state.focus = clay.ID("Sensitivity").id
-	value = menu_test_frame(&state, view, {right=true})
-	if value.kind != .SENSITIVITY || abs(value.value-1.05)>0.001 { return false }
+	if state.settings_draft.mouse_dpi != 1600 || abs(menuui.cm360_from_sensitivity(state.settings_draft.sensitivity, 1600)-menuui.cm360_from_sensitivity(1, menuui.DEFAULT_MOUSE_DPI))>0.0001 { fmt.println("DPI changes must preserve cm/360"); return false }
+	menu_test_click(&state, view, clay.ID("Sensitivity"))
+	menu_test_frame(&state, view, {text="`35.5"})
+	value := menu_test_frame(&state, view, {enter=true})
+	if value.kind != .NONE || abs(menuui.cm360_from_sensitivity(state.settings_draft.sensitivity,1600)-35.5)>0.0001 || view.sensitivity != 1 { fmt.println("Sensitivity must accept cm/360 without changing committed values"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Sensitivity"))
+	menu_test_frame(&state, view, {text="0"})
+	menu_test_frame(&state, view, {enter=true})
+	if !state.number_invalid || state.number_edit != .CM360 || abs(menuui.cm360_from_sensitivity(state.settings_draft.sensitivity,1600)-35.5)>0.0001 { fmt.println("Invalid cm/360 must not change the draft"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {escape=true})
+	if state.page != .SETTINGS || state.number_edit != .NONE { fmt.println("Escape must cancel only number entry"); return false }
+	menu_test_frame(&state, view, {})
+	if clay.GetElementData(clay.ID("AdsSensitivity")).found { fmt.println("ADS entry must be hidden until Advanced is enabled"); return false }
+	menu_test_click(&state, view, clay.ID("AdvancedSensitivity"))
+	menu_test_frame(&state, view, {})
+	if !state.settings_draft.advanced_sensitivity || !clay.GetElementData(clay.ID("AdsSensitivity")).found { fmt.println("Advanced sensitivity must reveal the ADS entry"); return false }
+	menu_test_click(&state, view, clay.ID("AdsSensitivity"))
+	menu_test_frame(&state, view, {text="60"})
+	menu_test_frame(&state, view, {enter=true})
+	menu_test_frame(&state, view, {})
+	if abs(menuui.cm360_from_sensitivity(state.settings_draft.ads_sensitivity,1600)-60)>0.0001 || abs(menuui.cm360_from_sensitivity(state.settings_draft.sensitivity,1600)-35.5)>0.0001 { fmt.println("ADS entry must be independent of hipfire"); return false }
+	menu_test_click(&state, view, clay.ID("MouseDPI"))
+	menu_test_frame(&state, view, {text="3200"})
+	menu_test_frame(&state, view, {enter=true})
+	menu_test_frame(&state, view, {})
+	if abs(menuui.cm360_from_sensitivity(state.settings_draft.ads_sensitivity,3200)-60)>0.0001 || abs(menuui.cm360_from_sensitivity(state.settings_draft.sensitivity,3200)-35.5)>0.0001 { fmt.println("DPI changes must preserve both sensitivities"); return false }
+	menu_test_click(&state, view, clay.ID("InvertMouse"))
+	menu_test_frame(&state, view, {})
+	if !state.settings_draft.invert_mouse || view.invert_mouse || view.advanced_sensitivity { fmt.println("Advanced and inversion changes must remain staged"); return false }
 	// Audio sliders retain their own channel and range when using the keyboard.
-	view.audio_volumes = {0.8, 1, 0.5, 0}
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.AUDIO)))
 	for name, i in ([4]string{"MasterVolume", "EffectsVolume", "FootstepsVolume", "UiVolume"}) {
 		menu_test_frame(&state, view, {})
 		state.focus = clay.ID(name).id
 		value = menu_test_frame(&state, view, {right = true})
-		if value.kind != .AUDIO_VOLUME || value.index != i32(i) || abs(value.value - min(1, view.audio_volumes[i]+0.05)) > 0.001 {
-			fmt.println("Audio slider keyboard routing failed", name, value); return false
+		if value.kind != .NONE || abs(state.settings_draft.audio_volumes[i] - min(1, view.audio_volumes[i]+0.05)) > 0.001 {
+			fmt.println("Audio slider keyboard routing failed", name, value, state.settings_tab, state.number_edit, state.settings_draft.audio_volumes); return false
 		}
 	}
 	// Tab scrolls focused audio controls into view; dragging adjusts that channel.
@@ -117,10 +154,86 @@ test_menu :: proc() -> bool {
 	menu_test_frame(&state, view, {})
 	box = clay.GetElementData(clay.ID("UiVolume")).boundingBox
 	value = menu_test_frame(&state, view, {pointer = {box.x+box.width*0.25, box.y+box.height/2}, down = true})
-	if value.kind != .AUDIO_VOLUME || value.index != 3 || abs(value.value-0.25)>0.001 { fmt.println("Audio slider dragging failed", value); return false }
+	if value.kind != .NONE || abs(state.settings_draft.audio_volumes[3]-0.25)>0.001 { fmt.println("Audio slider dragging failed", value); return false }
+	// Clicking the thumb itself must keep dragging the slider underneath it.
+	menu_test_frame(&state, view, {})
+	box = clay.GetElementData(clay.ID("UiVolumeThumb")).boundingBox
+	menu_test_frame(&state, view, {pointer = {box.x+box.width/2, box.y+box.height/2}, down = true})
+	if state.pressed != clay.ID("UiVolume").id { fmt.println("Volume thumb blocked slider input"); return false }
 	menu_test_frame(&state, view, {})
 	view.active = true
 	if menu_test_frame(&state, view, {escape=true}).kind != .NONE || state.page != .HOME { return false }
+	// Escape cancels the entire draft, including edits on other tabs.
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Settings",u32(menuui.Page.SETTINGS)))
+	menu_test_frame(&state, view, {})
+	if state.settings_draft.sensitivity != view.sensitivity || state.settings_draft.audio_volumes != view.audio_volumes { fmt.println("Settings cancellation failed"); return false }
+	if state.settings_draft.advanced_sensitivity || state.settings_draft.invert_mouse { fmt.println("Cancel must discard Advanced and inversion changes"); return false }
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.INPUT)))
+	menu_test_frame(&state, view, {})
+	// Both slots are editable; capture consumes navigation keys and buttons.
+	menu_test_click(&state, view, clay.ID("Binding", 1))
+	if state.binding_capture != 2 { fmt.println("Key binding listener did not open"); return false }
+	if menu_test_frame(&state, view, {binding_pressed = 'I'}).kind != .NONE || state.settings_draft.bindings[.FORWARD] != ([2]i32{'W', 'I'}) || view.bindings[.FORWARD][1] != 0 { fmt.println("Alternate binding capture failed"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Binding", 1))
+	menu_test_frame(&state, view, {binding_pressed = 96})
+	if state.binding_capture == 0 || !state.binding_reserved { fmt.println("Backtick must remain reserved"); return false }
+	menu_test_frame(&state, view, {escape = true})
+	if state.page != .SETTINGS || state.binding_capture != 0 || state.settings_draft.bindings[.FORWARD][1] != 'I' { fmt.println("Escape must cancel only key capture"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Binding", 1))
+	menu_test_frame(&state, view, {binding_pressed = -4})
+	if state.settings_draft.bindings[.FORWARD][1] != -4 { fmt.println("Mouse binding capture failed"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Binding", 1))
+	menu_test_frame(&state, view, {binding_pressed = 261})
+	if state.settings_draft.bindings[.FORWARD][1] != 0 { fmt.println("Delete must clear a binding"); return false }
+	menu_test_frame(&state, view, {})
+	box = clay.GetElementData(clay.ID("SettingsPanel")).boundingBox
+	menu_test_frame(&state, view, {pointer = {box.x+box.width/2, box.y+box.height/2}, scroll = {0, -100}})
+	menu_test_frame(&state, view, {})
+	last_binding := clay.GetElementData(clay.ID("BindingRow", u32(menuui.Binding_Action.FULLSCREEN))).boundingBox
+	if !clay.GetElementData(clay.ID("SettingsScrollTrack")).found || last_binding.y < box.y || last_binding.y+last_binding.height > box.y+box.height+1 { fmt.println("Input settings must scroll to the final binding"); return false }
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.VIDEO)))
+	menu_test_frame(&state, view, {})
+	if abs(clay.GetScrollContainerData(clay.ID("SettingsPanel")).scrollPosition[1]) > 0.001 { fmt.println("Changing settings tab must reset scrolling"); return false }
+	menu_test_click(&state, view, clay.ID("DisplayMode"))
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {down_key = true})
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {down_key = true})
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {enter = true})
+	if state.settings_draft.display_mode != 2 || state.focus != clay.ID("DisplayMode").id { fmt.println("Display mode lost keyboard focus"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Resolution"))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsOption", 1))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Monitor"))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsOption", 1))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("VSync"))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.HUD)))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Fps"))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("HudTimer"))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("HudRoundScore", 1))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("HudGameScore", 2))
+	menu_test_frame(&state, view, {})
+	value = menu_test_click(&state, view, clay.ID("SettingsSave"))
+	if value.kind != .SETTINGS_SAVE || state.page != .HOME || state.settings_draft.display_mode != 2 || state.settings_draft.resolution_index != 1 || !state.settings_draft.show_fps { fmt.println("Settings Save failed"); return false }
+	if !state.settings_draft.vsync || state.settings_draft.monitor_index != 1 || state.settings_draft.hud != (menuui.HUD_Settings{true, true, true}) { fmt.println("Video and HUD settings were not staged"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Settings",u32(menuui.Page.SETTINGS)))
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("SettingsCancel")).kind != .NONE || state.page != .HOME { fmt.println("Settings Cancel failed"); return false }
 	menu_test_frame(&state, view, {})
 	if menu_test_frame(&state, view, {escape=true}).kind != .PLAY { return false }
 	// Offline connection screen: editable invite, paste, join, and errors.
@@ -128,17 +241,75 @@ test_menu :: proc() -> bool {
 	view.join_status="Connection failed. Please check the invite and try again."
 	menu_test_frame(&state, view, {})
 	if menu_test_click(&state, view, clay.ID("JoinLink")).kind != .NONE { return false }
+	if clay.GetElementData(clay.ID("Login")).found { return false }
+	view.browser_access_supported = true
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("Login")).kind != .LOGIN { fmt.println("Login must be available without an invite"); return false }
 	menu_test_click(&state, view, clay.ID("Invite"))
 	menu_test_frame(&state, view, {text="krunk://localhost:21015"})
 	if menuui.invite(&state) != "krunk://localhost:21015" { return false }
 	menu_test_frame(&state, view, {})
 	if menu_test_click(&state, view, clay.ID("JoinLink")).kind != .JOIN_LINK { return false }
+	view.auth_pending = true
+	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("Login")).kind != .NONE || menu_test_click(&state, view, clay.ID("JoinLink")).kind != .NONE { fmt.println("Pending Login must disable duplicate Login and Join"); return false }
+	if menu_test_click(&state, view, clay.ID("CancelJoin")).kind != .CANCEL_JOIN { return false }
+	view.auth_pending = false
 	// Opening session from the connection screen must not duplicate field IDs.
 	state.page=.SESSION
 	menu_test_frame(&state, view, {})
+	if menu_test_click(&state, view, clay.ID("Login")).kind != .LOGIN { fmt.println("Session controls must expose Login"); return false }
 	if state.errors != 0 { return false }
 	fmt.println("Competitive lobby layout, modal, selection, invite, mouse and keyboard tests OK")
-	return test_standard_menu() && test_lobby_packets() && test_live_lobby_records()
+	return test_graphics_menu() && test_standard_menu() && test_lobby_packets() && test_live_lobby_records()
+}
+
+test_graphics_menu :: proc() -> bool {
+	state := menuui.State{page=.SETTINGS}
+	if !menuui.init(&state, menu_test_measure, nil) { return false }
+	defer menuui.fini(&state)
+	view := menuui.View{visuals=menuui.DEFAULT_VISUAL_SETTINGS, max_anisotropy=4, sensitivity=1}
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.GAMEPLAY)))
+	menu_test_frame(&state, view, {})
+	if state.settings_tab != .GAMEPLAY || state.control_count != len(menuui.Settings_Tab)+3 { fmt.println("Gameplay must expose its FOV slider"); return false }
+	state.focus = clay.ID("FieldOfView").id
+	menu_test_frame(&state, view, {right=true})
+	if state.settings_draft.fov != 91 { fmt.println("FOV keyboard adjustment must start from the current draft angle"); return false }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.VISUALS)))
+	menu_test_frame(&state, view, {})
+	state.focus = clay.ID("Visual1").id // Gamma.
+	menu_test_frame(&state, view, {right=true})
+	if abs(state.settings_draft.visuals.values[.GAMMA]-1.05)>0.001 || view.visuals.values[.GAMMA] != 1 { fmt.println("Visual sliders must stage changes from their own value"); return false }
+	menu_test_frame(&state, view, {})
+	if clay.GetElementData(clay.ID("Visual6")).found || clay.GetElementData(clay.ID("VisualOverride0")).found || clay.GetElementData(clay.ID("VisualColor0_0")).found { fmt.println("Fog distance and color overrides must not be editable in Settings"); return false }
+	// Tab to the last control must bring the reset button into the scroll viewport.
+	state.focus = clay.ID("Visual5").id
+	menu_test_frame(&state, view, {tab=true})
+	menu_test_frame(&state, view, {})
+	box := clay.GetElementData(clay.ID("ResetVisuals")).boundingBox
+	panel := clay.GetElementData(clay.ID("SettingsPanel")).boundingBox
+	if state.focus != clay.ID("ResetVisuals").id || box.y < panel.y-1 || box.y+box.height > panel.y+panel.height+1 { fmt.println("Reset visuals must remain reachable by keyboard"); return false }
+	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.VIDEO)))
+	menu_test_frame(&state, view, {})
+	for control in state.controls[:state.control_count] { if control.id.id == clay.ID("TextureFiltering").id { menuui.focus_visible(control, .SETTINGS) } }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("TextureFiltering"))
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("SettingsOption", 1))
+	menu_test_frame(&state, view, {})
+	for control in state.controls[:state.control_count] { if control.id.id == clay.ID("Anisotropy").id { menuui.focus_visible(control, .SETTINGS) } }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, clay.ID("Anisotropy"))
+	menu_test_frame(&state, view, {})
+	if state.control_count != 3 { fmt.println("Anisotropic filtering must list only supported levels"); return false }
+	menu_test_click(&state, view, clay.ID("SettingsOption", 2))
+	menu_test_frame(&state, view, {})
+	value := menu_test_click(&state, view, clay.ID("SettingsSave"))
+	if value.kind != .SETTINGS_SAVE || !state.settings_draft.quality.smooth_textures || state.settings_draft.quality.anisotropy != 4 || abs(state.settings_draft.visuals.values[.GAMMA]-1.05)>0.001 { fmt.println("Graphics changes must survive tab switches and Save"); return false }
+	fmt.println("Visuals, Gameplay FOV, graphics scrolling, supported quality choices and staging tests OK")
+	return true
 }
 
 test_standard_menu :: proc() -> bool {

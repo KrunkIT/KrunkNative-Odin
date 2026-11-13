@@ -20,6 +20,70 @@ with Odin!
 > The native protocol is project-owned and intentionally targets only this native client and
 > dedicated server.
 
+## Browser access on Windows
+
+Click **Login** on the connection screen or under **Session / Invite** to log in
+before entering an invite. Login opens the browser, caches access, and leaves you
+in the current session. Later, paste an invite and press **Join** to use that access.
+You can also press **Join** directly to log in and continue with the same invite.
+Both actions use the official site in an embedded WebView2 window. Krodin waits for
+a nonempty `krunker_username` in the official page's localStorage, then waits one
+second for the login handler to finish writing account access before reading
+`__FRVR_auth_access_token`. The JWT payload is decoded to reject `platform` values
+of `anonymous` or `anon`, including `extra.platform`, even with a username flag or
+`verified: true`. Guest access keeps the browser open for account login. Only the access token passes
+to the native client; refresh credentials remain in the browser session.
+The first session is visible. Later refreshes start hidden
+and show the window when login or other interaction is needed. Log in through the
+site's normal login flow; **Cancel** or closing the browser cancels Join.
+The original invite continues automatically when access is ready. Duplicate Join
+requests are disabled while access is pending.
+
+Install the [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+if Join reports that it is missing. Startup, Local practice, and direct native-server
+connections work offline. The helper opens only after **Login** or a Join that needs access or verification. macOS and Linux retain their
+existing environment/`.env` token method and have no browser dependency.
+
+Krodin uses a separate `%LOCALAPPDATA%\Krodin\Browser` profile. It stores the access
+JWT in `%LOCALAPPDATA%\Krodin\access-account.dpapi`, encrypted for your Windows user with DPAPI.
+Refresh credentials stay in the browser profile. **Session / Invite ? Forget browser
+session** clears both; close other Krodin browser windows first. This does not sign out
+your regular browser or interrupt an established game connection.
+
+The browser token is reused until 60 seconds before its JWT expiry. Decoded expiry only
+schedules renewal; the server decides acceptance. This Windows test build uses
+browser access only: `KRUNKER_ACCESS_TOKEN` from the environment or `.env` is ignored.
+macOS and Linux retain their existing environment/`.env` token method.
+An explicit invalid/expired-token response invalidates the token and retries the same
+invite with browser access once. Generic permission/403 failures do not trigger refresh.
+If the official page does not expose `FRVR.auth.getFreshAccessToken()`, Join reports the
+failure and asks you to retry Login after the site loads. Account UI and ranked account management
+remain deferred.
+
+If `/seek-game` returns `CaptchaRequired`, Windows Join opens the verification
+helper for the same invite. Complete any challenge there. The helper holds the
+proof-bearing request before it reaches matchmaking and blocks the page's game
+WebSocket. It passes the proof over private IPC, closes, and Odin retries native
+matchmaking once. When the browser receives a successful assignment without a
+captcha token, it hands the validated assignment to the same native WebSocket
+path instead of leaving the game running only in the helper. Gameplay uses the
+existing native WebSocket. This handoff is experimental: acceptance of the proof
+outside its browser session still needs a live test. A second CAPTCHA response
+stops the attempt without another prompt.
+
+Login and Join print authentication stages to the console and
+`logs/krunker-network.log`, including request IDs, elapsed time, username-gate waits,
+SDK renewal, cache reuse, cancellation, errors, and Join continuation. Tokens,
+refresh credentials, usernames, and login response bodies are omitted. Launch
+`.\bin\krodin_client.exe` from PowerShell to watch the console, or follow the file
+from another terminal with `Get-Content .\logs\krunker-network.log -Wait -Tail 40`.
+
+For a standalone embedded browser with full DevTools and a redacted network
+timeline, see [the browser inspector](tools/browser_inspect/README.md). Build with
+`build.bat inspect none`, then run
+`python -B tools/browser_inspect/inspect_browser.py "https://krunker.io/?game=NY:066nj"`.
+It uses its own browser profile and runs independently of the game client.
+
 ## Requirements
 
 - The [Odin compiler](https://odin-lang.org/) and a working system linker.
@@ -93,9 +157,13 @@ make test     # build and run the deterministic simulation tests
 
 ### Windows
 
-No extra libraries are required. Odin's `vendor:glfw` statically links the shipped
+Odin's `vendor:glfw` statically links the shipped
 `glfw3_mt.lib` (no DLL needed), `vendor:stb` uses pre-shipped `.lib` files, and OpenGL is loaded at
-runtime. You only need the Odin compiler and a working Windows linker (MSVC or MinGW-w64).
+runtime. You need the Odin compiler and a working Windows linker (MSVC or MinGW-w64).
+Windows client builds also build `krodin_browser.exe` and restore the official Microsoft
+WebView2 loader from a pinned, checksum-verified NuGet package. The first build needs internet access.
+The helper and `WebView2Loader.dll` must stay beside the client executable; packaging includes
+both and Microsoft?s license and notices. `build.bat browser none` builds just the helper.
 
 Build from PowerShell or cmd with the bundled helper. The leading `.\` works in both shells:
 
@@ -151,8 +219,8 @@ stereo direction and distance attenuation. Movement reconciliation and local
 shot echoes do not repeat sounds. Live hit sounds require server confirmation.
 
 Settings provides Master, Effects, Footsteps and UI volume sliders. Drag them or
-use Left/Right with keyboard focus; Tab scrolls controls into view. Changes take
-effect immediately and save to the ignored `audio-settings.json` beside the
+use Left/Right with keyboard focus; Tab scrolls controls into view. Select Save
+to apply changes and persist them to the ignored `audio-settings.json` beside the
 working directory's assets folder. Zero Master volume mutes all output.
 
 Short effects are decoded at startup from `assets/config/sound-assets.txt` and
@@ -193,7 +261,8 @@ Copy a Krunker invite (`https://krunker.io/?game=<id>`) and choose **PASTE & JOI
 home screen. The client parses browser invite links, assigned game URLs, and direct `tcp://host:port`
 endpoints without probing a server at startup. Browser invites are resolved through the matchmaker,
 then the live adapter keeps a libcurl WSS connection open and sends the MessagePack load/team/class/
-spawn bootstrap. Set `KRUNKER_ACCESS_TOKEN` in the ignored `.env` (or in the environment) for browser
+spawn bootstrap. Use **Login** for browser access on Windows. On macOS/Linux, set
+`KRUNKER_ACCESS_TOKEN` in the ignored `.env` (or in the environment) for browser
 invite resolution. Direct `wss://` links are accepted as well; offline sessions continue to use the
 existing local renderer and simulation.
 
@@ -281,6 +350,37 @@ Crossbow, Build Tool, and Charge Rifle. Building and weapon charge mechanics
 still require a separate gameplay implementation.
 
 ## Controls
+
+Settings > Key binds provides Primary and Alternate slots for each action.
+Select a slot and press a key or mouse button; either slot activates the action.
+Escape cancels capture, Delete clears the slot, and backtick is reserved for
+practice map rotation. Escape always remains available for menus.
+
+Main uses a manually entered Mouse DPI and sensitivity in cm/360. Click either
+value to type, then press Enter or Tab to confirm. DPI changes preserve the
+selected physical sensitivity. FOV changes preserve true hipfire cm/360: the same
+mouse distance produces the same turning angle at every FOV. Enable Advanced
+sensitivity to reveal a separate ADS cm/360 value; fully aimed ADS then uses that
+distance for every weapon zoom, with a smooth transition from hipfire. With Advanced
+off, ADS retains the existing zoom scaling. Invert mouse reverses vertical look only.
+DPI changes preserve both physical sensitivity values. Existing settings keep their
+camera turn speed and start with an editable DPI of 800. Save applies these values;
+Cancel discards the edits.
+
+Save applies all edited categories; Cancel or Escape discards the draft. Key
+bindings, sensitivity, graphics and HUD preferences persist in the ignored
+`client-settings.json` in the working directory. Video supports mode, monitor,
+window resolution, V-Sync, sharp/smooth texture filtering and supported anisotropic
+filtering levels. Visuals provides brightness, gamma, contrast, saturation
+and ambient/sunlight strength. Fog distance and environment colors follow the
+map and cannot be overridden in Settings. Graphics preview live; Cancel or Escape restores
+the saved appearance. Reset visuals restores the original map appearance.
+Gameplay starts with a vertical world field-of-view slider (60–120 degrees,
+default 90). Save applies and persists it; Cancel discards the draft. Weapon
+field of view remains separate.
+HUD independently toggles the timer (including
+objective/phase countdowns), current-round objective points, rounds won and FPS.
+The default bindings are:
 
 | Input | Action |
 | --- | --- |

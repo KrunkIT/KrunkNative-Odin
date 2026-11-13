@@ -201,7 +201,7 @@ when ODIN_TEST {
 		if !server_waiting_for_reset {
 			for command in krunker_test_decode_commands(t, packet) { server_ack = command.seq }
 		}
-		testing.expect(t, server_ack == 654 && counter == 20,
+		testing.expect(t, server_ack == 654 && counter == 208, // (239 + 225) & 255 in build 5fHFc
 			"the first recovery packet must unblock ACK progress, including at a packet-counter wrap")
 		krunker_ws_input_sent(state, 5, counter)
 		client_discard_acked_inputs(&client, server_ack)

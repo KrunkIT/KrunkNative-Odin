@@ -1,9 +1,9 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:strings"
 import "core:encoding/json"
-import "core:math"
 import glfw "vendor:glfw"
 import shared "../shared"
 import menuui "../menu"
@@ -23,10 +23,12 @@ menu_character :: proc "c" (window: glfw.WindowHandle, codepoint: rune) {
 
 client_selection_status :: proc(client: ^Client, value: string) {
 	delete(client.selection_status)
-	client.selection_status = strings.clone(value)
+	client.selection_status = kproto.network_log_safe(value)
 }
 
 client_leave_session :: proc(client: ^Client, reset_map: bool = true) {
+	client_access_cancel(client)
+	client.access.retried = false
 	audio_stop_all(client.audio)
 	if client.audio != nil { client.audio.hit_revision = 0 }
 	net_client_disconnect(&client.net)
@@ -228,6 +230,13 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		for name, i in client.krunker_world.lobby_team_names { if len(name)>0 { team_names[i]=name } }
 	}
 	if client.net.connected { team_selection = client.net.lobby_received && client.net.lobby.select_team; capacity = int(client.net.lobby.capacity); team_names = client.net.lobby.team_names }
+	resolution_options := make([]string, len(DISPLAY_RESOLUTIONS), context.temp_allocator)
+	for resolution, i in DISPLAY_RESOLUTIONS { resolution_options[i] = fmt.tprintf("%d x %d", resolution.width, resolution.height) }
+	window_resolution := client_window_resolution(client)
+	monitor_names := make([dynamic]string, context.temp_allocator)
+	if client.window != nil {
+		for monitor, i in glfw.GetMonitors() { append(&monitor_names, fmt.tprintf("%d: %s", i+1, glfw.GetMonitorName(monitor))) }
+	}
 	view := menuui.View{
 		live_class_changes = krunker_client_live_class_window(client, glfw.GetTime()),
 		presentation = client_lobby_presentation(client), ranked = client.krunker.connected && client.krunker_world.is_ranked,
@@ -239,10 +248,15 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		active = (online || client.local_practice) && client.me != nil && client.me.active, class_pending = client.spawn_pending && confirmed_class != client.selected_class, has_life = client.has_life,
 		spawn_pending = client.spawn_pending, ready = client.krunker.connected ? client.krunker_world.ready && client.krunker.render_map_ready : client.game.ready && (!client.net.connected || client.net.match_state_received),
 		map_name = map_name, mode = mode, lobby_name = online ? (len(client.join_link.game_id) > 0 ? client.join_link.game_id : client.join_link.host) : "Local practice",
-		connecting = client.join_queued > 0, current_invite = client.join_link.raw, join_status = client.join_status, selection_status = client.selection_status,
-		display_mode = i32(client.display_mode), sensitivity = client.sensitivity, show_fps = client.show_fps,
+		browser_access_supported = ODIN_OS == .Windows, auth_pending = client.access.status == .PENDING,
+		connecting = client.join_queued > 0 || client.access.status == .PENDING && client.access.join_after_access, current_invite = client.join_link.raw, join_status = client.join_status, selection_status = client.selection_status,
+		fov = client.camera.fov * 180 / math.PI, display_mode = i32(client.display_mode), sensitivity = client.sensitivity, mouse_dpi = client.mouse_dpi, show_fps = client.show_fps,
+		ads_sensitivity = client.ads_sensitivity, advanced_sensitivity = client.advanced_sensitivity, invert_mouse = client.invert_mouse,
+		resolution_index = client.resolution_index, resolution_options = resolution_options,
+		monitor_index = client.monitor_index, monitor_names = monitor_names[:], vsync = client.vsync, bindings = client.bindings, hud = client.hud_settings,
+		visuals = client.visual_settings, quality = client_supported_quality(client.quality_settings, client.max_anisotropy), max_anisotropy = client.max_anisotropy,
 		audio_volumes = {client.audio_settings.master, client.audio_settings.effects, client.audio_settings.footsteps, client.audio_settings.ui},
-		resolution = fmt.tprintf("%d x %d", DISPLAY_RESOLUTIONS[client.resolution_index].width, DISPLAY_RESOLUTIONS[client.resolution_index].height),
+		resolution = fmt.tprintf("%d x %d", window_resolution.width, window_resolution.height),
 		match_status = client.game.move_lock ? "Waiting for match to start" : "Match in progress",
 		respawn_remaining = krunker_client_respawn_remaining(client, glfw.GetTime()),
 	}
@@ -288,15 +302,54 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: pr
 		audio_play_effect(client.audio, "tick_0", .UI, 0.6)
 	}
 	switch action.kind {
-	case .NONE, .EDIT_INVITE, .INSPECT_CLASS:
+	case .NONE, .EDIT_INVITE, .INSPECT_CLASS, .SETTINGS_TAB, .SETTINGS_CANCEL, .BIND_KEY, .HUD_TOGGLE, .VSYNC, .MONITOR, .SETTINGS_DROPDOWN, .RESOLUTION_SELECT, .VISUAL_VALUE, .VISUAL_RESET, .TEXTURE_FILTER, .ANISOTROPY, .SETTINGS_NUMBER, .FOV, .ADVANCED_SENSITIVITY, .INVERT_MOUSE:
+	case .SETTINGS_SAVE:
+		values := client.menu.settings_draft
+		mode := Display_Mode(clamp(values.display_mode, 0, 2))
+		resolution := clamp(values.resolution_index, 0, i32(len(DISPLAY_RESOLUTIONS))-1)
+		if client.display_mode != mode || client.resolution_index != resolution || client.monitor_index != values.monitor_index || mode == .Windowed && client.menu.settings_resolution_selected {
+			client_remember_windowed_rect(client)
+			client.display_mode, client.resolution_index = mode, resolution
+			client.monitor_index = values.monitor_index
+			client_apply_display_settings(client)
+		}
+		client.mouse_dpi = menuui.mouse_dpi_validate(values.mouse_dpi)
+		client.sensitivity = menuui.sensitivity_validate(values.sensitivity, client.mouse_dpi)
+		client.ads_sensitivity = menuui.ads_sensitivity_validate(values.ads_sensitivity, client.sensitivity, client.mouse_dpi)
+		client.advanced_sensitivity, client.invert_mouse = values.advanced_sensitivity, values.invert_mouse
+		client.camera.fov = menuui.fov_validate(values.fov) * math.PI / 180
+		client.show_fps = values.show_fps
+		client.bindings, client.hud_settings = values.bindings, values.hud
+		client.visual_settings, client.quality_settings = menuui.visual_settings_validate(values.visuals), menuui.quality_settings_validate(values.quality)
+		client.last_swap_key = 0
+		if client.vsync != values.vsync {
+			client.vsync = values.vsync
+			if client.window != nil { glfw.SwapInterval(client.vsync ? 1 : 0) }
+		}
+		client.settings_dirty = true
+		settings := audio_settings_clamp({values.audio_volumes[0], values.audio_volumes[1], values.audio_volumes[2], values.audio_volumes[3]})
+		if client.audio_settings != settings {
+			client.audio_settings = settings
+			audio_set_settings(client.audio, settings)
+			client.audio_settings_dirty, client.audio_save_delay = true, 0.5
+		}
 	case .PASTE:
 		menuui.set_invite(&client.menu, glfw.GetClipboardString(client.window))
 		client.menu.focus = clay.ID("Invite").id
 	case .JOIN_LINK:
-		if client.join_queued > 0 { return }
+		if client.join_queued > 0 || client.access.status == .PENDING { return }
 		client.join_queued = 2
 		krunker_ws_set_status(client, "Connecting to lobby...")
 		client.menu.page = .HOME
+	case .LOGIN:
+		when ODIN_OS == .Windows { client_access_login(client) }
+	case .CANCEL_JOIN:
+		login := client.access.status == .PENDING && !client.access.join_after_access
+		client_access_cancel(client)
+		client.join_queued = 0
+		krunker_ws_set_status(client, login ? "Login cancelled." : "Join cancelled.")
+	case .FORGET_BROWSER_SESSION:
+		client_access_forget(client)
 	case .COPY_INVITE:
 		value := strings.clone_to_cstring(client.join_link.raw)
 		glfw.SetClipboardString(client.window, value)
@@ -391,7 +444,7 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: pr
 	case .RESOLUTION:
 		client.resolution_index = (client.resolution_index + action.index + i32(len(DISPLAY_RESOLUTIONS))) % i32(len(DISPLAY_RESOLUTIONS))
 		client_apply_display_settings(client)
-	case .SENSITIVITY: client.sensitivity = math.round(action.value * 100) / 100
+	case .SENSITIVITY: client.sensitivity = menuui.sensitivity_validate(action.value, client.mouse_dpi)
 	case .AUDIO_VOLUME:
 		switch action.index {
 		case 0: client.audio_settings.master = action.value

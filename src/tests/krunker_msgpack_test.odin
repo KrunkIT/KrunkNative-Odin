@@ -13,7 +13,7 @@ test_krunker_msgpack :: proc() -> bool {
 		return false
 	}
 	for value, i in packet { if value != expected[i] { fmt.eprintln("Krunker MessagePack load packet bytes mismatch"); return false } }
-	if krunker.krunker_msgpack_counter_next(0, "load") != 37 || krunker.krunker_msgpack_counter_next(37, "cptR") != 37 {
+	if krunker.krunker_msgpack_counter_next(0, "load") != 225 || krunker.krunker_msgpack_counter_next(225, "cptR") != 225 {
 		fmt.eprintln("Krunker trailer counter rule mismatch")
 		return false
 	}

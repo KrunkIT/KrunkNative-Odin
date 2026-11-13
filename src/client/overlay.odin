@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:math"
 import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
+import menuui "../menu"
 import shared "../shared"
 
 ammo_icon: u32
@@ -72,6 +73,7 @@ overlay_match_render :: proc(client: ^Client) {
 	// Equal-sized totals with numerals centered in each box.
 	point_width := max(180*s, max(ui_measure_text(ui, fmt.tprintf("%d", match.team_scores[1]), 52*s), ui_measure_text(ui, fmt.tprintf("%d", match.team_scores[2]), 52*s))+116*s)
 	for color, i in colors {
+		if client.hud_settings.hide_round_score { break }
 		value := fmt.tprintf("%d", match.team_scores[i+1])
 		y := (104 + f32(i)*64)*s
 		ui_fill_rect(ui, panel, 20*s, y, point_width, 56*s)
@@ -86,23 +88,27 @@ overlay_match_render :: proc(client: ^Client) {
 	score_width := max(80*s, max(ui_measure_text(ui, fmt.tprintf("%d", match.round_wins[1]), 60*s), ui_measure_text(ui, fmt.tprintf("%d", match.round_wins[2]), 60*s))+24*s)
 	width := score_width*2 + center_width + 8*s
 	x, y := (ui.width-width)*0.5, 20*s
-	ui_fill_rect(ui, panel, x+score_width+4*s, y, center_width, 84*s)
-	ui_fill_text(ui, white, round, (ui.width-ui_measure_text(ui, round, 42*s))*0.5, y+42*s, 42*s)
-	label := "Round"
-	ui_fill_text(ui, muted, label, (ui.width-ui_measure_text(ui, label, 24*s))*0.5, y+70*s, 24*s)
-	for color, i in colors {
-		left := x + f32(i)*(score_width+center_width+8*s)
-		ui_fill_rect(ui, panel, left, y, score_width, 84*s)
-		ui_fill_rect(ui, color, left, y+80*s, score_width, 4*s)
-		value := fmt.tprintf("%d", match.round_wins[i+1])
-		ui_fill_text(ui, white, value, left+(score_width-ui_measure_text(ui, value, 60*s))*0.5, overlay_numeric_baseline(y, 80*s, 60*s), 60*s)
+	if !client.hud_settings.hide_game_score {
+		ui_fill_rect(ui, panel, x+score_width+4*s, y, center_width, 84*s)
+		ui_fill_text(ui, white, round, (ui.width-ui_measure_text(ui, round, 42*s))*0.5, y+42*s, 42*s)
+		label := "Round"
+		ui_fill_text(ui, muted, label, (ui.width-ui_measure_text(ui, label, 24*s))*0.5, y+70*s, 24*s)
+		for color, i in colors {
+			left := x + f32(i)*(score_width+center_width+8*s)
+			ui_fill_rect(ui, panel, left, y, score_width, 84*s)
+			ui_fill_rect(ui, color, left, y+80*s, score_width, 4*s)
+			value := fmt.tprintf("%d", match.round_wins[i+1])
+			ui_fill_text(ui, white, value, left+(score_width-ui_measure_text(ui, value, 60*s))*0.5, overlay_numeric_baseline(y, 80*s, 60*s), 60*s)
+		}
 	}
+	if client.hud_settings.hide_timer { return }
 	seconds := max(0, int(math.ceil(match.objective.rotation_remaining)))
 	rotation := fmt.tprintf("Next objective %02d:%02d", seconds/60, seconds%60)
 	if match.phase == .WARMUP { rotation = fmt.tprintf("Match starts in %.0fs", math.ceil(match.phase_remaining)) }
 	if countdown := krunker_client_countdown_label(client, glfw.GetTime()); len(countdown) > 0 { rotation = countdown }
-	ui_fill_rect(ui, panel, x, y+88*s, width, 32*s)
-	ui_fill_text(ui, white, rotation, (ui.width-ui_measure_text(ui, rotation, 24*s))*0.5, overlay_numeric_baseline(y+88*s, 32*s, 24*s), 24*s)
+	countdown_y := y + (client.hud_settings.hide_game_score ? 0 : 88*s)
+	ui_fill_rect(ui, panel, x, countdown_y, width, 32*s)
+	ui_fill_text(ui, white, rotation, (ui.width-ui_measure_text(ui, rotation, 24*s))*0.5, overlay_numeric_baseline(countdown_y, 32*s, 24*s), 24*s)
 }
 
 overlay_loadout_render :: proc(client: ^Client, right, bottom: f32) {
@@ -110,6 +116,17 @@ overlay_loadout_render :: proc(client: ^Client, right, bottom: f32) {
 	if weapon_icons == nil { weapon_icons = make(map[i32]u32) }
 	s := client.ui.scale
 	row_height := 58.0 * s
+	key_size := 26.0 * s
+	keys: [menuui.Binding_Action]string
+	key_width: f32 = 0
+	for action in ([?]menuui.Binding_Action{.SECONDARY, .MELEE}) {
+		code := client.bindings[action][0]
+		if code == 0 { code = client.bindings[action][1] }
+		if code == 0 { continue }
+		keys[action] = fmt.tprintf("[%s]", menuui.binding_label(code))
+		key_width = max(key_width, ui_measure_text(client.ui, keys[action], key_size))
+	}
+	icon_right := right - max(24.0 * s, key_width + 8.0 * s)
 	row: f32 = 0
 	for weapon_id, slot in client.me.loadout {
 		if weapon_id < 0 || int(weapon_id) >= len(client.game.weapons) { continue }
@@ -135,17 +152,16 @@ overlay_loadout_render :: proc(client: ^Client, right, bottom: f32) {
 		// The bundled silhouettes use a 2:1 canvas, including their transparent padding.
 		if icon != 0 {
 			icon_top := top + (12.0 if weapon.melee else -8.0) * s
-			if slot == 0 && !weapon.melee { icon_top -= 10.0 * s }
-			ui_draw_image(client.ui, icon, right - 184.0 * s, icon_top, 160.0 * s, 80.0 * s, color)
+			if slot == 0 && !weapon.melee { icon_top -= 18.0 * s }
+			ui_draw_image(client.ui, icon, icon_right - 160.0 * s, icon_top, 160.0 * s, 80.0 * s, color)
 		} else {
 			text_size := 24.0 * s
 			width := ui_measure_text(client.ui, weapon.name, text_size)
-			ui_fill_text(client.ui, color, weapon.name, right - 28.0 * s - width, overlay_numeric_baseline(top, row_height, text_size), text_size)
+			ui_fill_text(client.ui, color, weapon.name, icon_right - width, overlay_numeric_baseline(top, row_height, text_size), text_size)
 		}
-		// Match the actual swap keys rather than displaying unbound slot numbers.
-		key := "[Q]" if weapon.melee else ("[E]" if weapon.secondary else "")
+		// Show the first assigned binding, falling back to the alternate slot.
+		key := keys[.MELEE] if weapon.melee else (keys[.SECONDARY] if weapon.secondary else "")
 		if len(key) > 0 {
-			key_size := 26.0 * s
 			ui_fill_text(client.ui, color, key, right - ui_measure_text(client.ui, key, key_size), overlay_numeric_baseline(top, row_height, key_size), key_size)
 		}
 		row += 1
@@ -319,7 +335,7 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 	overlay_ammo_render(client)
 
 	// top left HUD (timer)
-	{
+	if !client.hud_settings.hide_timer {
 		anchor := shared.Vec2{20.0 * client.ui.scale, 20.0 * client.ui.scale}
 
 		if timer_icon == 0 {

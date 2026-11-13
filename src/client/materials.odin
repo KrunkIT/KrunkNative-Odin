@@ -40,6 +40,8 @@ Shader_Uniforms :: struct {
 	fog_near:             i32,
 	fog_far:              i32,
 	camera_position:      i32,
+	visual_image:         i32,
+	visual_lighting:      i32,
 	aspect:               i32,
 	r_clip:               i32,
 	stroke_width:         i32,
@@ -85,6 +87,8 @@ cache_uniforms :: proc(program: u32) -> Shader_Uniforms {
 	u.fog_near = gl.GetUniformLocation(program, "uFogNear")
 	u.fog_far = gl.GetUniformLocation(program, "uFogFar")
 	u.camera_position = gl.GetUniformLocation(program, "uCameraPosition")
+	u.visual_image = gl.GetUniformLocation(program, "uVisualImage")
+	u.visual_lighting = gl.GetUniformLocation(program, "uVisualLighting")
 	u.aspect = gl.GetUniformLocation(program, "aspect")
 	u.r_clip = gl.GetUniformLocation(program, "r_clip")
 	u.stroke_width = gl.GetUniformLocation(program, "stroke_width")
@@ -188,6 +192,9 @@ basic_material_update_pass_uniforms :: proc(camera: ^Camera) {
 	gl.Uniform1f(u_basic.fog_near, 1.0)
 	gl.Uniform1f(u_basic.fog_far, max(1.0, g_lighting_config.fog_distance))
 	gl.Uniform3f(u_basic.camera_position, camera.position.x, camera.position.y, camera.position.z)
+	values := g_visual_settings.values
+	gl.Uniform4f(u_basic.visual_image, values[.BRIGHTNESS], values[.GAMMA], values[.CONTRAST], values[.SATURATION])
+	gl.Uniform2f(u_basic.visual_lighting, values[.AMBIENT], values[.SUNLIGHT])
 }
 
 flatten_mat3 :: proc(m: [3][3]f32) -> [9]f32 {

@@ -3,6 +3,8 @@ rem Build helper for Windows (requires Odin compiler in PATH).
 rem
 rem Usage:
 rem   build.bat client            build the client      -> bin\krodin_client.exe
+rem   build.bat browser           build browser helper and restore WebView2 loader
+rem   build.bat inspect           build standalone WebView2 inspector
 rem   build.bat server            build the server      -> bin\krodin_server.exe
 rem   build.bat tests             build + run the sim tests
 rem   build.bat check             typecheck client + server without linking
@@ -27,7 +29,7 @@ if "%SERVER_PROFILE%"=="" set "SERVER_PROFILE=%PROFILE%"
 
 if /i "%TARGET%"=="help" goto usage
 set "VALID_TARGET="
-for %%T in (client server tests check all clean) do if /i "%TARGET%"=="%%T" (
+for %%T in (client browser inspect server tests check all clean) do if /i "%TARGET%"=="%%T" (
     set "TARGET=%%T"
     set "VALID_TARGET=1"
 )
@@ -52,8 +54,22 @@ if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 
 goto:%TARGET%
 
+:browser
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\setup-webview2.ps1
+if errorlevel 1 exit /b %errorlevel%
+%ODIN% build src/browser_helper -out:%BIN_DIR%\krodin_browser.exe -o:%PROFILE% -subsystem:windows
+exit /b %errorlevel%
+
 :client
+call :browser
+if errorlevel 1 exit /b %errorlevel%
 %ODIN% build src/client -out:%BIN_DIR%\krodin_client.exe -o:%PROFILE%
+exit /b %errorlevel%
+
+:inspect
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\setup-webview2.ps1
+if errorlevel 1 exit /b %errorlevel%
+%ODIN% build tools/browser_inspect -out:%BIN_DIR%\krodin_browser_inspect.exe -o:%PROFILE% -subsystem:windows
 exit /b %errorlevel%
 
 :server
@@ -64,9 +80,15 @@ exit /b %errorlevel%
 %ODIN% build src/tests -out:%BIN_DIR%\krodin_tests.exe -o:%PROFILE%
 if errorlevel 1 exit /b %errorlevel%
 "%BIN_DIR%\krodin_tests.exe"
+if errorlevel 1 exit /b %errorlevel%
+%ODIN% test src/browser_access -out:%BIN_DIR%\browser_access_tests.exe -o:none
 exit /b %errorlevel%
 
 :check
+%ODIN% check tools/browser_inspect
+if errorlevel 1 exit /b %errorlevel%
+%ODIN% check src/browser_helper
+if errorlevel 1 exit /b %errorlevel%
 %ODIN% check src/client
 if errorlevel 1 exit /b %errorlevel%
 %ODIN% check src/server
@@ -80,6 +102,11 @@ call :server
 exit /b %errorlevel%
 
 :clean
+if exist "%BIN_DIR%\krodin_browser_inspect.exe" del "%BIN_DIR%\krodin_browser_inspect.exe"
+if exist "%BIN_DIR%\krodin_browser.exe" del "%BIN_DIR%\krodin_browser.exe"
+if exist "%BIN_DIR%\WebView2Loader.dll" del "%BIN_DIR%\WebView2Loader.dll"
+if exist "%BIN_DIR%\WebView2-LICENSE.txt" del "%BIN_DIR%\WebView2-LICENSE.txt"
+if exist "%BIN_DIR%\WebView2-NOTICE.txt" del "%BIN_DIR%\WebView2-NOTICE.txt"
 if exist "%BIN_DIR%\krodin_client.exe" del "%BIN_DIR%\krodin_client.exe"
 if exist "%BIN_DIR%\krodin_server.exe" del "%BIN_DIR%\krodin_server.exe"
 if exist "%BIN_DIR%\krodin_tests.exe" del "%BIN_DIR%\krodin_tests.exe"
@@ -98,7 +125,7 @@ call :usage
 exit /b 1
 
 :usage
-echo Usage: build.bat [client ^| server ^| tests] [level]
+echo Usage: build.bat [client ^| browser ^| inspect ^| server ^| tests] [level]
 echo        build.bat all [client-level] [server-level]
 echo        build.bat [check ^| clean ^| help]
 echo Levels: none, minimal, size, speed, aggressive ^(default^).

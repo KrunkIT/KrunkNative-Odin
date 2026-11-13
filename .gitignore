@@ -93,7 +93,11 @@ mod.zip
 __pycache__/
 *.pyc
 audio-settings.json
+client-settings.json
 
 Krodin-*.zip
 Krodin-Windows/
 Krodin-Linux/
+
+# Downloaded official WebView2 SDK (restored with a pinned SHA-256).
+tools/webview2/

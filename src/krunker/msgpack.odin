@@ -191,15 +191,17 @@ krunker_msgpack_encode_packet :: proc(opcode: string, args: []Krunker_Msgpack_Va
 	return out[:], true
 }
 
-// The live server requires +37, confirmed with continuous traffic and the
-// reference hoster's nibble counter. The archived browser snapshot uses +3;
-// its idle spawn probe sends too few packets to expose that incompatibility.
+// Official build 5fHFc, captured 2026-11-13: (counter + 0x43e1) & 0xff.
+// Only its low byte (225) matters. The previous bundle used 37; continuing
+// that sequence against this build produces INVALID VERSION.
 // cptR is the one opcode that does not advance the counter.
+KRUNKER_PROTOCOL_BUILD :: "5fHFc"
+KRUNKER_COUNTER_INCREMENT :: u8(225)
 krunker_msgpack_counter_next :: proc(counter: u8, opcode: string) -> u8 {
 	if opcode == "cptR" {
 		return counter
 	}
-	return counter + 37
+	return counter + KRUNKER_COUNTER_INCREMENT
 }
 
 krunker_msgpack_decode_trailer :: proc(packet: []byte) -> (counter: u8, body: []byte, ok: bool) {
