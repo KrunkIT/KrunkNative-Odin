@@ -31,6 +31,8 @@ uniform vec3 uFogColor;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform vec3 uCameraPosition;
+uniform vec4 uVisualImage; // brightness, gamma, contrast, saturation
+uniform vec2 uVisualLighting; // ambient and sunlight multipliers
 
 void main() {
     if (face_idx < 6 && ((face_mask & (1 << face_idx)) == 0)) discard;
@@ -88,12 +90,17 @@ void main() {
     // Keep the native path from saturating every textured face when the live
     // map's ambient and directional intensities sum above one.
     float peak_light = max(max(lighting.r, lighting.g), max(lighting.b, 1.0));
-    lighting /= peak_light;
+    lighting = (uAmbientColor * uAmbientIntensity * uVisualLighting.x + uLightColor * (uLightIntensity * diffuse * uVisualLighting.y)) / peak_light;
     // The map loader uses white as the neutral/default emissive value. Keep
     // that default neutral; explicit emissive materials need a separate
     // strength flag before they can be added without brightening every mesh.
     vec3 lit_rgb = frag_color.rgb * (unlit ? vec3(1.0) : lighting);
     float fog_span = max(0.001, uFogFar - uFogNear);
     float fog_amount = no_fog ? 0.0 : clamp((length(world_pos - uCameraPosition) - uFogNear) / fog_span, 0.0, 1.0);
-    frag_color = vec4(mix(lit_rgb, uFogColor, fog_amount), frag_color.a);
+    vec3 rgb = mix(lit_rgb, uFogColor, fog_amount);
+    rgb = (rgb * uVisualImage.x - 0.5) * uVisualImage.z + 0.5;
+    float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    rgb = mix(vec3(luma), rgb, uVisualImage.w);
+    rgb = pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / max(0.01, uVisualImage.y)));
+    frag_color = vec4(rgb, frag_color.a);
 }

@@ -298,7 +298,7 @@ scene_sort_transparent :: proc(scene: ^Scene) {
 	}
 }
 
-scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32) {
+scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32, sampler: u32 = 0) {
 	aspect := viewport_h > 0 ? viewport_w / viewport_h : (16.0 / 9.0)
 
 	gl.Enable(gl.DEPTH_TEST)
@@ -307,6 +307,8 @@ scene_render :: proc(scene: ^Scene, camera: ^Camera, viewport_w, viewport_h: f32
 	gl.Disable(gl.BLEND)
 	gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
 	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindSampler(0, sampler)
+	defer gl.BindSampler(0, 0)
 	state: Scene_Draw_State
 
 	camera_update_projection_matrix(camera, aspect)

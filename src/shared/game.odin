@@ -3,6 +3,7 @@ package shared
 import "core:math/rand"
 
 game_clear_players :: proc(game: ^Game) {
+	clear(&game.presentation_events)
 	clear(&game.projectiles)
 	delete(game.players)
 	game.players = nil
@@ -358,6 +359,7 @@ game_destroy :: proc(game: ^Game) {
 
 	game_clear_players(game)
 	delete(game.impacts)
+	delete(game.presentation_events)
 	delete(game.projectiles)
 	delete(game.objective_indices)
 

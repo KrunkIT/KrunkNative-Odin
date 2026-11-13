@@ -21,6 +21,7 @@ menu_scroll :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
 }
 
 client_join_invite :: proc(client: ^Client, connect_live: proc(^Client, ^shared.Join_Link) -> bool = krunker_ws_connect) {
+	if client.access.status == .PENDING { return }
 	kproto.network_log_begin()
 	invite := menuui.invite(&client.menu)
 	kproto.network_log("invite", fmt.tprintf("input bytes=%d link=%s", len(invite), invite))
@@ -149,13 +150,21 @@ hud_render :: proc(client: ^Client, delta: f32) {
 		backspace = glfw.GetKey(client.window, glfw.KEY_BACKSPACE) == glfw.PRESS,
 		clear_text = glfw.GetKey(client.window, glfw.KEY_LEFT_CONTROL) == glfw.PRESS && glfw.GetKey(client.window, glfw.KEY_A) == glfw.PRESS,
 		paste = glfw.GetKey(client.window, glfw.KEY_LEFT_CONTROL) == glfw.PRESS && glfw.GetKey(client.window, glfw.KEY_V) == glfw.PRESS,
+		up = glfw.GetKey(client.window, glfw.KEY_UP) == glfw.PRESS,
+		down_key = glfw.GetKey(client.window, glfw.KEY_DOWN) == glfw.PRESS,
+		binding_pressed = client.binding_event,
 	}
+	client.binding_event = 0
+	if client.menu.number_edit != .NONE && input.paste && !client.menu.previous.paste { input.text = glfw.GetClipboardString(client.window) }
 	client.menu_scroll = {}
 	client.menu_text_length = 0
 	view := menu_view(client)
 	commands := menuui.build(&client.menu, view, input, client.ui.width, client.ui.height, delta)
 	ui_fill_rect(client.ui, {0.015, 0.025, 0.035, 0.55}, 0, 0, client.ui.width, client.ui.height)
 	menu_render_commands(client.ui, commands)
+	previous_page := client.menu.page
+	previous_tab := client.menu.settings_tab
 	action := menuui.interact(&client.menu, input, view)
+	if client.menu.page != previous_page || client.menu.settings_tab != previous_tab { audio_play_effect(client.audio, "tick_0", .UI, 0.6) }
 	menu_apply_action(client, action)
 }

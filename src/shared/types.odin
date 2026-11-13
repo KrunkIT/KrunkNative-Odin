@@ -641,6 +641,8 @@ Game :: struct {
 	player_count: i32,
 	players:      [dynamic]^Player,
 	impacts:      [dynamic]Bullet_Impact,
+	presentation_enabled: bool,
+	presentation_events: [dynamic]Presentation_Event,
 	projectiles:  [dynamic]Projectile,
 	objective_indices: [dynamic]i32,
 	match:        Match_State,

@@ -18,7 +18,7 @@ network_log_secret :: proc(secret: string) {
 }
 
 network_log_sensitive_key :: proc(key: string) -> bool {
-	keys := []string{"accessToken", "validationToken", "clientKey", "clientId", "clientUID", "at", "bpt", "token", "authorization", "cookie", "set-cookie", "password", "access_token", "refresh_token"}
+	keys := []string{"accessToken", "validationToken", "captchaToken", "clientKey", "clientId", "clientUID", "at", "bpt", "token", "authorization", "cookie", "set-cookie", "password", "access_token", "refresh_token"}
 	for candidate in keys {
 		if strings.equal_fold(key, candidate) do return true
 	}
@@ -102,11 +102,16 @@ network_log :: proc(stage, message: string) {
 	if !network_log_file_warning { fmt.eprintln("[Krunker] Could not write logs/krunker-network.log; diagnostics continue on console."); network_log_file_warning = true }
 }
 
-network_log_begin :: proc() {
+network_log_clear_secrets :: proc() {
 	for secret in network_log_secrets { delete(secret) }
-	clear(&network_log_secrets)
+	delete(network_log_secrets)
+	network_log_secrets = nil
+}
+
+network_log_begin :: proc() {
+	network_log_clear_secrets()
 	network_log_attempt += 1
 	network_log_started = time.now()
 	cwd, _ := os.get_working_directory(context.temp_allocator)
-	network_log("join", fmt.tprintf("BEGIN cwd=%s log=%s/%s", cwd, cwd, NETWORK_LOG_PATH))
+	network_log("join", fmt.tprintf("BEGIN exe=%s handoff=v2 cwd=%s log=%s/%s", os.args[0], cwd, cwd, NETWORK_LOG_PATH))
 }

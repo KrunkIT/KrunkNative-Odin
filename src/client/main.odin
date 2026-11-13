@@ -36,6 +36,21 @@ Client :: struct {
 	scene:  ^Scene,
 	fps_scene: ^Scene,
 	ui:     ^UI,
+	audio: ^Audio_System,
+	audio_settings: Audio_Settings,
+	audio_settings_dirty: bool,
+	audio_save_delay: f32,
+	bindings: menuui.Bindings,
+	binding_event: i32,
+	hud_settings: menuui.HUD_Settings,
+	visual_settings: menuui.Visual_Settings,
+	quality_settings: menuui.Quality_Settings,
+	graphics_sampler: u32,
+	graphics_sampler_ready: bool,
+	graphics_quality: menuui.Quality_Settings,
+	max_anisotropy: f32,
+	settings_dirty, vsync: bool,
+	monitor_index: i32,
 
 	mouse_state: struct {
 		locked:  bool,
@@ -67,11 +82,15 @@ Client :: struct {
 	menu_text: [128]u8,
 	menu_text_length: int,
 	join_queued: int,
+	access: Client_Access,
 	menu:             menuui.State,
 	menu_scroll:      clay.Vector2,
 	display_mode:      Display_Mode,
 	resolution_index:  i32,
 	sensitivity:       f32,
+	mouse_dpi:         f32,
+	ads_sensitivity:   f32,
+	advanced_sensitivity, invert_mouse: bool,
 	freecam_enabled:   bool,
 	map_loaded:        bool,
 	offline_custom_map: ^shared.Map,
@@ -103,6 +122,14 @@ g_client: ^Client
 
 MAX_PREDICTED_INPUTS :: 256
 
+client_window_resolution :: proc(client: ^Client) -> Display_Resolution {
+	if client.window != nil {
+		width, height := glfw.GetWindowSize(client.window)
+		return {width, height}
+	}
+	return DISPLAY_RESOLUTIONS[client.resolution_index]
+}
+
 client_remember_windowed_rect :: proc(client: ^Client) {
 	if client.display_mode != .Windowed || glfw.GetWindowMonitor(client.window) != nil {
 		return
@@ -127,6 +154,11 @@ monitor_max_video_mode :: proc(monitor: glfw.MonitorHandle) -> (width, height, r
 
 client_apply_display_settings :: proc(client: ^Client) {
 	monitor := glfw.GetPrimaryMonitor()
+	monitors := glfw.GetMonitors()
+	if len(monitors) > 0 {
+		client.monitor_index = clamp(client.monitor_index, 0, i32(len(monitors))-1)
+		monitor = monitors[client.monitor_index]
+	}
 	if monitor == nil {
 		return
 	}
@@ -544,6 +576,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 		player.velocity = state.velocity
 		client_apply_movement_state(player, state)
 	}
+	if state.health < player.health { shared.player_emit_presentation(player, .DAMAGE) }
 	player.health = state.health
 	player.max_health = state.max_health
 	player.input_seq = state.ack_seq
@@ -584,6 +617,7 @@ client_apply_player_state :: proc(client: ^Client, state: ^shared.Packet_Player_
 	}
 	player.shot_seq = state.shot_seq
 	for shot_index in 0 ..< int(new_shots) {
+		shared.player_emit_presentation(player, .FIRE)
 		if player.weapon.melee {
 			is_throw := player.can_throw && player.aim_val >= 1 && player.game.config.throwable_melees
 			shared.player_start_melee_animation(player, is_throw ? 3 : player.can_throw ? 1 : 2)
@@ -656,6 +690,8 @@ set_window_icon :: proc(client: ^Client) {
 }
 
 client_unload_map :: proc(client: ^Client) {
+	audio_stop_all(client.audio)
+	clear(&client.game.presentation_events)
 	if client.game.map_inst == nil || !client.map_loaded {
 		return
 	}
@@ -738,7 +774,13 @@ client_update_objective_visuals :: proc(client: ^Client) {
 }
 
 client_tick_impacts :: proc(client: ^Client, delta: f32) {
+	impact_sounds := 0
 	for &impact in client.game.impacts {
+		// Limit pellet/packet bursts without affecting the visual impact pool.
+		if impact.kind == .World && impact_sounds < 6 {
+			audio_play_effect(client.audio, "impact_0", gain = 0.18, position = impact.position, spatial = true, radius = 120, priority = 0)
+			impact_sounds += 1
+		}
 		client_add_tracer(client, &impact)
 		client_add_bullet_hole(client, &impact)
 	}
@@ -756,8 +798,9 @@ client_clear_impacts :: proc(client: ^Client) {
 }
 
 client_update_freecam :: proc(client: ^Client, mouse_delta: shared.Vec2, delta: f32) {
-	client.camera.rotation.x -= mouse_delta.y * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
-	client.camera.rotation.y -= mouse_delta.x * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
+	rotation := client_mouse_rotation(client, mouse_delta)
+	client.camera.rotation.x -= rotation.y
+	client.camera.rotation.y -= rotation.x
 	client.camera.rotation.x = max(-math.PI * 0.5, min(math.PI * 0.5, client.camera.rotation.x))
 	client.camera.rotation.y = math.mod(client.camera.rotation.y, 2.0 * math.PI)
 
@@ -845,6 +888,13 @@ client_enter_game :: proc(client: ^Client) {
 }
 
 client_tick :: proc(client: ^Client, now, delta: f32) {
+	when ODIN_OS == .Windows {
+		if client.krunker.auth_rejected {
+			krunker_ws_disconnect(&client.krunker)
+			if !client_access_retry(client, true) { krunker_ws_set_status(client, "Krunker rejected the renewed access token. Sign in again or use Forget browser session.") }
+		}
+	}
+	client_access_tick(client)
 	if client.join_queued > 0 {
 		client.join_queued -= 1
 		if client.join_queued == 0 { client_join_invite(client) }
@@ -870,7 +920,8 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		}
 	}
 
-	debug_key := glfw.GetKey(client.window, glfw.KEY_GRAVE_ACCENT) == glfw.PRESS
+	editing_settings := client.menu.page == .SETTINGS || client.menu.page == .CONTROLS
+	debug_key := !editing_settings && glfw.GetKey(client.window, glfw.KEY_GRAVE_ACCENT) == glfw.PRESS
 	freecam_key := glfw.GetKey(client.window, glfw.KEY_RIGHT_BRACKET) == glfw.PRESS
 
 	if debug_key && !client.last_debug_key && !client.net.connected && !client.krunker.connected {
@@ -890,14 +941,14 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	}
 
 	client.last_debug_key = debug_key
-	if freecam_key && !client.last_freecam_key && client.me != nil && client.me.active {
+	if !editing_settings && !client_binding_used(client, glfw.KEY_RIGHT_BRACKET) && freecam_key && !client.last_freecam_key && client.me != nil && client.me.active {
 		client.freecam_enabled = !client.freecam_enabled
 	}
 	client.last_freecam_key = freecam_key
 
 	x, y := glfw.GetCursorPos(client.window)
 
-	fullscreen_key := glfw.GetKey(client.window, glfw.KEY_F11) == glfw.PRESS
+	fullscreen_key := !editing_settings && client_action_down(client, .FULLSCREEN)
 
 	if fullscreen_key && !client.last_fullscreen_key {
 		client_set_display_mode(client, client.display_mode == .Windowed ? .Fullscreen : .Windowed)
@@ -906,8 +957,9 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	client.last_fullscreen_key = fullscreen_key
 	client.mouse_state.locked = glfw.GetInputMode(client.window, glfw.CURSOR) == glfw.CURSOR_DISABLED
 
-	escape_key := glfw.GetKey(client.window, glfw.KEY_ESCAPE) == glfw.PRESS
+	escape_key := client_action_down(client, .MENU) || glfw.GetKey(client.window, glfw.KEY_ESCAPE) == glfw.PRESS
 	if client.mouse_state.locked && escape_key && !client.last_escape_key {
+		audio_play_effect(client.audio, "menu_open", .UI, 0.35)
 		glfw.SetInputMode(client.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 		client.mouse_state.locked = false
 		client.menu.page = .HOME
@@ -926,7 +978,7 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 		client.camera.position = client.game.map_inst.camera_position
 	}
 
-	noclip_key := glfw.GetKey(client.window, glfw.KEY_N) == glfw.PRESS
+	noclip_key := !client_binding_used(client, glfw.KEY_N) && glfw.GetKey(client.window, glfw.KEY_N) == glfw.PRESS
 
 	if client.me != nil && client.me.active {
 		input := shared.Input{}
@@ -947,41 +999,15 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 				client.me.noclip = !client.me.noclip
 			}
 
-			input.x_dir -= mouse_delta.y * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
-			input.y_dir -= mouse_delta.x * shared.GAME_CONSTANTS.mouse_sensitivity * client.sensitivity / client.camera.zoom
+			rotation := client_mouse_rotation(client, mouse_delta)
+			input.x_dir -= rotation.y
+			input.y_dir -= rotation.x
 
-			input.jump = glfw.GetKey(client.window, glfw.KEY_SPACE) == glfw.PRESS
-			input.crouch = glfw.GetKey(client.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS
-			input.reload = glfw.GetKey(client.window, glfw.KEY_R) == glfw.PRESS
-			input.shoot = glfw.GetMouseButton(client.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
-			input.scope = glfw.GetMouseButton(client.window, glfw.MOUSE_BUTTON_RIGHT) == glfw.PRESS
-
-			if glfw.GetKey(client.window, glfw.KEY_E) == glfw.PRESS {
-				input.swap = 1
-			} else if glfw.GetKey(client.window, glfw.KEY_Q) == glfw.PRESS {
-				input.swap = 2
-			}
-
-			swap_key := input.swap
-
-			if swap_key == client.last_swap_key {
-				input.swap = 0
-			}
-			client.last_swap_key = swap_key
-
-			forward := glfw.GetKey(client.window, glfw.KEY_W) == glfw.PRESS
-			back := glfw.GetKey(client.window, glfw.KEY_S) == glfw.PRESS
-			left := glfw.GetKey(client.window, glfw.KEY_A) == glfw.PRESS
-			right := glfw.GetKey(client.window, glfw.KEY_D) == glfw.PRESS
-
-			if forward != back {
-				input.move_dir += forward ? 1 : 5
-				if left != right {
-					input.move_dir += right ? (forward ? 1 : -1) : (forward ? 7 : 1)
-				}
-			} else if left != right {
-				input.move_dir += right ? 3 : 7
-			}
+			held: [menuui.Binding_Action]bool
+			for action in menuui.Binding_Action { held[action] = client_action_down(client, action) }
+			bound := client_bound_input(held, &client.last_swap_key)
+			input.jump, input.crouch, input.reload, input.shoot, input.scope = bound.jump, bound.crouch, bound.reload, bound.shoot, bound.scope
+			input.swap, input.move_dir = bound.swap, bound.move_dir
 		}
 
 		if client.mouse_state.locked && client.freecam_enabled {
@@ -1063,19 +1089,21 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			player_update_meshes(client.me, false)
 		}
 	}
+	audio_update_listener(client.audio, &client.camera)
 	client_tick_impacts(client, delta)
 	client_tick_projectiles(client)
 	krunker_client_tick_explosions(client, delta)
 
 	client_tick_textures(client, now)
 
+	client_update_graphics(client)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	scene_render(client.scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height))
+	scene_render(client.scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height), client.graphics_sampler)
 	player_healthbars_render(client)
 
 	gl.Clear(gl.DEPTH_BUFFER_BIT)
 	weapon_camera := camera_for_viewmodel(&client.camera)
-	scene_render(client.fps_scene, &weapon_camera, f32(client.viewport_width), f32(client.viewport_height))
+	scene_render(client.fps_scene, &weapon_camera, f32(client.viewport_width), f32(client.viewport_height), client.graphics_sampler)
 
 	ui_update(client.ui, f32(client.viewport_width), f32(client.viewport_height))
 
@@ -1119,14 +1147,21 @@ main :: proc() {
 	client := new(Client)
 	defer free(client)
 	g_client = client
-	client.show_fps = options.show_fps
-	client.display_mode = .Windowed
-	client.resolution_index = 0
-	client.sensitivity = 1.0
+	preferences := client_settings_load()
+	client.show_fps = options.show_fps || preferences.show_fps
+	client.display_mode = Display_Mode(preferences.display_mode)
+	client.resolution_index, client.monitor_index = preferences.resolution_index, preferences.monitor_index
+	client.sensitivity, client.vsync = preferences.sensitivity, preferences.vsync
+	client.mouse_dpi = preferences.mouse_dpi
+	client.ads_sensitivity = preferences.ads_sensitivity
+	client.advanced_sensitivity, client.invert_mouse = preferences.advanced_sensitivity, preferences.invert_mouse
+	client.bindings, client.hud_settings = preferences.bindings, preferences.hud
+	client.visual_settings, client.quality_settings = preferences.visuals, preferences.quality
+	defer { if client.settings_dirty { client_settings_save(client_settings_snapshot(client)) } }
 	client.selected_secondary = 2
 
 	client.camera.zoom = 1.0
-	client.camera.fov = math.PI / 2.0
+	client.camera.fov = preferences.fov * math.PI / 180
 	client.camera.near = 0.1
 	client.camera.far = 10000.0
 
@@ -1157,6 +1192,8 @@ main :: proc() {
 	glfw.SetFramebufferSizeCallback(client.window, resize_viewport)
 	glfw.SetScrollCallback(client.window, menu_scroll)
 	glfw.SetCharCallback(client.window, menu_character)
+	glfw.SetKeyCallback(client.window, client_binding_key)
+	glfw.SetMouseButtonCallback(client.window, client_binding_mouse)
 	glfw.MakeContextCurrent(client.window)
 
 	if bool(glfw.RawMouseMotionSupported()) {
@@ -1168,8 +1205,11 @@ main :: proc() {
 	defer client_mouse_fini()
 
 	gl.load_up_to(4, 5, glfw.gl_set_proc_address)
+	client_graphics_init(client)
+	defer client_graphics_fini(client)
 
-	glfw.SwapInterval(0)
+	glfw.SwapInterval(client.vsync ? 1 : 0)
+	client_apply_display_settings(client)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
 	client.scene = scene_init()
@@ -1189,6 +1229,13 @@ main :: proc() {
 	defer delete(config_path)
 	gameplay_config := shared.config_load_gameplay(config_path)
 	defer shared.config_destroy_gameplay(gameplay_config)
+	client.audio_settings = audio_settings_load()
+	client.audio = audio_create(gameplay_config.weapons, client.audio_settings)
+	defer {
+		if client.audio_settings_dirty { audio_settings_save(client.audio_settings) }
+		audio_destroy(client.audio)
+	}
+	client.game.presentation_enabled = client.audio != nil
 
 	if len(options.class_name) > 0 {
 		client.selected_class = i32(shared.class_config_index(options.class_name))
@@ -1234,15 +1281,24 @@ main :: proc() {
 		last_tick = now
 
 		client_tick(client, now, delta)
+		client_audio_tick(client, delta)
+		if client.settings_dirty {
+			client.settings_dirty = false
+			client_settings_save(client_settings_snapshot(client))
+		}
 		glfw.SwapBuffers(client.window)
 		client_poll_events()
 		free_all(context.temp_allocator)
 	}
 
+	client_access_cancel(client)
+	delete(client.access.token)
+	delete(client.access.assignment_url)
 	client_unload_map(client)
 	net_client_disconnect(&client.net)
 	krunker_ws_disconnect(&client.krunker)
 	shared.join_link_free(&client.join_link)
+	kproto.network_log_clear_secrets()
 	delete(client.join_status)
 	delete(client.selection_status)
 	kproto.krunker_world_reset(&client.krunker_world)

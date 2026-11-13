@@ -8,8 +8,25 @@ Page :: enum { HOME, SETTINGS, CONTROLS, SESSION, CLASSES, LOADOUT }
 Lobby_Presentation :: enum { STANDARD, COMPETITIVE }
 // The client owns clipboard access and session changes. The menu emits actions
 // and renders requested selections separately from confirmed lobby state.
-Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS }
+Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, LOGIN, CANCEL_JOIN, FORGET_BROWSER_SESSION, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS, AUDIO_VOLUME, SETTINGS_TAB, SETTINGS_SAVE, SETTINGS_CANCEL, BIND_KEY, HUD_TOGGLE, VSYNC, MONITOR, SETTINGS_DROPDOWN, RESOLUTION_SELECT, VISUAL_VALUE, VISUAL_RESET, TEXTURE_FILTER, ANISOTROPY, SETTINGS_NUMBER, FOV, ADVANCED_SENSITIVITY, INVERT_MOUSE }
 Action :: struct { kind: Action_Kind, index: i32, value: f32 }
+Settings_Tab :: enum { MAIN, INPUT, VIDEO, VISUALS, GAMEPLAY, AUDIO, HUD }
+Settings_Dropdown :: enum { NONE, DISPLAY_MODE, MONITOR, RESOLUTION, TEXTURE_FILTER, ANISOTROPY }
+HUD_Settings :: struct { hide_timer, hide_round_score, hide_game_score: bool }
+Settings_Values :: struct {
+	display_mode, resolution_index, monitor_index: i32,
+	fov: f32,
+	sensitivity, mouse_dpi: f32,
+	ads_sensitivity: f32,
+	advanced_sensitivity, invert_mouse: bool,
+	audio_volumes: [4]f32,
+	show_fps: bool,
+	vsync: bool,
+	bindings: Bindings,
+	hud: HUD_Settings,
+	visuals: Visual_Settings,
+	quality: Quality_Settings,
+}
 Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_jump, available: bool, reason: string, used, limit: int, portrait, weapon_icon: rawptr }
 Secondary :: struct { id: i32, name: string, icon: rawptr }
 Player :: struct { name, class_name: string, team: i32, is_you: bool }
@@ -17,6 +34,7 @@ Team :: struct { id: i32, name: string, capacity: int, available: bool, reason: 
 View :: struct {
 	presentation: Lobby_Presentation,
 	ranked, team_selection: bool,
+	browser_access_supported, auth_pending: bool,
 	classes: []Class,
 	selected_class: i32,
 	secondaries: []Secondary,
@@ -37,7 +55,21 @@ View :: struct {
 	join_status: string,
 	player_count: int,
 	display_mode: i32,
-	sensitivity: f32,
+	resolution_index: i32,
+	resolution_options: []string,
+	monitor_index: i32,
+	monitor_names: []string,
+	vsync: bool,
+	bindings: Bindings,
+	hud: HUD_Settings,
+	visuals: Visual_Settings,
+	quality: Quality_Settings,
+	max_anisotropy: f32,
+	fov: f32,
+	sensitivity, mouse_dpi: f32,
+	ads_sensitivity: f32,
+	advanced_sensitivity, invert_mouse: bool,
+	audio_volumes: [4]f32,
 	show_fps: bool,
 }
 Input :: struct {
@@ -46,8 +78,10 @@ Input :: struct {
 	backspace, clear_text, paste: bool,
 	text: string,
 	scroll: clay.Vector2,
+	up, down_key: bool,
+	binding_pressed: i32,
 }
-Control :: struct { id: clay.ElementId, action: Action, enabled, slider: bool }
+Control :: struct { id: clay.ElementId, action: Action, enabled, slider: bool, slider_min, slider_max, slider_step: f32 }
 State :: struct {
 	page: Page,
 	ctx: ^clay.Context,
@@ -63,6 +97,38 @@ State :: struct {
 	previous: Input,
 	scale: f32,
 	errors: int,
+	settings_tab: Settings_Tab,
+	settings_active: bool,
+	settings_draft: Settings_Values,
+	settings_resolution_count: i32,
+	settings_resolution_selected: bool,
+	binding_capture: i32, // action*2 + slot + 1; zero when not listening.
+	binding_reserved: bool,
+	settings_dropdown: Settings_Dropdown,
+	dropdown_return_focus: u32,
+	number_edit: Settings_Number,
+	number_buffer: [24]u8,
+	number_length: int,
+	number_replace, number_invalid, number_changed: bool,
+}
+
+prepare_settings :: proc(state: ^State, view: View) {
+	if state.page != .SETTINGS && state.page != .CONTROLS {
+		state.settings_active = false
+		state.binding_capture, state.settings_dropdown = 0, .NONE
+		state.number_edit = .NONE
+		return
+	}
+	if !state.settings_active {
+		state.settings_resolution_selected = false
+		state.settings_draft = {display_mode = view.display_mode, resolution_index = view.resolution_index,
+			fov = fov_validate(view.fov), sensitivity = view.sensitivity, mouse_dpi = mouse_dpi_validate(view.mouse_dpi), audio_volumes = view.audio_volumes, show_fps = view.show_fps,
+			ads_sensitivity = ads_sensitivity_validate(view.ads_sensitivity, view.sensitivity, view.mouse_dpi), advanced_sensitivity = view.advanced_sensitivity, invert_mouse = view.invert_mouse,
+			monitor_index = view.monitor_index, vsync = view.vsync, bindings = view.bindings, hud = view.hud, visuals = view.visuals, quality = view.quality}
+		state.settings_active = true
+	}
+	state.settings_resolution_count = i32(len(view.resolution_options))
+	if state.page == .CONTROLS { state.settings_tab = .INPUT }
 }
 
 error_handler :: proc "c" (data: clay.ErrorData) {
@@ -105,12 +171,42 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 	clay.SetCurrentContext(state.ctx)
 	clay.SetPointerState(input.pointer, input.down)
 	defer state.previous = input
+	if state.number_edit != .NONE && settings_number_interact(state, input) { return {} }
+	// Capture runs before menu shortcuts: Enter, Tab, arrows and mouse buttons
+	// can all be rebound without activating another control behind the listener.
+	if state.binding_capture != 0 {
+		code := input.binding_pressed
+		if input.escape && !state.previous.escape || code == 256 { state.binding_capture, state.binding_reserved = 0, false; return {} }
+		if code == 0 { return {} }
+		if code == 96 { state.binding_reserved = true; return {} }
+		if code == 261 { code = 0 }
+		if !binding_valid(code) { return {} }
+		action := Binding_Action((state.binding_capture-1)/2)
+		slot := (state.binding_capture-1)%2
+		state.settings_draft.bindings[action][slot] = code
+		if state.settings_draft.bindings[action][1-slot] == code { state.settings_draft.bindings[action][1-slot] = 0 }
+		state.binding_capture, state.binding_reserved, state.pressed = 0, false, 0
+		return {}
+	}
+	if state.settings_dropdown != .NONE {
+		if input.escape && !state.previous.escape {
+			state.settings_dropdown, state.focus = .NONE, state.dropdown_return_focus
+			return {}
+		}
+		if input.down && !state.previous.down && !clay.PointerOver(clay.ID("SettingsOptions")) {
+			state.settings_dropdown, state.focus, state.pressed = .NONE, state.dropdown_return_focus, 0
+			return {}
+		}
+	}
 	focused_index := -1
 	for control, i in state.controls[:state.control_count] {
 		if control.id.id == state.focus && control.enabled { focused_index = i }
 	}
 	if input.escape && !state.previous.escape {
 		state.pressed = 0
+		if state.page == .SETTINGS || state.page == .CONTROLS {
+			return activate(state, {action = {kind = .SETTINGS_CANCEL}})
+		}
 		if state.page != .HOME {
 			state.page, state.focus = back_page(state), back_focus(state)
 		} else if view.active {
@@ -130,8 +226,8 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 		}
 		if input.enter && !state.previous.enter { return {kind = .JOIN_LINK} }
 	}
-	if input.tab && !state.previous.tab {
-		step := input.shift ? -1 : 1
+	if input.tab && !state.previous.tab || state.settings_dropdown != .NONE && (input.up && !state.previous.up || input.down_key && !state.previous.down_key) {
+		step := input.shift || input.up ? -1 : 1
 		if focused_index < 0 { focused_index = input.shift ? 0 : -1 }
 		for _ in 0 ..< state.control_count {
 			focused_index = (focused_index + step + state.control_count) % state.control_count
@@ -148,7 +244,13 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 	}
 	if focused_index >= 0 && state.controls[focused_index].slider {
 		direction := (input.right && !state.previous.right ? 1 : 0) - (input.left && !state.previous.left ? 1 : 0)
-		if direction != 0 { return {kind = .SENSITIVITY, value = clamp(view.sensitivity + f32(direction) * 0.05, 0.1, 2)} }
+		if direction != 0 {
+			control := state.controls[focused_index]
+			value := settings_slider_value(state, view, control.action)
+			action := control.action
+			action.value = clamp(value + f32(direction) * control.slider_step, control.slider_min, control.slider_max)
+			return activate(state, {action = action})
+		}
 	}
 	for control in state.controls[:state.control_count] {
 		if !control.enabled { continue }
@@ -161,7 +263,9 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 		if state.pressed == control.id.id {
 			if control.slider && input.down {
 				progress := clamp((input.pointer[0] - data.boundingBox.x) / data.boundingBox.width, 0, 1)
-				return {kind = .SENSITIVITY, value = 0.1 + progress * 1.9}
+				action := control.action
+				action.value = control.slider_min + progress * (control.slider_max - control.slider_min)
+				return activate(state, {action = action})
 			}
 			if !input.down && state.previous.down && over {
 				state.pressed = 0
@@ -175,6 +279,93 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 }
 
 activate :: proc(state: ^State, control: Control) -> Action {
+	if control.action.kind == .SETTINGS_NUMBER {
+		settings_number_begin(state, Settings_Number(control.action.index))
+		return {}
+	}
+	if control.action.kind == .BIND_KEY {
+		state.binding_capture, state.binding_reserved = control.action.index+1, false
+		state.pressed = 0
+		return {}
+	}
+	if control.action.kind == .SETTINGS_DROPDOWN {
+		state.settings_dropdown = Settings_Dropdown(control.action.index)
+		data := clay.GetScrollContainerData(clay.ID("SettingsOptions"))
+		if data.found { data.scrollPosition^ = {} }
+		state.dropdown_return_focus = control.id.id
+		index: i32
+		switch state.settings_dropdown {
+		case .NONE:
+		case .DISPLAY_MODE: index = state.settings_draft.display_mode
+		case .MONITOR: index = state.settings_draft.monitor_index
+		case .RESOLUTION: index = state.settings_draft.resolution_index
+		case .TEXTURE_FILTER: index = state.settings_draft.quality.smooth_textures ? 1 : 0
+		case .ANISOTROPY:
+			for value, i in ([5]i32{0, 2, 4, 8, 16}) { if value == state.settings_draft.quality.anisotropy { index = i32(i) } }
+		}
+		state.focus = clay.ID("SettingsOption", u32(index)).id
+		return {}
+	}
+	if control.action.kind == .SETTINGS_TAB {
+		state.settings_tab = Settings_Tab(control.action.index)
+		state.page = .SETTINGS
+		state.pressed = 0
+		data := clay.GetScrollContainerData(clay.ID("SettingsPanel"))
+		if data.found { data.scrollPosition^ = {} }
+		return {}
+	}
+	if control.action.kind == .SETTINGS_SAVE || control.action.kind == .SETTINGS_CANCEL {
+		state.page, state.focus, state.pressed = .HOME, state.return_focus, 0
+		state.settings_active = false
+		state.binding_capture, state.settings_dropdown = 0, .NONE
+		state.number_edit = .NONE
+		state.binding_reserved = false
+		return control.action if control.action.kind == .SETTINGS_SAVE else Action{}
+	}
+	if state.settings_active {
+		if state.settings_dropdown != .NONE {
+			state.settings_dropdown, state.focus = .NONE, state.dropdown_return_focus
+		}
+		#partial switch control.action.kind {
+		case .DISPLAY_MODE: state.settings_draft.display_mode = control.action.index; return {}
+		case .VISUAL_VALUE:
+			if control.action.index >= 0 && control.action.index < i32(Visual_Control.FOG_DISTANCE) {
+				state.settings_draft.visuals.values[Visual_Control(control.action.index)] = control.action.value
+			}
+			return {}
+		case .VISUAL_RESET:
+			state.settings_draft.visuals = DEFAULT_VISUAL_SETTINGS
+			return {}
+		case .TEXTURE_FILTER: state.settings_draft.quality.smooth_textures = control.action.index == 1; return {}
+		case .ANISOTROPY: state.settings_draft.quality.anisotropy = ANISOTROPY_LEVELS[clamp(control.action.index, 0, 4)]; return {}
+		case .MONITOR: state.settings_draft.monitor_index = control.action.index; return {}
+		case .RESOLUTION_SELECT:
+			state.settings_draft.resolution_index = control.action.index
+			state.settings_resolution_selected = true
+			return {}
+		case .VSYNC: state.settings_draft.vsync = !state.settings_draft.vsync; return {}
+		case .HUD_TOGGLE:
+			switch control.action.index {
+			case 0: state.settings_draft.hud.hide_timer = !state.settings_draft.hud.hide_timer
+			case 1: state.settings_draft.hud.hide_round_score = !state.settings_draft.hud.hide_round_score
+			case 2: state.settings_draft.hud.hide_game_score = !state.settings_draft.hud.hide_game_score
+			}
+			return {}
+		case .RESOLUTION:
+			count := state.settings_resolution_count
+			if count > 0 {
+				state.settings_draft.resolution_index = (state.settings_draft.resolution_index + control.action.index + count) % count
+				state.settings_resolution_selected = true
+			}
+			return {}
+		case .SENSITIVITY: state.settings_draft.sensitivity = control.action.value; return {}
+		case .ADVANCED_SENSITIVITY: state.settings_draft.advanced_sensitivity = !state.settings_draft.advanced_sensitivity; return {}
+		case .INVERT_MOUSE: state.settings_draft.invert_mouse = !state.settings_draft.invert_mouse; return {}
+		case .FOV: state.settings_draft.fov = fov_validate(control.action.value); return {}
+		case .AUDIO_VOLUME: state.settings_draft.audio_volumes[control.action.index] = control.action.value; return {}
+		case .FPS: state.settings_draft.show_fps = !state.settings_draft.show_fps; return {}
+		}
+	}
 	if control.action.kind == .INSPECT_CLASS || control.action.kind == .EDIT_INVITE { return {} }
 	// Navigation changes the menu page without dispatching a gameplay action.
 	if control.action.kind == .NONE {
@@ -203,7 +394,8 @@ focus_visible :: proc(control: Control, page: Page) {
 		if page == .HOME { container = "ClassStrip" }
 		if page == .CLASSES { container = "ClassPicker" }
 	}
-	if page == .SETTINGS && (control.slider || control.action.kind == .DISPLAY_MODE || control.action.kind == .RESOLUTION || control.action.kind == .FPS) { container = "SettingsPanel" }
+	if (page == .SETTINGS || page == .CONTROLS) && (control.slider || control.action.kind == .SETTINGS_DROPDOWN || control.action.kind == .SETTINGS_NUMBER || control.action.kind == .BIND_KEY || control.action.kind == .HUD_TOGGLE || control.action.kind == .VSYNC || control.action.kind == .FPS || control.action.kind == .VISUAL_RESET || control.action.kind == .ADVANCED_SENSITIVITY || control.action.kind == .INVERT_MOUSE) { container = "SettingsPanel" }
+	if control.action.kind == .DISPLAY_MODE || control.action.kind == .MONITOR || control.action.kind == .RESOLUTION_SELECT || control.action.kind == .TEXTURE_FILTER || control.action.kind == .ANISOTROPY { container = "SettingsOptions" }
 	if control.action.kind == .SELECT_SECONDARY { container = "SecondaryPicker" }
 	if len(container) == 0 { return }
 	data := clay.GetScrollContainerData(clay.ID(container))

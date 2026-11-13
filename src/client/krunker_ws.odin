@@ -11,6 +11,7 @@ import curl "vendor:curl"
 import glfw "vendor:glfw"
 import shared "../shared"
 import kproto "../krunker"
+import accessui "../browser_access"
 
 Krunker_WS_State :: struct {
 	handle:       ^curl.CURL,
@@ -61,11 +62,12 @@ Krunker_WS_State :: struct {
 	heartbeat_logged: int,
 	snapshots_received: int,
 	server_error: string,
+	auth_rejected: bool,
 }
 
 krunker_ws_set_status :: proc(client: ^Client, text: string) {
 	delete(client.join_status)
-	client.join_status = strings.clone(text)
+	client.join_status = kproto.network_log_safe(text)
 	kproto.network_log("status", text)
 }
 
@@ -97,28 +99,37 @@ krunker_ws_game_version :: proc(value: json.Value) -> string {
 }
 
 krunker_ws_access_token :: proc() -> (string, bool) {
-	if token, ok := os.lookup_env_alloc("KRUNKER_ACCESS_TOKEN", context.allocator); ok {
-		if len(token) > 0 { kproto.network_log("auth", fmt.tprintf("source=environment KRUNKER_ACCESS_TOKEN present=true bytes=%d", len(token))); return token, true }
-		delete(token)
+	when ODIN_OS == .Windows {
+		kproto.network_log("auth", "Environment/.env token loading disabled; use Login for browser access.")
+		return "", false
+	} else {
+		if token, ok := os.lookup_env_alloc("KRUNKER_ACCESS_TOKEN", context.allocator); ok {
+			if len(token) > 0 { kproto.network_log("auth", fmt.tprintf("source=environment KRUNKER_ACCESS_TOKEN present=true bytes=%d", len(token))); return token, true }
+			delete(token)
+		}
+		data, err := os.read_entire_file_from_path(".env", context.temp_allocator)
+		if err != nil { kproto.network_log("auth", fmt.tprintf("ERROR reading .env from working directory: %v", err)); return "", false }
+		lines := strings.split_lines(string(data))
+		defer delete(lines)
+		for raw_line in lines {
+			line := strings.trim_space(raw_line)
+			if len(line) == 0 || line[0] == '#' do continue
+			eq := strings.index(line, "=")
+			if eq <= 0 || strings.trim_space(line[:eq]) != "KRUNKER_ACCESS_TOKEN" do continue
+			value := strings.trim_space(line[eq + 1:])
+			if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) { value = value[1:len(value)-1] }
+			if len(value) > 0 { kproto.network_log("auth", fmt.tprintf("source=.env KRUNKER_ACCESS_TOKEN present=true bytes=%d", len(value))); return strings.clone(value), true }
+		}
+		kproto.network_log("auth", "ERROR KRUNKER_ACCESS_TOKEN missing or empty in .env")
+		return "", false
 	}
-	data, err := os.read_entire_file_from_path(".env", context.temp_allocator)
-	if err != nil { kproto.network_log("auth", fmt.tprintf("ERROR reading .env from working directory: %v", err)); return "", false }
-	lines := strings.split_lines(string(data))
-	defer delete(lines)
-	for raw_line in lines {
-		line := strings.trim_space(raw_line)
-		if len(line) == 0 || line[0] == '#' do continue
-		eq := strings.index(line, "=")
-		if eq <= 0 || strings.trim_space(line[:eq]) != "KRUNKER_ACCESS_TOKEN" do continue
-		value := strings.trim_space(line[eq + 1:])
-		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) { value = value[1:len(value)-1] }
-		if len(value) > 0 { kproto.network_log("auth", fmt.tprintf("source=.env KRUNKER_ACCESS_TOKEN present=true bytes=%d", len(value))); return strings.clone(value), true }
-	}
-	kproto.network_log("auth", "ERROR KRUNKER_ACCESS_TOKEN missing or empty in .env")
-	return "", false
 }
 
 krunker_ws_http_failure :: proc(stage: string, status: i64, transport_ok: bool, body: []byte) -> string {
+	if transport_ok && accessui.captcha_required(body) {
+		kproto.network_log("captcha", fmt.tprintf("%s requires a CAPTCHA (HTTP %d). Access and browser session retained; no authentication retry.", stage, status))
+		return "Krunker requires a CAPTCHA for this join. Verification is needed before native matchmaking can continue."
+	}
 	safe := kproto.network_log_safe(string(body), 240)
 	defer delete(safe)
 	return fmt.tprintf("%s failed: HTTP %d, transport_ok=%v, body=%s. See logs/krunker-network.log", stage, status, transport_ok, safe)
@@ -144,18 +155,21 @@ krunker_ws_log_token_expiry :: proc(token: string) {
 	kproto.network_log("auth", "JWT exp missing; expiry unavailable")
 }
 
-krunker_ws_resolve_invite :: proc(link: ^shared.Join_Link) -> (string, bool, string) {
-	access, access_ok := krunker_ws_access_token()
-	if !access_ok { return "", false, "KRUNKER_ACCESS_TOKEN is missing; set it in .env. See logs/krunker-network.log" }
-	defer delete(access)
+krunker_ws_resolve_invite :: proc(link: ^shared.Join_Link, access: string, rejected: ^bool, http: proc(string, string, string, string) -> ([dynamic]byte, i64, bool) = kproto.network_http, captcha: string = "", needs_captcha: ^bool = nil) -> (string, bool, string) {
+	rejected^ = false
+	if needs_captcha != nil { needs_captcha^ = false }
+	if len(access) == 0 {
+		when ODIN_OS == .Windows { return "", false, "Browser access is missing. Click Login, then retry Join. See logs/krunker-network.log" }
+		else { return "", false, "KRUNKER_ACCESS_TOKEN is missing; set it in .env. See logs/krunker-network.log" }
+	}
 	kproto.network_log_secret(access)
 	krunker_ws_log_token_expiry(access)
 	access_encoded := krunker_ws_url_encode(access)
 	defer delete(access_encoded)
 	kproto.network_log_secret(access_encoded)
-	validation, validation_status, validation_ok := kproto.network_http("https://matchmaker.krunker.io/generate-token", "GET", "", "generate-token")
+	validation, validation_status, validation_ok := http("https://matchmaker.krunker.io/generate-token", "GET", "", "generate-token")
 	defer delete(validation)
-	if !validation_ok || validation_status < 200 || validation_status >= 300 || len(strings.trim_space(string(validation[:]))) == 0 {
+	if !validation_ok || validation_status < 200 || validation_status >= 300 || len(strings.trim_space(string(validation[:]))) == 0 || accessui.captcha_required(validation[:]) {
 		return "", false, krunker_ws_http_failure("matchmaker /generate-token", validation_status, validation_ok, validation[:])
 	}
 	validation_token := strings.trim_space(string(validation[:]))
@@ -166,7 +180,9 @@ krunker_ws_resolve_invite :: proc(link: ^shared.Join_Link) -> (string, bool, str
 	kproto.network_log("generate-token", fmt.tprintf("validation token received; bytes=%d (value redacted)", len(validation_token)))
 	version := strings.clone("1.0.0")
 	defer delete(version)
-	game_list, game_status, game_ok := kproto.network_http("https://matchmaker.krunker.io/game-list?hostname=krunker.io", "GET", "", "game-list")
+	game_list, game_status, game_ok := http("https://matchmaker.krunker.io/game-list?hostname=krunker.io", "GET", "", "game-list")
+	defer delete(game_list)
+	if game_ok && accessui.captcha_required(game_list[:]) { return "", false, krunker_ws_http_failure("matchmaker /game-list", game_status, true, game_list[:]) }
 	if game_ok && game_status >= 200 && game_status < 300 {
 		if value, err := json.parse_string(string(game_list[:]), parse_integers = true); err == .None {
 			delete(version)
@@ -174,7 +190,6 @@ krunker_ws_resolve_invite :: proc(link: ^shared.Join_Link) -> (string, bool, str
 			json.destroy_value(value)
 		} else { kproto.network_log("game-list", fmt.tprintf("ERROR JSON parse=%v; using fallback version=1.0.0; body=%s", err, string(game_list[:]))) }
 	} else { kproto.network_log("game-list", "WARNING game list unavailable; using fallback version=1.0.0") }
-	delete(game_list)
 	data_query, query_ok := kproto.krunker_seek_data_query(version)
 	if !query_ok { return "", false, "Could not serialize matchmaker dataQuery; see logs/krunker-network.log" }
 	defer delete(data_query)
@@ -184,9 +199,21 @@ krunker_ws_resolve_invite :: proc(link: ^shared.Join_Link) -> (string, bool, str
 	defer delete(data_encoded)
 	defer delete(game_encoded)
 	seek := fmt.tprintf("https://matchmaker.krunker.io/seek-game?hostname=krunker.io&region=sgp&autoChangeGame=false&validationToken=%s&dataQuery=%s&accessToken=%s&game=%s", validation_encoded, data_encoded, access_encoded, game_encoded)
-	assignment_body, status, ok := kproto.network_http(seek, "GET", "", "seek-game")
+	if len(captcha) > 0 {
+		if !accessui.captcha_token_valid(captcha) { return "", false, accessui.status_text("CAPTCHA_BAD_TOKEN") }
+		kproto.network_log_secret(captcha)
+		encoded := krunker_ws_url_encode(captcha); defer delete(encoded)
+		kproto.network_log_secret(encoded)
+		seek = fmt.tprintf("%s&captchaToken=%s", seek, encoded)
+		kproto.network_log("captcha", "Retrying native seek-game with the browser proof and a fresh native validation token; proof omitted.")
+	}
+	assignment_body, status, ok := http(seek, "GET", "", "seek-game")
 	defer delete(assignment_body)
-	if !ok || status < 200 || status >= 300 { return "", false, krunker_ws_http_failure("matchmaker /seek-game", status, ok, assignment_body[:]) }
+	if !ok || status < 200 || status >= 300 || accessui.captcha_required(assignment_body[:]) || accessui.token_rejected(status, assignment_body[:]) {
+		if needs_captcha != nil { needs_captcha^ = ok && accessui.captcha_required(assignment_body[:]) }
+		rejected^ = ok && accessui.token_rejected(status, assignment_body[:])
+		return "", false, krunker_ws_http_failure("matchmaker /seek-game", status, ok, assignment_body[:])
+	}
 	value, parse_err := json.parse_string(string(assignment_body[:]), parse_integers = true)
 	if parse_err != .None { kproto.network_log("seek-game", fmt.tprintf("ERROR JSON parse=%v body=%s", parse_err, string(assignment_body[:]))); return "", false, "matchmaker returned invalid JSON; see logs/krunker-network.log" }
 	defer json.destroy_value(value)
@@ -195,15 +222,24 @@ krunker_ws_resolve_invite :: proc(link: ^shared.Join_Link) -> (string, bool, str
 	host, host_ok := krunker_ws_json_string(object, "host")
 	client_key, key_ok := krunker_ws_json_string(object, "clientId")
 	game_id, game_id_ok := krunker_ws_json_string(object, "gameId")
+	port: i64 = 443
+	if raw_port, found := object["port"]; found {
+		if parsed, ok := raw_port.(json.Integer); ok && parsed > 0 && parsed <= 65535 { port = i64(parsed) }
+	}
 	if key_ok { kproto.network_log_secret(client_key) }
-	kproto.network_log("seek-game", fmt.tprintf("assignment host_present=%v clientId_present=%v gameId_present=%v body=%s", host_ok, key_ok, game_id_ok, string(assignment_body[:])))
+	kproto.network_log("seek-game", fmt.tprintf("assignment host_present=%v clientId_present=%v gameId_present=%v port=%d body=%s", host_ok, key_ok, game_id_ok, port, string(assignment_body[:])))
 	if !host_ok || !key_ok || !game_id_ok || len(host) == 0 || len(client_key) == 0 || len(game_id) == 0 { return "", false, "matchmaker response omitted host, clientId, or gameId; see logs/krunker-network.log" }
 	resolved_game := krunker_ws_url_encode(game_id)
 	resolved_key := krunker_ws_url_encode(client_key)
 	defer delete(resolved_game)
 	defer delete(resolved_key)
 	kproto.network_log_secret(resolved_key)
-	url := fmt.aprintf("wss://%s/ws?gameId=%s&clientKey=%s&at=%s", host, resolved_game, resolved_key, access_encoded)
+	url := ""
+	if accessui.assignment_uses_explicit_port(host, port) {
+		url = fmt.aprintf("wss://%s:%d/ws?gameId=%s&clientKey=%s&at=%s", host, port, resolved_game, resolved_key, access_encoded)
+	} else {
+		url = fmt.aprintf("wss://%s/ws?gameId=%s&clientKey=%s&at=%s", host, resolved_game, resolved_key, access_encoded)
+	}
 	return url, true, ""
 }
 
@@ -249,8 +285,9 @@ krunker_ws_message :: proc(opcode: string, ah_num: ^u8, q_index: int, team: i32 
 	case "v":
 		krunker_ws_pack_array(&message, 1); krunker_ws_pack_string(&message, "v")
 	case "en":
-		krunker_ws_pack_array(&message, 14); krunker_ws_pack_string(&message, "en")
-		krunker_ws_pack_array(&message, 34)
+		// Build 5fHFc: opcode + 12 arguments, including the 35-field loadout.
+		krunker_ws_pack_array(&message, 13); krunker_ws_pack_string(&message, "en")
+		krunker_ws_pack_array(&message, 35)
 		krunker_ws_pack_int(&message, class_index); krunker_ws_pack_int(&message, 2482)
 		krunker_ws_pack_array(&message, 2); krunker_ws_pack_int(&message, -1); krunker_ws_pack_int(&message, -1)
 		values := [?]i32{-1, -1, 2, 0, 0, 1, -1, -1, 1, 0, -1, -1, -1, -1, -1, -1, 0, -1, -1, 1, 1, 1, -1, -1, -1, 0}
@@ -258,9 +295,10 @@ krunker_ws_message :: proc(opcode: string, ah_num: ^u8, q_index: int, team: i32 
 		for value in values { krunker_ws_pack_int(&message, value) }
 		krunker_ws_pack_array(&message, 2); krunker_ws_pack_nil(&message); krunker_ws_pack_int(&message, -1)
 		krunker_ws_pack_int(&message, -1); krunker_ws_pack_int(&message, -1); krunker_ws_pack_int(&message, -1); krunker_ws_pack_int(&message, 1)
+		krunker_ws_pack_int(&message, -1) // titleIndex; no equipped title
 		krunker_ws_pack_int(&message, 16); krunker_ws_pack_int(&message, 18)
 		for _ in 0 ..< 6 { append(&message, 0xC2) }
-		krunker_ws_pack_nil(&message); append(&message, 0xC2); append(&message, 0xC2); append(&message, 0xC2)
+		krunker_ws_pack_nil(&message); append(&message, 0xC2); append(&message, 0xC2)
 	case "team":
 		krunker_ws_pack_array(&message, 3); krunker_ws_pack_string(&message, "cd"); krunker_ws_pack_string(&message, "t"); krunker_ws_pack_int(&message, team)
 	case "class":
@@ -304,7 +342,7 @@ krunker_ws_send_internal :: proc(state: ^Krunker_WS_State, opcode: string, queue
 	state.ah_num = next_counter
 	if opcode == "v" && state.spawned { state.heartbeat_logged += 1 }
 	if opcode != "v" || !state.spawned || state.heartbeat_logged <= 3 || state.heartbeat_logged % 120 == 0 {
-		kproto.network_log("ws-send", fmt.tprintf("opcode=%s bytes=%d counter=%d q_index=%d pending=%d", opcode, sent, state.ah_num, state.q_index, len(state.pending)))
+		kproto.network_log("ws-send", fmt.tprintf("opcode=%s bytes=%d counter=%d trailer=[%02x %02x] q_index=%d pending=%d", opcode, sent, state.ah_num, packet[len(packet)-2], packet[len(packet)-1], state.q_index, len(state.pending)))
 	}
 	if opcode == "q" { state.q_index += 1 }
 	return true
@@ -435,6 +473,13 @@ krunker_ws_apply_world :: proc(client: ^Client, payload: []byte, send_control: p
 				kproto.network_log("server-error", fmt.tprintf("opcode=%s args=%v", opcode, packet[1:]))
 				reason := "Server did not supply a text reason"
 				if len(packet) > 1 { if text, ok := packet[1].(string); ok && len(text) > 0 { reason = text } }
+				when ODIN_OS == .Windows {
+					if !state.ready_received && client_access_browser_link(&client.join_link) && accessui.token_rejection_reason(reason) {
+						// Defer cleanup/retry until the next client tick, outside packet iteration.
+						state.auth_rejected, state.connected = true, false
+						return
+					}
+				}
 				client.team_pending = false
 				client.spawn_pending = false
 				client.requested_team = client.lobby_team
@@ -606,18 +651,62 @@ krunker_ws_disconnect :: proc(state: ^Krunker_WS_State) {
 }
 
 krunker_ws_connect :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
+	when ODIN_OS == .Windows {
+		if client.access.status == .PENDING { return true }
+		client.access.captcha_retried = false
+		if client_access_browser_link(link) && !client_access_select(client, time.time_to_unix(time.now())) {
+			return client_access_begin(client)
+		}
+	}
+	return krunker_ws_connect_ready(client, link)
+}
+
+krunker_ws_connect_ready :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
 	krunker_ws_disconnect(&client.krunker)
 	state := &client.krunker
 	if curl.global_init(curl.GLOBAL_DEFAULT) != .E_OK { krunker_ws_set_status(client, "Could not initialize libcurl for Krunker WebSocket."); return false }
 	state.global_ready = true
-	kproto.network_log("curl", fmt.tprintf("library=%s", string(curl.version())))
+	kproto.network_log("curl", fmt.tprintf("library=%s protocol_build=%s counter_increment=%d", string(curl.version()), kproto.KRUNKER_PROTOCOL_BUILD, kproto.KRUNKER_COUNTER_INCREMENT))
 	kproto.network_log("invite", fmt.tprintf("scheme=%s host=%s port=%d path=%s game=%s team_hint=%s", link.scheme, link.host, link.port, link.path, link.game_id, link.team_hint))
 	url := ""
 	if link.scheme == "http" || link.scheme == "https" || link.scheme == "game" {
 		krunker_ws_set_status(client, "Resolving lobby through Krunker matchmaker…")
-		resolved_url, ok, error_text := krunker_ws_resolve_invite(link)
+		token := client.access.token
+		legacy := ""
+		defer delete(legacy)
+		when ODIN_OS != .Windows {
+			legacy, _ = krunker_ws_access_token()
+			token = legacy
+		}
+		rejected, needs_captcha: bool
+		proof := client.access.captcha_token
+		client.access.captcha_token = ""
+		defer delete(proof)
+		resolved_url := ""
+		ok := false
+		error_text := ""
+		if len(client.access.assignment_url) > 0 {
+			resolved_url, ok = strings.clone(client.access.assignment_url), true
+			delete(client.access.assignment_url); client.access.assignment_url = ""
+			kproto.network_log("captcha", "Using the exact browser-selected WebSocket URL through native libcurl; assigned browser socket was never opened.")
+		} else {
+			resolved_url, ok, error_text = krunker_ws_resolve_invite(link, token, &rejected, captcha = proof, needs_captcha = &needs_captcha)
+		}
 		url = resolved_url
-		if !ok { krunker_ws_set_status(client, error_text); krunker_ws_disconnect(state); return false }
+		if !ok {
+			krunker_ws_disconnect(state)
+			when ODIN_OS == .Windows {
+				if needs_captcha {
+					if !client.access.captcha_retried {
+						if client_captcha_begin(client) { return true }
+						if client.access.status == .ERROR { return false }
+					} else { error_text = accessui.status_text("CAPTCHA_REJECTED") }
+				}
+				if client_access_retry(client, rejected) { return true }
+			}
+			krunker_ws_set_status(client, error_text); return false
+		}
+		if len(proof) > 0 { kproto.network_log("captcha", "Native matchmaking accepted the challenge handoff; opening the existing native WebSocket transport.") }
 	} else if link.scheme == "ws" || link.scheme == "wss" {
 		url = strings.clone(link.raw)
 	} else {
@@ -661,6 +750,13 @@ krunker_ws_connect :: proc(client: ^Client, link: ^shared.Join_Link) -> bool {
 	status := kproto.network_http_info(handle, "websocket", code, string(cast(cstring)&state.error_buffer[0]))
 	kproto.network_log("websocket", fmt.tprintf("upgrade response headers=%s body=%s", string(state.upgrade_capture.headers[:]), string(state.upgrade_capture.body[:])))
 	if code != .E_OK {
+		when ODIN_OS == .Windows {
+			rejected := accessui.token_rejected(status, state.upgrade_capture.body[:])
+			if rejected && client_access_browser_link(link) {
+				krunker_ws_disconnect(state)
+				if client_access_retry(client, true) { return true }
+			}
+		}
 		krunker_ws_set_status(client, fmt.tprintf("Krunker WebSocket upgrade failed: HTTP %d curl=%v; see logs/krunker-network.log", status, code)); krunker_ws_disconnect(state); return false
 	}
 	state.connected = true
