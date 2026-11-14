@@ -49,6 +49,7 @@ Krunker_WS_State :: struct {
 	bootstrap_step: int,
 	last_server_message: string,
 	input_elapsed: f64,
+	input_duration_remainder_ms: f64,
 	send_elapsed: f64,
 	input_commands: [dynamic]shared.Input,
 	input_reset: bool,

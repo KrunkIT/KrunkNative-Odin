@@ -6,10 +6,11 @@ import shared "../shared"
 import kproto "../krunker"
 import glfw "vendor:glfw"
 
-// Integer milliseconds match Krunker's simulation clock. This is close to the
-// browser's default 144 Hz input rate, independently of rendering and sending.
-KRUNKER_INPUT_SECONDS :: 0.007
+// Sample independently of rendering and sending; wire durations use whole ms.
+KRUNKER_INPUT_RATE :: 360
+KRUNKER_INPUT_SECONDS :: 1.0 / KRUNKER_INPUT_RATE
 KRUNKER_SEND_SECONDS :: 1.0 / 30.0
+KRUNKER_MAX_PREDICTED_INPUTS :: 2 * KRUNKER_INPUT_RATE
 
 Krunker_Render_Sample :: struct {
 	position: shared.Vec3,
@@ -30,6 +31,7 @@ krunker_client_reset_prediction :: proc(client: ^Client) {
 	clear(&client.predicted_inputs)
 	clear(&client.krunker.input_commands)
 	client.krunker.input_elapsed = 0
+	client.krunker.input_duration_remainder_ms = 0
 	client.krunker.send_elapsed = 0
 	client.krunker.input_swap = 0
 	client.krunker.render_sample_ready = false
@@ -56,11 +58,16 @@ krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input, now:
 	state.input_elapsed += f64(clamp(frame.delta, 0, 0.1))
 	state.send_elapsed += f64(clamp(frame.delta, 0, 0.1))
 	// Frame delta originates as f32; tolerate its sub-microsecond rounding at
-	// an exact command boundary without losing an entire 7 ms command.
+	// an exact command boundary without losing an entire input command.
 	for state.input_elapsed + 1e-7 >= KRUNKER_INPUT_SECONDS {
 		command := frame^
 		command.seq = state.input_sequence
-		command.delta = f32(clamp(i32(math.round(KRUNKER_INPUT_SECONDS * 1000 * f64(client.game.config.delta_mlt))), 1, 33)) / 1000
+		// Carry fractional milliseconds so 360 commands advance one second,
+		// rather than 1.08 seconds from rounding every command to 3 ms.
+		duration_ms := clamp(KRUNKER_INPUT_SECONDS * 1000 * f64(client.game.config.delta_mlt), 1, 33) + state.input_duration_remainder_ms
+		rounded_ms := math.round(duration_ms)
+		state.input_duration_remainder_ms = duration_ms - rounded_ms
+		command.delta = f32(rounded_ms) / 1000
 		command.x_dir = math.round(look.x * 1000) / 1000
 		command.y_dir = math.round(shared.normalize_angle(look.y) * 1000) / 1000
 		command.swap = state.input_swap
@@ -76,7 +83,7 @@ krunker_client_predict_input :: proc(client: ^Client, frame: ^shared.Input, now:
 		append(&state.input_commands, command)
 		// Keep client-only impulse metadata produced by prediction for replay.
 		append(&client.predicted_inputs, command)
-		if len(client.predicted_inputs) > MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }
+		if len(client.predicted_inputs) > KRUNKER_MAX_PREDICTED_INPUTS { ordered_remove(&client.predicted_inputs, 0) }
 		state.command_direction = client.me.direction
 		state.render_current = {client.me.position, client.me.aim_val}
 		state.input_sequence += 1

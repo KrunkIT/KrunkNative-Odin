@@ -27,7 +27,7 @@ when ODIN_TEST {
 				can_slide = player.can_slide, weapon_slot = 0,
 				has_ack = true, ack_seq = 12, sync_revision = 1,
 			}
-			frame := shared.Input{delta = 0.007, move_dir = -1, shoot = true, x_dir = -math.PI/2}
+			frame := shared.Input{delta = f32(KRUNKER_INPUT_SECONDS), move_dir = -1, shoot = true, x_dir = -math.PI/2}
 			ammo := player.ammo[0]
 			krunker_client_predict_input(&client, &frame)
 			if !testing.expect(t, player.velocity.y > 0 && !player.on_ground, "fresh predicted ground shots must immediately lift the shooter") do return

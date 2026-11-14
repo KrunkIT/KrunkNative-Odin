@@ -115,10 +115,17 @@ when ODIN_TEST {
 			captured, reconciled := false, false
 			elapsed: f64
 			last_ack: i32 = 12
+			transmitted_ms: i32
 			for elapsed < 1.40000001 {
 				delta := min(1/f64(fps), 1.40000001-elapsed)
 				frame := shared.Input{delta = f32(delta), move_dir = 0, x_dir = 0.123456, y_dir = 0.713876}
+				pending_count := len(client.krunker.input_commands)
 				krunker_client_predict_input(&client, &frame)
+				for command in client.krunker.input_commands[pending_count:] {
+					testing.expect(t, command.delta == 0.002 || command.delta == 0.003,
+						"360 Hz commands must use wire-compatible 2 or 3 ms durations")
+					transmitted_ms += i32(math.round(command.delta * 1000))
+				}
 				elapsed += delta
 				if client.krunker.send_elapsed >= KRUNKER_SEND_SECONDS && len(client.krunker.input_commands) > 0 {
 					last_ack = krunker_test_deliver_commands(t, &client, server)
@@ -126,6 +133,8 @@ when ODIN_TEST {
 				// Real l corrections arrive once per second. Delay this one a
 				// further 100 ms, so replay includes both sent and unsent commands.
 				if !captured && elapsed >= 1 {
+					testing.expect(t, len(client.predicted_inputs) == int(client.krunker.input_sequence-13),
+						"prediction must retain at least one second of commands while waiting for the first ACK")
 					snapshot = {position = server.position, velocity = server.velocity, on_ground = server.on_ground,
 						weapon_slot = 0, can_slide = true, has_ack = true, ack_seq = last_ack, sync_revision = 1}
 					captured = true
@@ -139,7 +148,9 @@ when ODIN_TEST {
 				}
 			}
 			for len(client.krunker.input_commands) > 0 { krunker_test_deliver_commands(t, &client, server) }
-			testing.expect(t, client.krunker.input_sequence == 213, "1.4 seconds must produce 200 unique 7 ms commands at every display rate")
+			testing.expect(t, client.krunker.input_sequence == 517, "1.4 seconds must produce 504 unique commands at 360 Hz at every display rate")
+			testing.expect(t, transmitted_ms == 1400,
+				"fractional command durations must preserve elapsed time without movement or cooldown speedup")
 			testing.expect(t, abs(client.me.position.x-server.position.x) < 0.0001 && abs(client.me.position.z-server.position.z) < 0.0001,
 				"local prediction must match the peer that processed the actual wire commands")
 			if rate_index == 0 { baseline = client.me.position }
@@ -162,13 +173,14 @@ when ODIN_TEST {
 		state.input_sequence = 650
 		state.ah_num = 239
 		state.input_elapsed, state.send_elapsed = 0.004, 0.02
+		state.input_duration_remainder_ms = 0.25
 		append(&client.predicted_inputs, shared.Input{seq = 648}, shared.Input{seq = 649})
 		append(&state.input_commands, shared.Input{seq = 649})
 		failure, ok := kproto.krunker_msgpack_encode_packet("f", []kproto.Krunker_Msgpack_Value{i64(4)}, 0)
 		if !testing.expect(t, ok) { return }
 		defer delete(failure)
 		krunker_ws_apply_world(&client, failure)
-		testing.expect(t, len(client.predicted_inputs) == 0 && len(state.input_commands) == 0 && state.input_elapsed == 0,
+		testing.expect(t, len(client.predicted_inputs) == 0 && len(state.input_commands) == 0 && state.input_elapsed == 0 && state.input_duration_remainder_ms == 0,
 			"INPUT_FAILED must discard rejected prediction and the unsent batch")
 		testing.expect(t, state.input_reset && state.input_sequence == 650 && state.ah_num == 239,
 			"recovery must request a wire reset without rewinding the monotonic sequence or packet counter")
@@ -236,7 +248,7 @@ when ODIN_TEST {
 		krunker_client_predict_input(&client, &frame)
 		frame.swap = 0
 		for _ in 0..<20 { krunker_client_predict_input(&client, &frame) }
-		if !testing.expect(t, len(client.krunker.input_commands) == 3, "render frames must accumulate into command ticks") { return }
+		if !testing.expect(t, len(client.krunker.input_commands) == 7, "21 ms of render frames must accumulate into seven 360 Hz commands") { return }
 		testing.expect(t, client.krunker.input_commands[0].swap == 2 && client.krunker.input_commands[1].swap == 0 && client.me.weapon.melee,
 			"a swap pressed between ticks must reach both prediction and the outgoing queue exactly once")
 		frame.x_dir, frame.y_dir = 0.2, 0.4

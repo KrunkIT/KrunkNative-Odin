@@ -272,7 +272,10 @@ after `start` and a matching local player position arrive. Team/class entry wait
 `ready` and sends the bootstrap in paced steps. If the server reports `gmsg("wt")`,
 the menu shows that it is waiting for players; that state has no confirmed spawn yet.
 After spawning, keyboard/mouse input is sent as live `q` batches with local prediction
-and authoritative position corrections.
+and authoritative position corrections. Input simulation runs at 360 Hz, with
+30 network batches per second. Command durations alternate between whole
+milliseconds to preserve elapsed time, and prediction retains two seconds of
+commands for delayed server acknowledgements.
 
 Live match clocks/scores, objectives, team and round changes, movement locks,
 player flags, interaction progress, hit confirmations, and standard projectile
