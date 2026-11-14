@@ -45,6 +45,14 @@ Client :: struct {
 	hud_settings: menuui.HUD_Settings,
 	visual_settings: menuui.Visual_Settings,
 	quality_settings: menuui.Quality_Settings,
+	viewmodel_settings: menuui.Viewmodel_Settings,
+	trail_settings: menuui.Trail_Settings,
+	crosshair_settings: menuui.Crosshair_Settings,
+	aim_pressed, aim_toggled: bool,
+	inspect_pressed: bool,
+	inspect_weapon: ^shared.Weapon,
+	inspect_slot: i32,
+	inspect_angle, inspect_time: f32,
 	graphics_sampler: u32,
 	graphics_sampler_ready: bool,
 	graphics_quality: menuui.Quality_Settings,
@@ -355,7 +363,10 @@ client_load_map :: proc(client: ^Client) {
 	for i in 0 ..< len(client.game.map_inst.objects) {
 		object := client.game.map_inst.objects[i]
 		if object.mesh != nil {
-			scene_add_mesh(client.scene, cast(^Mesh)object.mesh)
+			mesh := cast(^Mesh)object.mesh
+			mesh.map_detail = map_object_detail(object)
+			mesh.map_detail_visible = mesh.visible
+			scene_add_mesh(client.scene, mesh)
 		}
 	}
 }
@@ -979,6 +990,10 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 	}
 
 	noclip_key := !client_binding_used(client, glfw.KEY_N) && glfw.GetKey(client.window, glfw.KEY_N) == glfw.PRESS
+	aim_down := client_action_down(client, .AIM)
+	scope_input := client_aim_input(client, aim_down, client.me != nil && client.me.active && client.mouse_state.locked && !client.freecam_enabled)
+	inspect_down := client_action_down(client, .INSPECT)
+	inspect_cancel := false
 
 	if client.me != nil && client.me.active {
 		input := shared.Input{}
@@ -1006,9 +1021,10 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 			held: [menuui.Binding_Action]bool
 			for action in menuui.Binding_Action { held[action] = client_action_down(client, action) }
 			bound := client_bound_input(held, &client.last_swap_key)
-			input.jump, input.crouch, input.reload, input.shoot, input.scope = bound.jump, bound.crouch, bound.reload, bound.shoot, bound.scope
+			input.jump, input.crouch, input.reload, input.shoot, input.scope = bound.jump, bound.crouch, bound.reload, bound.shoot, scope_input
 			input.swap, input.move_dir = bound.swap, bound.move_dir
 		}
+		inspect_cancel = input.shoot || input.scope || input.reload || input.swap != 0
 
 		if client.mouse_state.locked && client.freecam_enabled {
 			client_update_freecam(client, mouse_delta, delta)
@@ -1053,13 +1069,14 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 				if player != client.me {
 					shared.player_interpolate(player, delta)
 				}
-				if player.mesh != nil {
+				if player.mesh != nil && (player != client.me || client.freecam_enabled) {
 					player_update_meshes(player, false)
 				}
 			}
 		}
 		shared.game_tick_projectiles(&client.game, delta * client.game.config.delta_mlt)
 	}
+	client_update_inspect(client, inspect_down, client.mouse_state.locked && !client.freecam_enabled, inspect_cancel, delta)
 	client_update_objective_visuals(client)
 
 	// Camera and view-model transforms must use the state produced by this
@@ -1083,9 +1100,9 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 		client.camera.rotation.x = client.me.direction.x + client.me.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt
 		client.camera.rotation.y = client.me.direction.y
-		client.camera.zoom = 1.0 + (client.me.weapon.zoom - 1.0) * view_aim
+		client.camera.zoom = viewmodel_zoom(client.me.weapon.zoom, view_aim, client_viewmodel_values(client))
 
-		if client.me.mesh != nil && !client.net.connected && !client.krunker.connected {
+		if client.me.mesh != nil {
 			player_update_meshes(client.me, false)
 		}
 	}
@@ -1098,11 +1115,14 @@ client_tick :: proc(client: ^Client, now, delta: f32) {
 
 	client_update_graphics(client)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	saved_fov := client.camera.fov
+	client.camera.fov = client_world_fov(client)
 	scene_render(client.scene, &client.camera, f32(client.viewport_width), f32(client.viewport_height), client.graphics_sampler)
+	client.camera.fov = saved_fov
 	player_healthbars_render(client)
 
 	gl.Clear(gl.DEPTH_BUFFER_BIT)
-	weapon_camera := camera_for_viewmodel(&client.camera)
+	weapon_camera := camera_for_viewmodel(&client.camera, client_viewmodel_values(client))
 	scene_render(client.fps_scene, &weapon_camera, f32(client.viewport_width), f32(client.viewport_height), client.graphics_sampler)
 
 	ui_update(client.ui, f32(client.viewport_width), f32(client.viewport_height))
@@ -1157,6 +1177,9 @@ main :: proc() {
 	client.advanced_sensitivity, client.invert_mouse = preferences.advanced_sensitivity, preferences.invert_mouse
 	client.bindings, client.hud_settings = preferences.bindings, preferences.hud
 	client.visual_settings, client.quality_settings = preferences.visuals, preferences.quality
+	client.viewmodel_settings = preferences.viewmodel
+	client.trail_settings = preferences.trails
+	client.crosshair_settings = preferences.crosshair
 	defer { if client.settings_dirty { client_settings_save(client_settings_snapshot(client)) } }
 	client.selected_secondary = 2
 

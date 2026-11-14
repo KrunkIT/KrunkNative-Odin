@@ -3,14 +3,15 @@ package main
 import "core:math"
 import "core:math/linalg"
 import shared "../shared"
+import menuui "../menu"
 
 // Current Krunker settings default fpsFOV to 95 degrees. The first-person
 // camera shares the world pose and ADS zoom, with its own projection.
 DEFAULT_WEAPON_FOV :: 95.0 * math.PI / 180.0
 
-camera_for_viewmodel :: proc(camera: ^Camera) -> Camera {
+camera_for_viewmodel :: proc(camera: ^Camera, settings: menuui.Viewmodel_Settings = menuui.DEFAULT_VIEWMODEL_SETTINGS) -> Camera {
 	result := camera^
-	result.fov = DEFAULT_WEAPON_FOV
+	result.fov = menuui.viewmodel_settings_validate(settings).values[.WEAPON_FOV] * math.PI/180
 	result.near = 0.1
 	result.far = 200
 	return result

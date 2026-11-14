@@ -53,6 +53,7 @@ visual_adjust_color :: proc(color: shared.Vec3, visuals: menuui.Visual_Settings)
 client_update_graphics :: proc(client: ^Client) {
 	visuals, quality := client_graphics_values(client)
 	g_visual_settings = menuui.visual_settings_validate(visuals)
+	client_update_map_details(client, g_visual_settings)
 	base := shared.DEFAULT_LIGHTING_CONFIG
 	if client.game.map_inst != nil { base = client.game.map_inst.lighting }
 	g_lighting_config = base

@@ -14,8 +14,8 @@ MIN_CM360 :: 0.1
 MAX_CM360 :: 2000.0
 DEFAULT_FOV :: 90.0
 MIN_FOV :: 60.0
-MAX_FOV :: 120.0
-Settings_Number :: enum { NONE, DPI, CM360, ADS_CM360 }
+MAX_FOV :: 150.0
+Settings_Number :: enum { NONE, DPI, CM360, ADS_CM360, SLIDER }
 
 // FOV is the vertical world-camera angle, in degrees.
 fov_validate :: proc(fov: f32) -> f32 {
@@ -62,13 +62,14 @@ settings_sensitivity :: proc(state: ^State) {
 		settings_number_row(state, "ADS (cm/360)", "AdsSensitivity", .ADS_CM360)
 	}
 	message := state.settings_draft.advanced_sensitivity ? "Hipfire and fully aimed ADS each use their own cm/360, independent of FOV and weapon zoom. Invert mouse reverses vertical look." : "Enter your DPI and hipfire cm/360. FOV changes preserve this distance. Enable Advanced sensitivity to set ADS separately; otherwise ADS scales with weapon zoom."
-	if state.number_invalid {
+	if state.number_invalid && state.number_edit != .SLIDER {
 		message = state.number_edit == .DPI ? "Enter a whole-number DPI from 100 to 100000." : "Enter a cm/360 value from 0.1 to 2000."
 	}
 	settings_note(message, state.scale)
 }
 
 settings_number_value :: proc(state: ^State, field: Settings_Number) -> f32 {
+	if field == .SLIDER { return settings_slider_value(state, {}, state.number_control.action) * settings_number_scale(state) }
 	if field == .DPI { return mouse_dpi_validate(state.settings_draft.mouse_dpi) }
 	if field == .ADS_CM360 { return cm360_from_sensitivity(ads_sensitivity_validate(state.settings_draft.ads_sensitivity, state.settings_draft.sensitivity, state.settings_draft.mouse_dpi), state.settings_draft.mouse_dpi) }
 	return cm360_from_sensitivity(state.settings_draft.sensitivity, state.settings_draft.mouse_dpi)
@@ -100,15 +101,44 @@ settings_number_row :: proc(state: ^State, label, name: string, field: Settings_
 settings_number_begin :: proc(state: ^State, field: Settings_Number) {
 	state.number_edit, state.number_invalid, state.number_replace, state.number_changed = field, false, true, false
 	value := settings_number_value(state, field)
-	label := field == .DPI ? fmt.tprintf("%.0f", value) : fmt.tprintf("%.6f", value)
+	label := field == .DPI ? fmt.tprintf("%.0f", value) : field == .SLIDER ? fmt.tprintf("%g", value) : fmt.tprintf("%.6f", value)
 	state.number_length = copy(state.number_buffer[:], transmute([]u8)label)
 	state.pressed = 0
+	if field == .SLIDER { state.focus = state.number_control.id.id }
+}
+
+// Audio fields display percentages; all other sliders use their native units.
+settings_number_scale :: proc(state: ^State) -> f32 {
+	return state.number_control.action.kind == .AUDIO_VOLUME ? 100 : 1
+}
+
+settings_number_hint :: proc(state: ^State) -> string {
+	if state.number_invalid && state.number_edit == .SLIDER {
+		scale := settings_number_scale(state)
+		unit := scale == 100 ? "%" : ""
+		return fmt.tprintf("Enter a number from %g%s to %g%s.", state.number_control.slider_min*scale, unit, state.number_control.slider_max*scale, unit)
+	}
+	if state.number_edit != .NONE { return "Enter applies the value. Escape discards this edit. Save keeps changes." }
+	return "Click a value to type. Save keeps your changes."
 }
 
 settings_number_commit :: proc(state: ^State) -> bool {
 	if !state.number_changed { state.number_edit = .NONE; return true }
-	value, ok := strconv.parse_f32(strings.trim_space(string(state.number_buffer[:state.number_length])))
+	input := strings.trim_space(string(state.number_buffer[:state.number_length]))
+	if state.number_edit == .SLIDER && state.number_control.action.kind == .AUDIO_VOLUME { input = strings.trim_space(strings.trim_suffix(input, "%")) }
+	value, ok := strconv.parse_f32(input)
 	ok = ok && !math.is_nan(value) && !math.is_inf(value)
+	if state.number_edit == .SLIDER {
+		scale := settings_number_scale(state)
+		ok = ok && value >= state.number_control.slider_min*scale && value <= state.number_control.slider_max*scale
+		if !ok { state.number_invalid = true; return false }
+		action := state.number_control.action
+		action.value = value/scale
+		// Reuse the slider's draft action so previews and Save/Cancel stay identical.
+		activate(state, {action=action})
+		state.number_edit, state.number_invalid = .NONE, false
+		return true
+	}
 	if state.number_edit == .DPI {
 		ok = ok && value >= MIN_MOUSE_DPI && value <= MAX_MOUSE_DPI && math.round(value) == value
 	} else { ok = ok && value >= MIN_CM360 && value <= MAX_CM360 }
@@ -123,6 +153,7 @@ settings_number_commit :: proc(state: ^State) -> bool {
 	case .CM360: state.settings_draft.sensitivity = sensitivity_from_cm360(value, state.settings_draft.mouse_dpi)
 	case .ADS_CM360: state.settings_draft.ads_sensitivity = sensitivity_from_cm360(value, state.settings_draft.mouse_dpi)
 	case .NONE:
+	case .SLIDER: unreachable()
 	}
 	state.number_edit, state.number_invalid = .NONE, false
 	return true
@@ -150,7 +181,8 @@ settings_number_interact :: proc(state: ^State, input: Input) -> bool {
 		}
 	}
 	if input.enter && !state.previous.enter { settings_number_commit(state); return true }
-	if input.tab && !state.previous.tab || input.down && !state.previous.down && !clay.PointerOver(settings_number_id(state.number_edit)) {
+	id := state.number_edit == .SLIDER ? state.number_control.id : settings_number_id(state.number_edit)
+	if input.tab && !state.previous.tab || input.down && !state.previous.down && !clay.PointerOver(id) {
 		return !settings_number_commit(state)
 	}
 	return true

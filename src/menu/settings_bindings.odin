@@ -11,7 +11,8 @@ settings_bindings :: proc(state: ^State) {
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, childAlignment = {x = .Center}}}) { text(label, 16, s, SETTINGS_MUTED) }
 		}
 	}
-	for action in Binding_Action {
+	// Display inspect with weapons while preserving saved enum values.
+	for action in ([len(Binding_Action)]Binding_Action{.FORWARD, .BACKWARD, .LEFT, .RIGHT, .JUMP, .CROUCH, .AIM, .FIRE, .RELOAD, .INSPECT, .SECONDARY, .MELEE, .MENU, .FULLSCREEN}) {
 		if action == .FORWARD { settings_section("Move", s) }
 		if action == .AIM { settings_section("Weapon", s) }
 		if action == .MENU { settings_section("System", s) }
@@ -49,6 +50,7 @@ settings_dropdown_menu :: proc(state: ^State, view: View) {
 	mode_labels := [3]string{"Windowed", "Borderless", "Fullscreen"}
 	filter_labels := [2]string{"Sharp", "Smooth"}
 	anisotropy_labels := [5]string{"Off", "2x", "4x", "8x", "16x"}
+	crosshair_labels := [2]string{"Precision", "Image (coming later)"}
 	labels: []string
 	anchor: string
 	action: Action_Kind
@@ -58,6 +60,7 @@ settings_dropdown_menu :: proc(state: ^State, view: View) {
 	case .MONITOR: labels, anchor, action = view.monitor_names, "Monitor", .MONITOR
 	case .RESOLUTION: labels, anchor, action = view.resolution_options, "Resolution", .RESOLUTION_SELECT
 	case .TEXTURE_FILTER: labels, anchor, action = filter_labels[:], "TextureFiltering", .TEXTURE_FILTER
+	case .CROSSHAIR_TYPE: labels, anchor, action = crosshair_labels[:], "CrosshairType", .CROSSHAIR_TYPE
 	case .ANISOTROPY:
 		count := 1
 		for level in ([4]f32{2, 4, 8, 16}) { if level <= view.max_anisotropy { count += 1 } }
@@ -77,8 +80,9 @@ settings_dropdown_menu :: proc(state: ^State, view: View) {
 	}) {
 		for label, i in labels {
 			id := clay.ID("SettingsOption", u32(i))
-			register(state, {id = id, action = {kind = action, index = i32(i)}, enabled = true})
-			if clay.UI(id)({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(48*s)}, padding = {left = u16(12*s), right = u16(12*s)}, childAlignment = {y = .Center}}, backgroundColor = state.focus == id.id || clay.PointerOver(id) ? SETTINGS_ORANGE : SETTINGS_DARK}) { text(shorten(label, 30), 20, s) }
+			enabled := action != .CROSSHAIR_TYPE || i == 0
+			register(state, {id = id, action = {kind = action, index = i32(i)}, enabled = enabled})
+			if clay.UI(id)({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(48*s)}, padding = {left = u16(12*s), right = u16(12*s)}, childAlignment = {y = .Center}}, backgroundColor = enabled && (state.focus == id.id || clay.PointerOver(id)) ? SETTINGS_ORANGE : SETTINGS_DARK}) { text(shorten(label, 30), 20, s, enabled ? WHITE : SETTINGS_MUTED) }
 		}
 	}
 }

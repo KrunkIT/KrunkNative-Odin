@@ -94,6 +94,8 @@ Mesh_Transform :: struct {
 }
 
 Mesh :: struct {
+	map_detail: Map_Detail,
+	map_detail_visible: bool,
 	transform: Mesh_Transform,
 	// Root meshes can reuse their matrix until one of their public fields changes.
 	last_transform: Mesh_Transform,
@@ -195,6 +197,7 @@ Impact_Marker :: struct {
 
 Tracer_Marker :: struct {
 	mesh:            ^Mesh,
+	is_yours:        bool,
 	direction:       shared.Vec3,
 	start_position:  shared.Vec3,
 	travel_distance: f32,

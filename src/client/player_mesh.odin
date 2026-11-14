@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:math"
 import shared "../shared"
+import menuui "../menu"
 
 // v3 first-person knife orientation relative to the right arm pivot.
 MELEE_ROT_X :: -math.PI / 3.5
@@ -491,13 +492,19 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 
 	player_mesh := cast(^Player_Mesh)player.mesh
 
-	animate_aim := true
-	weapon_bobbing_mlt: f32 = 1.0
-	weapon_lean_mlt: f32 = 1.0
-	weapon_rotation: f32 = 0.0
-	weapon_offset_mlt := shared.Vec3{1.0, 1.0, 1.0}
-
 	third_person := player_uses_third_person_camera(player)
+	local_viewmodel := player.render_you && !third_person && !is_preview && g_client != nil && g_client.me == player
+	settings := menuui.DEFAULT_VIEWMODEL_SETTINGS
+	if local_viewmodel { settings = client_viewmodel_values(g_client) }
+	// The official renderer mirrors the entire upper-body rig. Keeping the
+	// reflection on this parent also mirrors hands, sights and muzzle origins
+	// live, without rebuilding models or changing the player's gameplay state.
+	player_mesh.upper_body_anchor.scale.x = local_viewmodel && settings.toggles[.LEFT_HANDED] ? -1 : 1
+	animate_aim := settings.toggles[.AIM_ANIMATION]
+	weapon_bobbing_mlt := settings.values[.BOBBING]
+	weapon_lean_mlt := settings.values[.LEANING]
+	weapon_rotation := settings.values[.ROTATION]
+	weapon_offset_mlt := shared.Vec3{settings.values[.OFFSET_X], settings.values[.OFFSET_Y], settings.values[.OFFSET_Z]}
 	// Ballistic recoil controls spread and camera pitch, not first-person gun
 	// sway. Keep its legacy mesh offsets for world models; view_kick supplies
 	// the independent first-person firing animation.
@@ -603,12 +610,15 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 
 	// Shared weapon swapping cannot manipulate client meshes. Keep all loadout
 	// arms hidden except the active slot here so swaps remain renderer-agnostic.
+	viewmodel_visible := !local_viewmodel || (viewmodel_weapon_visible(player.weapon, settings) &&
+		!(settings.toggles[.HIDE_ON_ADS] && view_aim >= 0.99))
 	for arms, i in player_mesh.arms {
 		if arms == nil {
 			continue
 		}
 
-		visible := i == int(player.loadout_index) && !(!is_preview && player_scope_visible(player, view_aim))
+		visible := i == int(player.loadout_index) && !(!is_preview && player_scope_visible(player, view_aim)) && viewmodel_visible
+		hands_visible := visible && (!local_viewmodel || settings.toggles[.SHOW_HANDS])
 
 		if arms.weapon_right != nil {
 			arms.weapon_right.visible = visible
@@ -627,26 +637,26 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 			}
 
 			if arm.extender != nil {
-				arm.extender.visible = visible
+				arm.extender.visible = hands_visible
 			}
 			if arm.upper != nil {
-				arm.upper.visible = visible
+				arm.upper.visible = hands_visible
 			}
 			if arm.joint != nil {
-				arm.joint.visible = visible
+				arm.joint.visible = hands_visible
 			}
 
 			for mesh in arm.lower.meshes {
-				mesh.visible = visible
+				mesh.visible = hands_visible
 			}
 		}
 	}
 
-	reload_mlt: f32 = third_person ? 0.4 : 1.0
+	reload_mlt: f32 = third_person ? 0.4 : settings.values[.RELOAD_Y]
 	// Match camera pitch here so camera recoil does not displace the sight.
 	player_mesh.upper_body_anchor.rotation.x = (bob_anim_y * -0.2 + land_bob_ya) * movement_mlt + reload_anim * (reload_mlt * -2.8) +
 		player.direction.x * (player.render_you && !third_person ? 1.0 : 0.5) +
-		(-math.PI * 0.25 * swap_anim + player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt) +
+		(-math.PI * 0.25 * swap_anim * settings.values[.SWAP_Y] + player.recoil_anim_y * shared.GAME_CONSTANTS.recoil_mlt) +
 		(player.weapon.y_rotation != 0 ? player.weapon.y_rotation : 0.0)
 
 	player_mesh.upper_body_anchor.rotation.y = reload_anim * -reload_mlt
@@ -663,6 +673,9 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 	arms := player_mesh.arms[player.loadout_index]
 	arm_anchor := &arms.anchor
 	aim_offset_y := player.weapon.has_attachment ? REFLEX_SIGHT_AIM_OFFSET_Y + player.weapon.aim_offset_y : 0.0
+	if local_viewmodel && settings.values[.ADS_OFFSET_Y] != 1 {
+		aim_offset_y = (aim_offset_y != 0 ? aim_offset_y : 0.1) * settings.values[.ADS_OFFSET_Y]
+	}
 
 	arm_anchor.rotation.x = (-math.cos(player.idle_anim) * bob_crouch_mlt * 0.01 * idle_anim -
 		player.land_bob_yr * 0.4 +
@@ -717,7 +730,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		arms.left.pivot.position.x -= pose[shared.MELEE_L_ARM] * 0.3
 		arms.right.pivot.rotation.z += player.crouch_val * 0.12 - step_half_rotate + player.jump_bob_y * 0.2
 		if arms.weapon_right != nil {
-			arms.weapon_right.visible = player.can_throw
+			arms.weapon_right.visible = player.can_throw && viewmodel_visible
 			arms.weapon_right.transform.position = {0.9, -0.95, 0.72}
 			arms.weapon_right.transform.rotation = {MELEE_ROT_X, MELEE_ROT_Y, MELEE_ROT_Z}
 		}
@@ -729,7 +742,7 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 			arms.right.pivot.position.y += wind_up * 2.9
 			arms.right.pivot.rotation.y += wind_up
 			arms.right.pivot.rotation.x += wind_up * 1.7
-		} else {
+		} else if !player.inspecting {
 			r_arm := pose[shared.MELEE_R_ARM]
 			arms.right.pivot.rotation.z += pose[shared.MELEE_ARM_R]
 			arms.right.pivot.rotation.y += pose[shared.MELEE_ARM_T] - r_arm * 0.25
@@ -745,6 +758,8 @@ player_update_meshes :: proc(player: ^shared.Player, is_preview: bool) {
 		}
 	}
 
+
+	if local_viewmodel { client_apply_inspect_pose(g_client, arms) }
 
 	if !player.render_you || third_person {
 		crouch_distance := shared.GAME_CONSTANTS.crouch_distance * player.crouch_val

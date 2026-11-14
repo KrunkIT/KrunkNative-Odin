@@ -64,6 +64,13 @@ when ODIN_TEST {
 		client.menu.settings_draft.fov = 105
 		client.menu.settings_draft.ads_sensitivity = 0.75
 		client.menu.settings_draft.advanced_sensitivity, client.menu.settings_draft.invert_mouse = true, true
+		client.menu.settings_draft.viewmodel = menuui.DEFAULT_VIEWMODEL_SETTINGS
+		client.menu.settings_draft.viewmodel.values[.WEAPON_FOV] = 110
+		client.menu.settings_draft.viewmodel.toggles[.SHOW_HANDS] = false
+		client.menu.settings_draft.trails = {hide_others=true, hide_yours=true}
+		client.menu.settings_draft.crosshair = menuui.DEFAULT_CROSSHAIR_SETTINGS
+		client.menu.settings_draft.crosshair.values[.GAP] = -3
+		client.menu.settings_draft.crosshair.color = 0x00ff00
 		menu_apply_action(&client, {})
 		testing.expect(t, client.sensitivity == 1 && !client.show_fps && client.audio_settings == DEFAULT_AUDIO_SETTINGS && !client.audio_settings_dirty,
 			"editing the menu draft must not apply settings to the client")
@@ -72,6 +79,9 @@ when ODIN_TEST {
 			"Save must apply manual DPI and sensitivity without rounding the camera multiplier")
 		testing.expect(t, abs(client.camera.fov - 105*math.PI/180) < 0.000001, "Save must apply the Gameplay FOV to the world camera")
 		testing.expect(t, client.ads_sensitivity == 0.75 && client.advanced_sensitivity && client.invert_mouse, "Save must commit separate ADS sensitivity and mouse inversion")
+		testing.expect(t, client.viewmodel_settings == client.menu.settings_draft.viewmodel, "Save must apply global viewmodel preferences alongside world FOV")
+		testing.expect(t, client.trail_settings == client.menu.settings_draft.trails, "Save must apply both trail visibility switches")
+		testing.expect(t, client.crosshair_settings == client.menu.settings_draft.crosshair && client_settings_snapshot(&client).crosshair == client.crosshair_settings, "Save and persistence snapshot must include the configured crosshair")
 		testing.expect(t, client.audio_settings == Audio_Settings{0.5, 0.7, 0.9, 0.2} && client.audio_settings_dirty && client.audio_save_delay == 0.5,
 			"Save must apply all audio channels and schedule their persistence")
 		testing.expect(t, client.bindings == bindings && client.hud_settings.hide_timer && !client.hud_settings.hide_round_score && client.hud_settings.hide_game_score && client.settings_dirty,
@@ -87,15 +97,23 @@ when ODIN_TEST {
 		settings := client_settings_defaults()
 		settings.bindings[.JUMP] = {32, -4}
 		settings.bindings[.RELOAD] = {'T', 0}
+		settings.bindings[.INSPECT] = {'G', -5}
 		settings.bindings[.AIM] = {0, 0}
 		settings.hud = {hide_round_score = true}
 		settings.monitor_index, settings.display_mode, settings.resolution_index, settings.vsync = 1, 2, 2, true
 		settings.visuals.values[.GAMMA], settings.visuals.values[.AMBIENT] = 1.25, 0.75
+		settings.visuals.hide_cats, settings.visuals.hide_extra_props = true, true
 		settings.quality = {smooth_textures=true, anisotropy=8}
+		settings.trails = {hide_others=true, hide_yours=true}
+		settings.crosshair.values[.OPACITY], settings.crosshair.values[.GAP] = 0.4, -3
+		settings.crosshair.color, settings.crosshair.shadow_color = 0x12ab34, 0x101020
+		settings.crosshair.toggles[.ALWAYS_SHOW], settings.crosshair.toggles[.CUSTOM_OPACITY], settings.crosshair.toggles[.DOT] = true, true, false
 		settings.mouse_dpi = 1600
 		settings.fov = 105
 		settings.ads_sensitivity = 0.75
 		settings.advanced_sensitivity, settings.invert_mouse = true, true
+		for control in menuui.Viewmodel_Control { settings.viewmodel.values[control] = menuui.VIEWMODEL_LIMITS[control][0] }
+		for toggle in menuui.Viewmodel_Toggle { settings.viewmodel.toggles[toggle] = !settings.viewmodel.toggles[toggle] }
 		settings.sensitivity = menuui.sensitivity_from_cm360(35.5, settings.mouse_dpi)
 		testing.expect(t, client_settings_save(settings, path))
 		roundtrip := client_settings_load(path)
@@ -112,8 +130,20 @@ when ODIN_TEST {
 			"existing files must retain allowed preferences while discarding retired fog and color settings")
 		testing.expect(t, os.write_entire_file(path, `{"version":1,"sensitivity":1.235}`) == nil)
 		migrated := client_settings_load(path)
+		testing.expect(t, migrated.bindings[.INSPECT] == ([2]i32{'F', 0}) && !migrated.visuals.hide_cats && !migrated.visuals.hide_extra_props,
+			"older preferences must default inspect to F and keep all map details visible")
 		testing.expect(t, migrated.sensitivity == 1.235 && migrated.mouse_dpi == menuui.DEFAULT_MOUSE_DPI && migrated.fov == menuui.DEFAULT_FOV, "existing preferences must retain turn speed and use the original world FOV")
 		testing.expect(t, !migrated.advanced_sensitivity && !migrated.invert_mouse, "older preferences must retain automatic ADS scaling and normal vertical look")
+		testing.expect(t, migrated.viewmodel == menuui.DEFAULT_VIEWMODEL_SETTINGS, "older preferences must retain the existing weapon pose, hands, ADS animation and zoom")
+		testing.expect(t, migrated.trails == menuui.Trail_Settings{}, "older preferences must retain visible local and remote bullet trails")
+		testing.expect(t, migrated.crosshair == menuui.DEFAULT_CROSSHAIR_SETTINGS, "older preferences must get the default Precision crosshair")
+		testing.expect(t, os.write_entire_file(path, `{"version":1,"viewmodel":{"values":{"WEAPON_FOV":110},"toggles":{"TOGGLE_ADS":true,"AIM_ANIMATION":false,"HIDE_ON_ADS":true,"SHOW_HANDS":false}}}`) == nil)
+		previous_viewmodel := client_settings_load(path).viewmodel
+		expected_viewmodel := menuui.DEFAULT_VIEWMODEL_SETTINGS
+		expected_viewmodel.values[.WEAPON_FOV] = 110
+		expected_viewmodel.toggles[.TOGGLE_ADS], expected_viewmodel.toggles[.AIM_ANIMATION] = true, false
+		expected_viewmodel.toggles[.HIDE_ON_ADS], expected_viewmodel.toggles[.SHOW_HANDS] = true, false
+		testing.expect(t, previous_viewmodel == expected_viewmodel, "existing viewmodel preferences must preserve edits and default new weapon visibility to on and left handed to off")
 		testing.expect(t, os.write_entire_file(path, `{"version":1,"sensitivity":-9,"display_mode":-5}`) == nil)
 		loaded := client_settings_load(path)
 		testing.expect(t, loaded.sensitivity == 1 && loaded.display_mode == 0 && loaded.bindings == menuui.default_bindings() && loaded.visuals == menuui.DEFAULT_VISUAL_SETTINGS && loaded.quality == menuui.Quality_Settings{}, "older preferences must keep neutral graphics and reject invalid sensitivity")

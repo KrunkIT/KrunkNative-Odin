@@ -126,8 +126,25 @@ menu_render_commands :: proc(ui: ^UI, commands: clay.ClayArray(clay.RenderComman
 		case .Image:
 			texture := u32(uintptr(command.renderData.image.imageData))
 			if texture != 0 { ui_draw_image(ui, texture, box.x, box.y, box.width, box.height) }
-		case .None, .Custom, .OverlayColorStart, .OverlayColorEnd:
-			// This prototype declares rectangles, borders, text and clips.
+		case .Custom:
+			if command.id == clay.ID("CrosshairPreview").id && command.renderData.custom.customData != nil {
+				data := command.renderData.custom
+				preview := cast(^menuui.Crosshair_Preview)data.customData
+				// Keep extreme size/gap values inside the preview, intersecting
+				// any existing menu clip and restoring it for following commands.
+				clip := box
+				if clip_count > 0 {
+					parent := clips[clip_count-1]
+					right, bottom := min(clip.x+clip.width,parent.x+parent.width), min(clip.y+clip.height,parent.y+parent.height)
+					clip.x, clip.y = max(clip.x,parent.x), max(clip.y,parent.y)
+					clip.width, clip.height = max(0,right-clip.x), max(0,bottom-clip.y)
+				}
+				gl.Enable(gl.SCISSOR_TEST)
+				menu_scissor(ui, clip)
+				crosshair_render(ui, preview.settings, box.x+box.width*0.5, box.y+box.height*0.5, preview.scale, menuui.crosshair_opacity(preview.settings, 1))
+				if clip_count > 0 { menu_scissor(ui, clips[clip_count-1]) } else { gl.Disable(gl.SCISSOR_TEST) }
+			}
+		case .None, .OverlayColorStart, .OverlayColorEnd:
 		}
 	}
 	gl.Disable(gl.SCISSOR_TEST)
@@ -155,7 +172,7 @@ hud_render :: proc(client: ^Client, delta: f32) {
 		binding_pressed = client.binding_event,
 	}
 	client.binding_event = 0
-	if client.menu.number_edit != .NONE && input.paste && !client.menu.previous.paste { input.text = glfw.GetClipboardString(client.window) }
+	if (client.menu.number_edit != .NONE || client.menu.color_edit != 0) && input.paste && !client.menu.previous.paste { input.text = glfw.GetClipboardString(client.window) }
 	client.menu_scroll = {}
 	client.menu_text_length = 0
 	view := menu_view(client)

@@ -6,6 +6,7 @@ import "core:testing"
 import gl "vendor:OpenGL"
 import glfw "vendor:glfw"
 import shared "../shared"
+import menuui "../menu"
 
 when ODIN_TEST {
 	@(test)
@@ -153,5 +154,53 @@ when ODIN_TEST {
 			}
 			client_clear_tracers(&client)
 		}
+
+		// Ownership comes from the shooter UID, including while the local player
+		// is inactive. Both switches must filter tracers and sniper smoke without
+		// changing the resolved shot or interfering with the opposite category.
+		client.me = &player
+		impact.weapon_id = 0
+		for hide_others in ([2]bool{false,true}) {
+			for hide_yours in ([2]bool{false,true}) {
+				client.trail_settings = {hide_others=hide_others, hide_yours=hide_yours}
+				for shooter in ([2]i32{player.uid,player.uid+1}) {
+					impact.shooter_uid = shooter
+					original := impact
+					client_add_tracer(&client, &impact)
+					testing.expect(t, impact == original, "trail visibility must preserve resolved hit and damage information")
+				}
+				expected := (hide_others ? 0 : 1) + (hide_yours ? 0 : 1)
+				testing.expect(t, len(client.tracer_markers) == expected && len(client.bullet_trails) == expected && client.scene.mesh_count == i32(2*expected),
+					"each trail switch must independently filter local or remote tracers and smoke")
+				client_clear_tracers(&client)
+			}
+		}
+		client.trail_settings = {}
+		for shooter in ([2]i32{player.uid,player.uid+1}) {
+			impact.shooter_uid = shooter
+			client_add_tracer(&client, &impact)
+		}
+		client.menu.page = .SETTINGS
+		menuui.prepare_settings(&client.menu, menuui.View{trails=client.trail_settings})
+		menuui.activate(&client.menu, {action={kind=.TRAILS_TOGGLE, index=1}})
+		client_tick_tracers(&client, 0)
+		for tracer in client.tracer_markers { testing.expect(t, tracer.mesh.visible == !tracer.is_yours, "Your trails must preview immediately on existing tracer meshes") }
+		for trail in client.bullet_trails { testing.expect(t, trail.mesh.visible == !trail.is_yours, "Your trails must preview immediately on existing sniper smoke") }
+		menuui.activate(&client.menu, {action={kind=.TRAILS_TOGGLE}})
+		client_tick_tracers(&client, 0)
+		for tracer in client.tracer_markers { testing.expect(t, !tracer.mesh.visible, "turning off both switches must hide every existing tracer") }
+		for trail in client.bullet_trails { testing.expect(t, !trail.mesh.visible, "turning off both switches must hide every existing smoke trail") }
+		testing.expect(t, len(client.tracer_markers) == 2 && len(client.bullet_trails) == 2 && client.trail_settings == menuui.Trail_Settings{},
+			"preview must preserve committed preferences and existing effects for Cancel")
+		menuui.activate(&client.menu, {action={kind=.SETTINGS_CANCEL}})
+		client_tick_tracers(&client, 0)
+		for tracer in client.tracer_markers { testing.expect(t, tracer.mesh.visible, "Cancel must restore existing tracers") }
+		for trail in client.bullet_trails { testing.expect(t, trail.mesh.visible, "Cancel must restore existing sniper smoke") }
+		client_clear_tracers(&client)
+		client.me = nil
+		client.trail_settings.hide_yours = true
+		impact.shooter_uid = 0
+		client_add_tracer(&client, &impact)
+		testing.expect(t, len(client.tracer_markers) == 1, "without a local player, UID zero must not be mistaken for one of your shots")
 	}
 }

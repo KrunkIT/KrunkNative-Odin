@@ -261,7 +261,208 @@ test_menu :: proc() -> bool {
 	if menu_test_click(&state, view, clay.ID("Login")).kind != .LOGIN { fmt.println("Session controls must expose Login"); return false }
 	if state.errors != 0 { return false }
 	fmt.println("Competitive lobby layout, modal, selection, invite, mouse and keyboard tests OK")
-	return test_graphics_menu() && test_standard_menu() && test_lobby_packets() && test_live_lobby_records()
+	return test_slider_numbers() && test_crosshair_menu() && test_settings_scrolling() && test_graphics_menu() && test_standard_menu() && test_lobby_packets() && test_live_lobby_records()
+}
+
+test_slider_numbers :: proc() -> bool {
+	state := menuui.State{page=.SETTINGS}
+	if !menuui.init(&state, menu_test_measure, nil) { return false }
+	defer menuui.fini(&state)
+	view := menuui.View{sensitivity=1, fov=90, visuals=menuui.DEFAULT_VISUAL_SETTINGS, viewmodel=menuui.DEFAULT_VIEWMODEL_SETTINGS, crosshair=menuui.DEFAULT_CROSSHAIR_SETTINGS, audio_volumes={0.8,1,0.5,0}}
+	count := 0
+	for tab in ([4]menuui.Settings_Tab{.MAIN,.VISUALS,.GAMEPLAY,.AUDIO}) {
+		menuui.activate(&state, {action={kind=.SETTINGS_TAB, index=i32(tab)}})
+		menu_test_frame(&state, view, {})
+		controls := state.controls
+		for control in controls[:state.control_count] {
+			if !control.number { continue }
+			count += 1
+			menuui.focus_visible(control, .SETTINGS)
+			menu_test_frame(&state, view, {})
+			menu_test_click(&state, view, control.id)
+			if state.number_edit != .SLIDER || state.number_control.id.id != control.id.id { fmt.println("Every slider value must open a number editor", tab, control.action); return false }
+			expected := control.slider_min+(control.slider_max-control.slider_min)*0.375
+			text := control.action.kind == .AUDIO_VOLUME ? "37.5%" : fmt.tprintf("%g", expected)
+			menu_test_frame(&state, view, {text=text})
+			action := menu_test_frame(&state, view, {enter=true})
+			actual := menuui.settings_slider_value(&state, view, control.action)
+			if state.number_edit != .NONE || action.kind != .NONE || abs(actual-expected)>0.0001 { fmt.println("Manual entry must update the matching draft value in its displayed units", tab, control.action, actual, expected); return false }
+			menu_test_frame(&state, view, {})
+		}
+	}
+	if count != 28 { fmt.println("Missing editable slider values", count); return false }
+	menuui.activate(&state, {action={kind=.SETTINGS_TAB, index=i32(menuui.Settings_Tab.GAMEPLAY)}})
+	menu_test_frame(&state, view, {})
+	gap: menuui.Control
+	for control in state.controls[:state.control_count] { if control.id.id == clay.ID("CrosshairGapValue").id { gap = control } }
+	menuui.focus_visible(gap, .SETTINGS)
+	menu_test_frame(&state, view, {})
+	before := state.settings_draft.crosshair
+	for invalid in ([]string{"", "not a number", "NaN", "Inf", "1e99", "-101", "101"}) {
+		menu_test_click(&state, view, gap.id)
+		menu_test_frame(&state, view, {clear_text=true, backspace=true})
+		menu_test_frame(&state, view, {text=invalid})
+		menu_test_frame(&state, view, {enter=true})
+		if !state.number_invalid || state.number_edit != .SLIDER || state.settings_draft.crosshair != before { fmt.println("Invalid manual values must leave the draft intact", invalid); return false }
+		menu_test_frame(&state, view, {escape=true})
+		if state.page != .SETTINGS || state.number_edit != .NONE { fmt.println("Escape must discard only the number edit"); return false }
+		menu_test_frame(&state, view, {})
+	}
+	menu_test_click(&state, view, gap.id)
+	menu_test_frame(&state, view, {text="-3.125"})
+	menu_test_frame(&state, view, {tab=true})
+	if state.number_edit != .NONE || state.settings_draft.crosshair.values[.GAP] != -3.125 || state.focus != clay.ID("CrosshairDot",u32(menuui.Crosshair_Toggle.DOT)).id { fmt.println("Tab must commit precise negative values and continue navigation"); return false }
+	menu_test_frame(&state, view, {})
+	// Opening and accepting an untouched field must preserve its exact float.
+	state.settings_draft.crosshair.values[.GAP] = -3.1234567
+	menu_test_click(&state, view, gap.id)
+	menu_test_frame(&state, view, {enter=true})
+	if state.settings_draft.crosshair.values[.GAP] != -3.1234567 { fmt.println("An untouched number editor must not round the stored value"); return false }
+	menu_test_frame(&state, view, {})
+	state.focus = gap.id.id
+	menu_test_frame(&state, view, {enter=true})
+	menu_test_frame(&state, view, {text="-7.75"})
+	action := menu_test_click(&state, view, clay.ID("SettingsSave"))
+	if action.kind != .SETTINGS_SAVE || state.settings_draft.crosshair.values[.GAP] != -7.75 { fmt.println("Save must commit an active numeric edit before saving the draft"); return false }
+	state.page = .SETTINGS
+	menu_test_frame(&state, view, {})
+	for control in state.controls[:state.control_count] { if control.id.id == gap.id.id { menuui.focus_visible(control, .SETTINGS) } }
+	menu_test_frame(&state, view, {})
+	menu_test_click(&state, view, gap.id)
+	menu_test_frame(&state, view, {text="-4.75"})
+	menu_test_click(&state, view, clay.ID("SettingsCancel"))
+	state.page = .SETTINGS
+	menu_test_frame(&state, view, {})
+	if state.settings_draft.crosshair != view.crosshair || state.settings_draft.viewmodel != view.viewmodel || state.settings_draft.audio_volumes != view.audio_volumes { fmt.println("Cancel must discard manually entered values across all settings"); return false }
+	fmt.println("Manual entry for all 28 sliders, percent units, range validation, exact values, keyboard, Save and Cancel tests OK")
+	return state.errors==0
+}
+
+test_crosshair_menu :: proc() -> bool {
+	state := menuui.State{page=.SETTINGS, settings_tab=.GAMEPLAY}
+	if !menuui.init(&state, menu_test_measure, nil) { return false }
+	defer menuui.fini(&state)
+	view := menuui.View{crosshair=menuui.DEFAULT_CROSSHAIR_SETTINGS}
+	menu_test_frame(&state, view, {})
+	for control in menuui.Crosshair_Control {
+		menu_test_frame(&state, view, {})
+		state.focus = clay.ID(menuui.CROSSHAIR_IDS[control]).id
+		before := state.settings_draft.crosshair.values[control]
+		menu_test_frame(&state, view, {right=true})
+		if abs(state.settings_draft.crosshair.values[control]-min(before+menuui.CROSSHAIR_STEPS[control],menuui.CROSSHAIR_LIMITS[control][1]))>0.001 { fmt.println("Crosshair slider keyboard routing failed",control); return false }
+	}
+	ids := [menuui.Crosshair_Toggle]string{.CUSTOM_OPACITY="CrosshairCustomOpacity", .ALWAYS_SHOW="CrosshairAlways", .DOT="CrosshairDot"}
+	for toggle in menuui.Crosshair_Toggle {
+		menu_test_frame(&state, view, {})
+		state.focus = clay.ID(ids[toggle],u32(toggle)).id
+		before := state.settings_draft.crosshair.toggles[toggle]
+		menu_test_frame(&state, view, {enter=true})
+		if state.settings_draft.crosshair.toggles[toggle]==before { fmt.println("Crosshair toggle routing failed",toggle); return false }
+	}
+	for field in 1..=2 {
+		menu_test_frame(&state, view, {})
+		state.focus = clay.ID("CrosshairColor",u32(field)).id
+		menu_test_frame(&state, view, {enter=true})
+		menu_test_frame(&state, view, {text="#aB1234"})
+		menu_test_frame(&state, view, {enter=true})
+		value := field == 1 ? state.settings_draft.crosshair.color : state.settings_draft.crosshair.shadow_color
+		if state.color_edit!=0 || value!=0xab1234 { fmt.println("Crosshair hex entry failed"); return false }
+	}
+	menuui.settings_color_begin(&state,1)
+	menu_test_frame(&state,view,{text="invalid"})
+	menu_test_frame(&state,view,{enter=true})
+	if !state.color_invalid || state.color_edit!=1 || state.settings_draft.crosshair.color!=0xab1234 { fmt.println("Invalid colors must preserve the previous value"); return false }
+	menu_test_frame(&state,view,{escape=true})
+	if state.page!=.SETTINGS || state.color_edit!=0 { fmt.println("Escape must cancel only the color edit"); return false }
+	for control in state.controls[:state.control_count] { if control.id.id==clay.ID("CrosshairType").id { menuui.focus_visible(control,.SETTINGS) } }
+	menu_test_frame(&state,view,{})
+	menu_test_click(&state,view,clay.ID("CrosshairType"))
+	menu_test_frame(&state,view,{})
+	if state.settings_dropdown!=.CROSSHAIR_TYPE || state.control_count!=2 || !state.controls[0].enabled || state.controls[1].enabled { fmt.println("Type must offer Precision with Image reserved and disabled"); return false }
+	menu_test_frame(&state,view,{tab=true})
+	if state.focus!=clay.ID("SettingsOption",0).id { fmt.println("Keyboard navigation must skip Image"); return false }
+	menu_test_frame(&state,view,{enter=true})
+	if state.settings_dropdown!=.NONE || state.settings_draft.crosshair.kind!=.PRECISION { fmt.println("Precision selection failed"); return false }
+	if view.crosshair!=menuui.DEFAULT_CROSSHAIR_SETTINGS { fmt.println("Crosshair edits must remain staged"); return false }
+	menu_test_frame(&state,view,{})
+	menu_test_frame(&state,view,{escape=true})
+	state.page = .SETTINGS
+	menu_test_frame(&state,view,{})
+	if state.settings_draft.crosshair!=view.crosshair { fmt.println("Cancel must discard every crosshair edit"); return false }
+	fmt.println("Precision controls, hex validation, disabled Image dropdown and cancel tests OK")
+	return state.errors==0
+}
+
+test_settings_scrolling :: proc() -> bool {
+	for size in ([3][2]f32{{1280,720},{1920,1080},{2560,1600}}) {
+		state := menuui.State{page=.SETTINGS, settings_tab=.GAMEPLAY}
+		if !menuui.init(&state, menu_test_measure, nil) { return false }
+		defer menuui.fini(&state)
+		view := menuui.View{sensitivity=1, visuals=menuui.DEFAULT_VISUAL_SETTINGS}
+		menu_test_frame(&state, view, {}, size[0], size[1])
+		menu_test_frame(&state, view, {}, size[0], size[1])
+		saved_draft := state.settings_draft
+		panel := clay.GetElementData(clay.ID("SettingsPanel")).boundingBox
+		input := menuui.Input{pointer={panel.x+panel.width/2,panel.y+panel.height/2}, scroll={0,-1}}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		data := clay.GetScrollContainerData(clay.ID("SettingsPanel"))
+		wheel_distance := -data.scrollPosition[1]
+		if wheel_distance < 72*state.scale || wheel_distance > 180*state.scale { fmt.println("A wheel notch must move settings by roughly two rows", size, wheel_distance); return false }
+		input.scroll = {0,0.5}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if abs(data.scrollPosition[1]+wheel_distance/2)>0.01 { fmt.println("Fractional wheel input must remain smooth and reversible"); return false }
+		track := clay.GetElementData(clay.ID("SettingsScrollTrack")).boundingBox
+		thumb := clay.GetElementData(clay.ID("SettingsScrollThumb")).boundingBox
+		if track.width < 14 || thumb.height <= 0 { fmt.println("Scrollbar must have an easy-to-grab thumb", size); return false }
+		// An off-center grab must not jump the content. Captured dragging must
+		// keep working outside the bar and clamp at both ends.
+		before_grab := data.scrollPosition[1]
+		input = {pointer={thumb.x+thumb.width/2,thumb.y+thumb.height/4}, down=true}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if !state.scrollbar_dragging || abs(data.scrollPosition[1]-before_grab)>0.01 { fmt.println("Grabbing the thumb must preserve its position"); return false }
+		input.pointer = {track.x-300,track.y+track.height+200}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		span := data.contentDimensions.height-data.scrollContainerDimensions.height
+		if abs(data.scrollPosition[1]+span)>0.01 { fmt.println("Dragging below the bar must reach the bottom"); return false }
+		// Releasing over Save must finish the drag without clicking Save.
+		save := clay.GetElementData(clay.ID("SettingsSave")).boundingBox
+		input = {pointer={save.x+save.width/2,save.y+save.height/2}}
+		action := menu_test_frame(&state, view, input, size[0], size[1])
+		if state.scrollbar_dragging || action.kind != .NONE || state.page != .SETTINGS { fmt.println("Scrollbar release must not activate underlying settings controls"); return false }
+		thumb = clay.GetElementData(clay.ID("SettingsScrollThumb")).boundingBox
+		input = {pointer={thumb.x+thumb.width/2,thumb.y+thumb.height/4}, down=true}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		input.pointer = {track.x+300,track.y-200}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if abs(data.scrollPosition[1])>0.01 { fmt.println("Dragging above the bar must reach the top"); return false }
+		input.pointer = {track.x,track.y+(track.height-thumb.height)/2+thumb.height/4}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if abs(data.scrollPosition[1]+span/2)>0.1 { fmt.println("Dragging to the middle must scroll proportionally"); return false }
+		input.down = false
+		menu_test_frame(&state, view, input, size[0], size[1])
+		input = {pointer={track.x+track.width/2,track.y+track.height-1}, down=true}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if !state.scrollbar_dragging || abs(data.scrollPosition[1]+span)>0.01 { fmt.println("Clicking the empty track must jump toward the click"); return false }
+		input.down = false
+		menu_test_frame(&state, view, input, size[0], size[1])
+		// Wheel scrolling over the bar itself must still reach the panel.
+		input.scroll = {0,1}
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if data.scrollPosition[1] <= -span+1 { fmt.println("The scrollbar must accept wheel input as well as dragging"); return false }
+		if state.settings_draft != saved_draft { fmt.println("Scrollbar interactions must never edit settings"); return false }
+		input.scroll, input.down = {}, true
+		menu_test_frame(&state, view, input, size[0], size[1])
+		input.escape = true
+		menu_test_frame(&state, view, input, size[0], size[1])
+		if state.page != .HOME || state.scrollbar_dragging { fmt.println("Escape during a scrollbar drag must cancel the capture and settings"); return false }
+		// A short tab must have neither a scrollbar nor a stale capture.
+		state.page, state.settings_tab = .SETTINGS, .AUDIO
+		menu_test_frame(&state, view, {}, size[0], size[1])
+		menu_test_frame(&state, view, {}, size[0], size[1])
+		if clay.GetElementData(clay.ID("SettingsScrollTrack")).found || state.scrollbar_dragging { fmt.println("A non-scrolling tab must not retain a scrollbar"); return false }
+	}
+	fmt.println("Fast wheel scrolling, fractional input, draggable scrollbar, track jumps and capture tests OK")
+	return true
 }
 
 test_graphics_menu :: proc() -> bool {
@@ -272,10 +473,38 @@ test_graphics_menu :: proc() -> bool {
 	menu_test_frame(&state, view, {})
 	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.GAMEPLAY)))
 	menu_test_frame(&state, view, {})
-	if state.settings_tab != .GAMEPLAY || state.control_count != len(menuui.Settings_Tab)+3 { fmt.println("Gameplay must expose its FOV slider"); return false }
+	if state.settings_tab != .GAMEPLAY || state.control_count != len(menuui.Settings_Tab)+9+2*len(menuui.Viewmodel_Control)+len(menuui.Viewmodel_Toggle)+2*len(menuui.Crosshair_Control)+len(menuui.Crosshair_Toggle) { fmt.println("Gameplay must expose global viewmodel, trails and crosshair controls with editable numbers"); return false }
 	state.focus = clay.ID("FieldOfView").id
 	menu_test_frame(&state, view, {right=true})
-	if state.settings_draft.fov != 91 { fmt.println("FOV keyboard adjustment must start from the current draft angle"); return false }
+	if state.settings_draft.fov != 95 { fmt.println("FOV keyboard adjustment must start from the current draft angle"); return false }
+	for control in menuui.Viewmodel_Control {
+		menu_test_frame(&state, view, {})
+		state.focus = clay.ID(menuui.VIEWMODEL_IDS[control]).id
+		before := state.settings_draft.viewmodel.values[control]
+		menu_test_frame(&state, view, {right=true})
+		step: f32 = control == .WEAPON_FOV ? 5 : 0.1
+		if abs(state.settings_draft.viewmodel.values[control]-min(before+step, menuui.VIEWMODEL_LIMITS[control][1]))>0.001 { fmt.println("Viewmodel slider keyboard routing failed", control); return false }
+	}
+	for toggle in menuui.Viewmodel_Toggle {
+		menu_test_frame(&state, view, {})
+		state.focus = clay.ID(menuui.VIEWMODEL_TOGGLE_IDS[toggle], u32(toggle)).id
+		before := state.settings_draft.viewmodel.toggles[toggle]
+		menu_test_frame(&state, view, {enter=true})
+		if state.settings_draft.viewmodel.toggles[toggle] == before { fmt.println("Viewmodel toggle routing failed", toggle); return false }
+	}
+	state.focus = clay.ID("BulletTrails").id
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {enter=true})
+	if !state.settings_draft.trails.hide_others || state.settings_draft.trails.hide_yours { fmt.println("Bullet trails must only toggle other players' trails"); return false }
+	state.focus = clay.ID("YourTrails", 1).id
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {enter=true})
+	if !state.settings_draft.trails.hide_others || !state.settings_draft.trails.hide_yours { fmt.println("Your trails must independently toggle local trails"); return false }
+	for control in state.controls[:state.control_count] { if control.id.id == clay.ID("CrosshairDot", u32(menuui.Crosshair_Toggle.DOT)).id { menuui.focus_visible(control, .SETTINGS) } }
+	menu_test_frame(&state, view, {})
+	last_box := clay.GetElementData(clay.ID("CrosshairDot", u32(menuui.Crosshair_Toggle.DOT))).boundingBox
+	viewmodel_panel := clay.GetElementData(clay.ID("SettingsPanel")).boundingBox
+	if last_box.y < viewmodel_panel.y-1 || last_box.y+last_box.height > viewmodel_panel.y+viewmodel_panel.height+1 { fmt.println("Last Gameplay control must scroll fully into view"); return false }
 	menu_test_frame(&state, view, {})
 	menu_test_click(&state, view, clay.ID("SettingsTab", u32(menuui.Settings_Tab.VISUALS)))
 	menu_test_frame(&state, view, {})
@@ -284,8 +513,19 @@ test_graphics_menu :: proc() -> bool {
 	if abs(state.settings_draft.visuals.values[.GAMMA]-1.05)>0.001 || view.visuals.values[.GAMMA] != 1 { fmt.println("Visual sliders must stage changes from their own value"); return false }
 	menu_test_frame(&state, view, {})
 	if clay.GetElementData(clay.ID("Visual6")).found || clay.GetElementData(clay.ID("VisualOverride0")).found || clay.GetElementData(clay.ID("VisualColor0_0")).found { fmt.println("Fog distance and color overrides must not be editable in Settings"); return false }
-	// Tab to the last control must bring the reset button into the scroll viewport.
-	state.focus = clay.ID("Visual5").id
+	// Both map-detail toggles must be reachable and stage changes independently.
+	state.focus = clay.ID("Visual5Value").id
+	menu_test_frame(&state, view, {tab=true})
+	menu_test_frame(&state, view, {})
+	if state.focus != clay.ID("HideCats").id { fmt.println("Hide cats must be reachable after lighting"); return false }
+	menu_test_frame(&state, view, {enter=true})
+	menu_test_frame(&state, view, {})
+	menu_test_frame(&state, view, {tab=true})
+	menu_test_frame(&state, view, {})
+	if state.focus != clay.ID("HideExtraProps", 1).id { fmt.println("Hide extra props must be independently reachable"); return false }
+	menu_test_frame(&state, view, {enter=true})
+	menu_test_frame(&state, view, {})
+	if !state.settings_draft.visuals.hide_cats || !state.settings_draft.visuals.hide_extra_props || view.visuals.hide_cats || view.visuals.hide_extra_props { fmt.println("Map detail toggles must stage changes without modifying saved preferences"); return false }
 	menu_test_frame(&state, view, {tab=true})
 	menu_test_frame(&state, view, {})
 	box := clay.GetElementData(clay.ID("ResetVisuals")).boundingBox

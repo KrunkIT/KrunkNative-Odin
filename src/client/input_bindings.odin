@@ -15,8 +15,12 @@ client_mouse_rotation :: proc(client: ^Client, delta: shared.Vec2) -> shared.Vec
 		if client.me != nil && client.me.weapon != nil {
 			aim = clamp(client.me.aim_val, 0, 1)
 			// Use the same interpolated ADS state as the camera, including live play.
-			if client.me.weapon.zoom > 1 {
-				aim = clamp((client.camera.zoom-1)/(client.me.weapon.zoom-1), 0, 1)
+			settings := client_viewmodel_values(client)
+			zoom_range := (client.me.weapon.zoom-1) * settings.values[.ADS_FOV_POWER]
+			if zoom_range > 0 {
+				aim = clamp((client.camera.zoom-1)/zoom_range, 0, 1)
+			} else if client.krunker.connected {
+				aim = clamp(krunker_client_render_sample(client).aim, 0, 1)
 			}
 		}
 		ads := menuui.ads_sensitivity_validate(client.ads_sensitivity, client.sensitivity, client.mouse_dpi)

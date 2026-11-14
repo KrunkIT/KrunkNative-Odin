@@ -298,7 +298,7 @@ The diagnostic regression test uses a local HTTP server and needs no account or 
 odin build tools/network_diagnostics_test -out:bin/network_diagnostics_test.exe -o:none
 python tools/test_network_diagnostics.py
 # Optional: tests the map/player handoff using a hidden OpenGL window.
-odin test src/client -out:bin/krodin_client_tests.exe
+odin test src/client -out:bin/krodin_client_tests.exe -define:ODIN_TEST_THREADS=1
 ```
 
 The standalone flow diagnostic requires a fresh `KRUNKER_ACCESS_TOKEN` because the `/seek-game`
@@ -358,6 +358,9 @@ Settings > Key binds provides Primary and Alternate slots for each action.
 Select a slot and press a key or mouse button; either slot activates the action.
 Escape cancels capture, Delete clears the slot, and backtick is reserved for
 practice map rotation. Escape always remains available for menus.
+Inspect weapon defaults to F and can be rebound in the Weapon section. Press it
+to inspect your gun or knife; press again to stop. Firing, aiming, reloading,
+swapping weapons or opening the menu cancels the animation.
 
 Main uses a manually entered Mouse DPI and sensitivity in cm/360. Click either
 value to type, then press Enter or Tab to confirm. DPI changes preserve the
@@ -375,12 +378,31 @@ bindings, sensitivity, graphics and HUD preferences persist in the ignored
 `client-settings.json` in the working directory. Video supports mode, monitor,
 window resolution, V-Sync, sharp/smooth texture filtering and supported anisotropic
 filtering levels. Visuals provides brightness, gamma, contrast, saturation
-and ambient/sunlight strength. Fog distance and environment colors follow the
+and ambient/sunlight strength, plus independent Hide cats and Hide extra props
+toggles. Extra props covers loose rubble, planks, fabric and grass. Both toggles
+preview live and persist on Save. Fog distance and environment colors follow the
 map and cannot be overridden in Settings. Graphics preview live; Cancel or Escape restores
 the saved appearance. Reset visuals restores the original map appearance.
-Gameplay starts with a vertical world field-of-view slider (60–120 degrees,
-default 90). Save applies and persists it; Cancel discards the draft. Weapon
-field of view remains separate.
+Gameplay provides global view model settings: world and weapon FOV (60–150
+degrees, default 90 and 95), bobbing, leaning, rotation, hipfire and ADS offsets,
+swap/reload motion, ADS FOV power, toggle ADS, aim animation, hiding the weapon
+while aiming, hand and primary/secondary/melee visibility, and left handed view
+models. These settings preview live and apply to every
+weapon. Save persists them in `client-settings.json`; Cancel or Escape restores
+the saved values.
+Scroll the settings with the mouse wheel, drag the scrollbar thumb, or click its
+track to jump to a position.
+Click any slider's number to type an exact value, then press Enter or Tab to
+apply it to the draft. Escape discards the current number edit. Values must be
+within that setting's range; audio volume uses percentages from 0 to 100.
+Gameplay also has independent Bullet trails (other players) and Your trails
+switches for moving tracers and sniper smoke. Both start enabled, preview live,
+and persist on Save.
+Gameplay includes a Precision crosshair with custom opacity, Always show during
+ADS, color and shadow color (`#RRGGBB`), shadow thickness, thickness, size,
+negative or positive gap, and a center dot. The sidebar preview stays visible
+while scrolling. Save persists the crosshair; Cancel restores it. The Type
+dropdown reserves Image for a later update.
 HUD independently toggles the timer (including
 objective/phase countdowns), current-round objective points, rounds won and FPS.
 The default bindings are:

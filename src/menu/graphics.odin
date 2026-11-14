@@ -12,6 +12,7 @@ Visual_Settings :: struct {
 	// Legacy settings are decoded for compatibility, then reset and ignored.
 	color_override: [Visual_Color]bool,
 	colors: [Visual_Color][3]f32,
+	hide_cats, hide_extra_props: bool,
 }
 Quality_Settings :: struct { smooth_textures: bool, anisotropy: i32 } // 0 = off; otherwise 2, 4, 8 or 16.
 
@@ -50,6 +51,10 @@ settings_visuals :: proc(state: ^State) {
 			VISUAL_LIMITS[control][0], VISUAL_LIMITS[control][1], {kind = .VISUAL_VALUE, index = i32(control)})
 	}
 	settings_note("Lighting strength multiplies each map's original values. 1.00 preserves the map defaults.", s)
+	settings_section("Map details", s)
+	settings_toggle_row(state, "Hide cats", "HideCats", state.settings_draft.visuals.hide_cats, {kind=.VISUAL_TOGGLE, index=0})
+	settings_toggle_row(state, "Hide extra props", "HideExtraProps", state.settings_draft.visuals.hide_extra_props, {kind=.VISUAL_TOGGLE, index=1})
+	settings_note("Hide extra props removes loose rubble, planks, fabric and grass. Cats have their own toggle.", s)
 	settings_note("Reset restores the original appearance of every map.", s)
 	settings_button(state, "Reset visuals", "ResetVisuals", {kind = .VISUAL_RESET})
 }
@@ -75,10 +80,14 @@ settings_slider_value :: proc(state: ^State, view: View, action: Action) -> f32 
 	if !state.settings_active {
 		values.sensitivity, values.audio_volumes, values.visuals = view.sensitivity, view.audio_volumes, view.visuals
 		values.fov = fov_validate(view.fov)
+		values.viewmodel = viewmodel_settings_validate(view.viewmodel)
+		values.crosshair = crosshair_settings_validate(view.crosshair)
 	}
 	#partial switch action.kind {
 	case .AUDIO_VOLUME: return values.audio_volumes[action.index]
 	case .FOV: return values.fov
+	case .VIEWMODEL_VALUE: return values.viewmodel.values[Viewmodel_Control(action.index)]
+	case .CROSSHAIR_VALUE: return values.crosshair.values[Crosshair_Control(action.index)]
 	case .VISUAL_VALUE: return values.visuals.values[Visual_Control(action.index)]
 	}
 	return values.sensitivity

@@ -2,18 +2,19 @@ package menu
 
 import "core:fmt"
 
-Binding_Action :: enum { FORWARD, BACKWARD, LEFT, RIGHT, JUMP, CROUCH, AIM, FIRE, RELOAD, SECONDARY, MELEE, MENU, FULLSCREEN }
+Binding_Action :: enum { FORWARD, BACKWARD, LEFT, RIGHT, JUMP, CROUCH, AIM, FIRE, RELOAD, SECONDARY, MELEE, MENU, FULLSCREEN, INSPECT }
 // Positive values are portable GLFW key codes. Mouse buttons use -(button+1).
 // Zero means unbound; neither the menu nor saved preferences store OS scancodes.
 Bindings :: [Binding_Action][2]i32
 BINDING_NAMES := [Binding_Action]string{
 	.FORWARD = "Forward", .BACKWARD = "Backward", .LEFT = "Left", .RIGHT = "Right", .JUMP = "Jump", .CROUCH = "Crouch / slide",
 	.AIM = "Aim down sights", .FIRE = "Fire", .RELOAD = "Reload", .SECONDARY = "Secondary / primary", .MELEE = "Melee / primary", .MENU = "Menu / resume", .FULLSCREEN = "Fullscreen",
+	.INSPECT = "Inspect weapon",
 }
 
 default_bindings :: proc() -> Bindings {
 	return {.FORWARD = {'W', 0}, .BACKWARD = {'S', 0}, .LEFT = {'A', 0}, .RIGHT = {'D', 0}, .JUMP = {32, 0}, .CROUCH = {340, 0},
-		.AIM = {-2, 0}, .FIRE = {-1, 0}, .RELOAD = {'R', 0}, .SECONDARY = {'E', 0}, .MELEE = {'Q', 0}, .MENU = {256, 0}, .FULLSCREEN = {300, 0}}
+		.AIM = {-2, 0}, .FIRE = {-1, 0}, .RELOAD = {'R', 0}, .SECONDARY = {'E', 0}, .MELEE = {'Q', 0}, .MENU = {256, 0}, .FULLSCREEN = {300, 0}, .INSPECT = {'F', 0}}
 }
 
 binding_valid :: proc(code: i32) -> bool {

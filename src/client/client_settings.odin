@@ -19,10 +19,13 @@ Client_Settings :: struct {
 	hud: menuui.HUD_Settings,
 	visuals: menuui.Visual_Settings,
 	quality: menuui.Quality_Settings,
+	viewmodel: menuui.Viewmodel_Settings,
+	trails: menuui.Trail_Settings,
+	crosshair: menuui.Crosshair_Settings,
 }
 
 client_settings_defaults :: proc() -> Client_Settings {
-	return {version = 1, fov = menuui.DEFAULT_FOV, sensitivity = 1, ads_sensitivity = 1, mouse_dpi = menuui.DEFAULT_MOUSE_DPI, bindings = menuui.default_bindings(), visuals = menuui.DEFAULT_VISUAL_SETTINGS}
+	return {version = 1, fov = menuui.DEFAULT_FOV, sensitivity = 1, ads_sensitivity = 1, mouse_dpi = menuui.DEFAULT_MOUSE_DPI, bindings = menuui.default_bindings(), visuals = menuui.DEFAULT_VISUAL_SETTINGS, viewmodel = menuui.DEFAULT_VIEWMODEL_SETTINGS, crosshair = menuui.DEFAULT_CROSSHAIR_SETTINGS}
 }
 
 client_settings_validate :: proc(settings: Client_Settings) -> Client_Settings {
@@ -36,6 +39,8 @@ client_settings_validate :: proc(settings: Client_Settings) -> Client_Settings {
 	result.monitor_index = max(0, result.monitor_index)
 	result.visuals = menuui.visual_settings_validate(result.visuals)
 	result.quality = menuui.quality_settings_validate(result.quality)
+	result.viewmodel = menuui.viewmodel_settings_validate(result.viewmodel)
+	result.crosshair = menuui.crosshair_settings_validate(result.crosshair)
 	defaults := menuui.default_bindings()
 	for action in menuui.Binding_Action {
 		for code, slot in result.bindings[action] {
@@ -62,7 +67,7 @@ client_settings_snapshot :: proc(client: ^Client) -> Client_Settings {
 	return {version = 1, display_mode = i32(client.display_mode), resolution_index = client.resolution_index, monitor_index = client.monitor_index,
 		fov = client.camera.fov * 180 / math.PI, sensitivity = client.sensitivity, mouse_dpi = client.mouse_dpi, show_fps = client.show_fps, vsync = client.vsync, bindings = client.bindings, hud = client.hud_settings,
 		ads_sensitivity = client.ads_sensitivity, advanced_sensitivity = client.advanced_sensitivity, invert_mouse = client.invert_mouse,
-		visuals = client.visual_settings, quality = client.quality_settings}
+		visuals = client.visual_settings, quality = client.quality_settings, viewmodel = client.viewmodel_settings, trails = client.trail_settings, crosshair = client.crosshair_settings}
 }
 
 client_settings_save :: proc(settings: Client_Settings, path: string = CLIENT_SETTINGS_PATH) -> bool {

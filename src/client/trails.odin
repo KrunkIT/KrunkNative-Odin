@@ -2,6 +2,7 @@ package main
 
 import "core:math"
 import shared "../shared"
+import menuui "../menu"
 
 // Krunker's physObj bullet tracer (particle config 0): units converted from
 // milliseconds to seconds. Sniper smoke is a separate, shrinking trail.
@@ -15,8 +16,18 @@ BULLET_TRAIL_SHRINK :: 0.36
 
 Bullet_Trail :: struct {
 	mesh: ^Mesh,
+	is_yours: bool,
 	start_position, direction: shared.Vec3,
 	distance, length, width: f32,
+}
+
+client_trail_settings :: proc(client: ^Client) -> menuui.Trail_Settings {
+	if client.menu.settings_active && client.menu.page == .SETTINGS { return client.menu.settings_draft.trails }
+	return client.trail_settings
+}
+
+bullet_trails_visible :: proc(settings: menuui.Trail_Settings, is_yours: bool) -> bool {
+	return !(is_yours ? settings.hide_yours : settings.hide_others)
 }
 
 // Current browser weapon configs: muzzle sprites are children of the weapon
@@ -101,6 +112,8 @@ bullet_trail_set_segment :: proc(mesh: ^Mesh, start, direction: shared.Vec3, wid
 }
 
 client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
+	is_yours := client.me != nil && impact.shooter_uid == client.me.uid
+	if !bullet_trails_visible(client_trail_settings(client), is_yours) { return }
 	if impact.weapon_id < 0 || int(impact.weapon_id) >= len(client.game.weapons) { return }
 	weapon := client.game.weapons[impact.weapon_id]
 	bullet_drop := client.game.config.bullet_drop
@@ -130,7 +143,7 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 	}
 	scene_add_mesh(client.scene, mesh)
 	append(&client.tracer_markers, Tracer_Marker{
-		mesh = mesh, direction = direction, start_position = start,
+		mesh = mesh, is_yours = is_yours, direction = direction, start_position = start,
 		travel_distance = distance, segment_length = BULLET_TRACER_LENGTH,
 		speed = BULLET_TRACER_SPEED, lifetime = distance / BULLET_TRACER_SPEED,
 		total_lifetime = distance / BULLET_TRACER_SPEED,
@@ -153,15 +166,17 @@ client_add_tracer :: proc(client: ^Client, impact: ^shared.Bullet_Impact) {
 	}
 	scene_add_mesh(client.scene, smoke)
 	append(&client.bullet_trails, Bullet_Trail{
-		mesh = smoke, start_position = start, direction = direction,
+		mesh = smoke, is_yours = is_yours, start_position = start, direction = direction,
 		distance = distance * 0.5, width = BULLET_TRAIL_WIDTH,
 	})
 }
 
 client_tick_tracers :: proc(client: ^Client, delta: f32) {
 	delta := max(0, delta)
+	settings := client_trail_settings(client)
 	for i := len(client.tracer_markers) - 1; i >= 0; i -= 1 {
 		tracer := &client.tracer_markers[i]
+		tracer.mesh.visible = bullet_trails_visible(settings, tracer.is_yours)
 		if tracer.lifetime <= 0 {
 			scene_remove_mesh(client.scene, tracer.mesh)
 			mesh_fini(tracer.mesh)
@@ -178,6 +193,7 @@ client_tick_tracers :: proc(client: ^Client, delta: f32) {
 	}
 	for i := len(client.bullet_trails) - 1; i >= 0; i -= 1 {
 		trail := &client.bullet_trails[i]
+		trail.mesh.visible = bullet_trails_visible(settings, trail.is_yours)
 		trail.width -= BULLET_TRAIL_SHRINK * delta
 		if trail.width <= 0 {
 			scene_remove_mesh(client.scene, trail.mesh)

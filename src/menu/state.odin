@@ -8,10 +8,10 @@ Page :: enum { HOME, SETTINGS, CONTROLS, SESSION, CLASSES, LOADOUT }
 Lobby_Presentation :: enum { STANDARD, COMPETITIVE }
 // The client owns clipboard access and session changes. The menu emits actions
 // and renders requested selections separately from confirmed lobby state.
-Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, LOGIN, CANCEL_JOIN, FORGET_BROWSER_SESSION, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS, AUDIO_VOLUME, SETTINGS_TAB, SETTINGS_SAVE, SETTINGS_CANCEL, BIND_KEY, HUD_TOGGLE, VSYNC, MONITOR, SETTINGS_DROPDOWN, RESOLUTION_SELECT, VISUAL_VALUE, VISUAL_RESET, TEXTURE_FILTER, ANISOTROPY, SETTINGS_NUMBER, FOV, ADVANCED_SENSITIVITY, INVERT_MOUSE }
+Action_Kind :: enum { NONE, PLAY, QUIT, JOIN_LINK, LOGIN, CANCEL_JOIN, FORGET_BROWSER_SESSION, PASTE, COPY_INVITE, LEAVE_SESSION, LOCAL_PRACTICE, SELECT_TEAM, SELECT_CLASS, SELECT_SECONDARY, INSPECT_CLASS, EDIT_INVITE, DISPLAY_MODE, RESOLUTION, SENSITIVITY, FPS, AUDIO_VOLUME, SETTINGS_TAB, SETTINGS_SAVE, SETTINGS_CANCEL, BIND_KEY, HUD_TOGGLE, VSYNC, MONITOR, SETTINGS_DROPDOWN, RESOLUTION_SELECT, VISUAL_VALUE, VISUAL_TOGGLE, VISUAL_RESET, TEXTURE_FILTER, ANISOTROPY, SETTINGS_NUMBER, FOV, ADVANCED_SENSITIVITY, INVERT_MOUSE, VIEWMODEL_VALUE, VIEWMODEL_TOGGLE, TRAILS_TOGGLE, CROSSHAIR_TYPE, CROSSHAIR_VALUE, CROSSHAIR_TOGGLE, CROSSHAIR_COLOR }
 Action :: struct { kind: Action_Kind, index: i32, value: f32 }
 Settings_Tab :: enum { MAIN, INPUT, VIDEO, VISUALS, GAMEPLAY, AUDIO, HUD }
-Settings_Dropdown :: enum { NONE, DISPLAY_MODE, MONITOR, RESOLUTION, TEXTURE_FILTER, ANISOTROPY }
+Settings_Dropdown :: enum { NONE, DISPLAY_MODE, MONITOR, RESOLUTION, TEXTURE_FILTER, ANISOTROPY, CROSSHAIR_TYPE }
 HUD_Settings :: struct { hide_timer, hide_round_score, hide_game_score: bool }
 Settings_Values :: struct {
 	display_mode, resolution_index, monitor_index: i32,
@@ -26,6 +26,9 @@ Settings_Values :: struct {
 	hud: HUD_Settings,
 	visuals: Visual_Settings,
 	quality: Quality_Settings,
+	viewmodel: Viewmodel_Settings,
+	trails: Trail_Settings,
+	crosshair: Crosshair_Settings,
 }
 Class :: struct { id: i32, name, weapon: string, health: i32, speed: f32, wall_jump, available: bool, reason: string, used, limit: int, portrait, weapon_icon: rawptr }
 Secondary :: struct { id: i32, name: string, icon: rawptr }
@@ -64,6 +67,9 @@ View :: struct {
 	hud: HUD_Settings,
 	visuals: Visual_Settings,
 	quality: Quality_Settings,
+	viewmodel: Viewmodel_Settings,
+	trails: Trail_Settings,
+	crosshair: Crosshair_Settings,
 	max_anisotropy: f32,
 	fov: f32,
 	sensitivity, mouse_dpi: f32,
@@ -81,7 +87,7 @@ Input :: struct {
 	up, down_key: bool,
 	binding_pressed: i32,
 }
-Control :: struct { id: clay.ElementId, action: Action, enabled, slider: bool, slider_min, slider_max, slider_step: f32 }
+Control :: struct { id: clay.ElementId, action: Action, enabled, slider, number: bool, slider_min, slider_max, slider_step: f32 }
 State :: struct {
 	page: Page,
 	ctx: ^clay.Context,
@@ -99,6 +105,8 @@ State :: struct {
 	errors: int,
 	settings_tab: Settings_Tab,
 	settings_active: bool,
+	scrollbar_dragging: bool,
+	scrollbar_grab: f32,
 	settings_draft: Settings_Values,
 	settings_resolution_count: i32,
 	settings_resolution_selected: bool,
@@ -107,16 +115,24 @@ State :: struct {
 	settings_dropdown: Settings_Dropdown,
 	dropdown_return_focus: u32,
 	number_edit: Settings_Number,
+	number_control: Control,
 	number_buffer: [24]u8,
 	number_length: int,
 	number_replace, number_invalid, number_changed: bool,
+	color_edit: i32, // 0 = none, 1 = crosshair, 2 = shadow.
+	color_buffer: [16]u8,
+	color_length: int,
+	color_replace, color_invalid: bool,
+	crosshair_preview: Crosshair_Preview,
 }
 
 prepare_settings :: proc(state: ^State, view: View) {
 	if state.page != .SETTINGS && state.page != .CONTROLS {
 		state.settings_active = false
+		state.scrollbar_dragging = false
 		state.binding_capture, state.settings_dropdown = 0, .NONE
 		state.number_edit = .NONE
+		state.color_edit = 0
 		return
 	}
 	if !state.settings_active {
@@ -124,7 +140,8 @@ prepare_settings :: proc(state: ^State, view: View) {
 		state.settings_draft = {display_mode = view.display_mode, resolution_index = view.resolution_index,
 			fov = fov_validate(view.fov), sensitivity = view.sensitivity, mouse_dpi = mouse_dpi_validate(view.mouse_dpi), audio_volumes = view.audio_volumes, show_fps = view.show_fps,
 			ads_sensitivity = ads_sensitivity_validate(view.ads_sensitivity, view.sensitivity, view.mouse_dpi), advanced_sensitivity = view.advanced_sensitivity, invert_mouse = view.invert_mouse,
-			monitor_index = view.monitor_index, vsync = view.vsync, bindings = view.bindings, hud = view.hud, visuals = view.visuals, quality = view.quality}
+			monitor_index = view.monitor_index, vsync = view.vsync, bindings = view.bindings, hud = view.hud, visuals = view.visuals, quality = view.quality,
+			viewmodel = viewmodel_settings_validate(view.viewmodel), trails = view.trails, crosshair = crosshair_settings_validate(view.crosshair)}
 		state.settings_active = true
 	}
 	state.settings_resolution_count = i32(len(view.resolution_options))
@@ -171,6 +188,7 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 	clay.SetCurrentContext(state.ctx)
 	clay.SetPointerState(input.pointer, input.down)
 	defer state.previous = input
+	if state.color_edit != 0 && settings_color_interact(state, input) { return {} }
 	if state.number_edit != .NONE && settings_number_interact(state, input) { return {} }
 	// Capture runs before menu shortcuts: Enter, Tab, arrows and mouse buttons
 	// can all be rebound without activating another control behind the listener.
@@ -198,6 +216,7 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 			return {}
 		}
 	}
+	if settings_scrollbar_interact(state, input) { return {} }
 	focused_index := -1
 	for control, i in state.controls[:state.control_count] {
 		if control.id.id == state.focus && control.enabled { focused_index = i }
@@ -279,6 +298,15 @@ interact :: proc(state: ^State, input: Input, view: View) -> Action {
 }
 
 activate :: proc(state: ^State, control: Control) -> Action {
+	if control.number {
+		state.number_control = control
+		settings_number_begin(state, .SLIDER)
+		return {}
+	}
+	if control.action.kind == .CROSSHAIR_COLOR {
+		settings_color_begin(state, control.action.index)
+		return {}
+	}
 	if control.action.kind == .SETTINGS_NUMBER {
 		settings_number_begin(state, Settings_Number(control.action.index))
 		return {}
@@ -300,6 +328,7 @@ activate :: proc(state: ^State, control: Control) -> Action {
 		case .MONITOR: index = state.settings_draft.monitor_index
 		case .RESOLUTION: index = state.settings_draft.resolution_index
 		case .TEXTURE_FILTER: index = state.settings_draft.quality.smooth_textures ? 1 : 0
+		case .CROSSHAIR_TYPE: index = 0
 		case .ANISOTROPY:
 			for value, i in ([5]i32{0, 2, 4, 8, 16}) { if value == state.settings_draft.quality.anisotropy { index = i32(i) } }
 		}
@@ -308,6 +337,7 @@ activate :: proc(state: ^State, control: Control) -> Action {
 	}
 	if control.action.kind == .SETTINGS_TAB {
 		state.settings_tab = Settings_Tab(control.action.index)
+		state.scrollbar_dragging = false
 		state.page = .SETTINGS
 		state.pressed = 0
 		data := clay.GetScrollContainerData(clay.ID("SettingsPanel"))
@@ -317,8 +347,10 @@ activate :: proc(state: ^State, control: Control) -> Action {
 	if control.action.kind == .SETTINGS_SAVE || control.action.kind == .SETTINGS_CANCEL {
 		state.page, state.focus, state.pressed = .HOME, state.return_focus, 0
 		state.settings_active = false
+		state.scrollbar_dragging = false
 		state.binding_capture, state.settings_dropdown = 0, .NONE
 		state.number_edit = .NONE
+		state.color_edit, state.color_invalid = 0, false
 		state.binding_reserved = false
 		return control.action if control.action.kind == .SETTINGS_SAVE else Action{}
 	}
@@ -331,6 +363,12 @@ activate :: proc(state: ^State, control: Control) -> Action {
 		case .VISUAL_VALUE:
 			if control.action.index >= 0 && control.action.index < i32(Visual_Control.FOG_DISTANCE) {
 				state.settings_draft.visuals.values[Visual_Control(control.action.index)] = control.action.value
+			}
+			return {}
+		case .VISUAL_TOGGLE:
+			switch control.action.index {
+			case 0: state.settings_draft.visuals.hide_cats = !state.settings_draft.visuals.hide_cats
+			case 1: state.settings_draft.visuals.hide_extra_props = !state.settings_draft.visuals.hide_extra_props
 			}
 			return {}
 		case .VISUAL_RESET:
@@ -362,6 +400,35 @@ activate :: proc(state: ^State, control: Control) -> Action {
 		case .ADVANCED_SENSITIVITY: state.settings_draft.advanced_sensitivity = !state.settings_draft.advanced_sensitivity; return {}
 		case .INVERT_MOUSE: state.settings_draft.invert_mouse = !state.settings_draft.invert_mouse; return {}
 		case .FOV: state.settings_draft.fov = fov_validate(control.action.value); return {}
+		case .VIEWMODEL_VALUE:
+			if control.action.index >= 0 && control.action.index < i32(len(Viewmodel_Control)) {
+				state.settings_draft.viewmodel.values[Viewmodel_Control(control.action.index)] = control.action.value
+				state.settings_draft.viewmodel = viewmodel_settings_validate(state.settings_draft.viewmodel)
+			}
+			return {}
+		case .VIEWMODEL_TOGGLE:
+			if control.action.index >= 0 && control.action.index < i32(len(Viewmodel_Toggle)) {
+				toggle := Viewmodel_Toggle(control.action.index)
+				state.settings_draft.viewmodel.toggles[toggle] = !state.settings_draft.viewmodel.toggles[toggle]
+			}
+			return {}
+		case .TRAILS_TOGGLE:
+			if control.action.index == 0 { state.settings_draft.trails.hide_others = !state.settings_draft.trails.hide_others }
+			if control.action.index == 1 { state.settings_draft.trails.hide_yours = !state.settings_draft.trails.hide_yours }
+			return {}
+		case .CROSSHAIR_TYPE: state.settings_draft.crosshair.kind = .PRECISION; return {}
+		case .CROSSHAIR_VALUE:
+			if control.action.index >= 0 && control.action.index < i32(len(Crosshair_Control)) {
+				state.settings_draft.crosshair.values[Crosshair_Control(control.action.index)] = control.action.value
+				state.settings_draft.crosshair = crosshair_settings_validate(state.settings_draft.crosshair)
+			}
+			return {}
+		case .CROSSHAIR_TOGGLE:
+			if control.action.index >= 0 && control.action.index < i32(len(Crosshair_Toggle)) {
+				toggle := Crosshair_Toggle(control.action.index)
+				state.settings_draft.crosshair.toggles[toggle] = !state.settings_draft.crosshair.toggles[toggle]
+			}
+			return {}
 		case .AUDIO_VOLUME: state.settings_draft.audio_volumes[control.action.index] = control.action.value; return {}
 		case .FPS: state.settings_draft.show_fps = !state.settings_draft.show_fps; return {}
 		}
@@ -394,7 +461,7 @@ focus_visible :: proc(control: Control, page: Page) {
 		if page == .HOME { container = "ClassStrip" }
 		if page == .CLASSES { container = "ClassPicker" }
 	}
-	if (page == .SETTINGS || page == .CONTROLS) && (control.slider || control.action.kind == .SETTINGS_DROPDOWN || control.action.kind == .SETTINGS_NUMBER || control.action.kind == .BIND_KEY || control.action.kind == .HUD_TOGGLE || control.action.kind == .VSYNC || control.action.kind == .FPS || control.action.kind == .VISUAL_RESET || control.action.kind == .ADVANCED_SENSITIVITY || control.action.kind == .INVERT_MOUSE) { container = "SettingsPanel" }
+	if (page == .SETTINGS || page == .CONTROLS) && (control.slider || control.number || control.action.kind == .SETTINGS_DROPDOWN || control.action.kind == .SETTINGS_NUMBER || control.action.kind == .BIND_KEY || control.action.kind == .HUD_TOGGLE || control.action.kind == .VSYNC || control.action.kind == .FPS || control.action.kind == .VISUAL_RESET || control.action.kind == .VISUAL_TOGGLE || control.action.kind == .ADVANCED_SENSITIVITY || control.action.kind == .INVERT_MOUSE || control.action.kind == .VIEWMODEL_TOGGLE || control.action.kind == .TRAILS_TOGGLE || control.action.kind == .CROSSHAIR_TOGGLE || control.action.kind == .CROSSHAIR_COLOR) { container = "SettingsPanel" }
 	if control.action.kind == .DISPLAY_MODE || control.action.kind == .MONITOR || control.action.kind == .RESOLUTION_SELECT || control.action.kind == .TEXTURE_FILTER || control.action.kind == .ANISOTROPY { container = "SettingsOptions" }
 	if control.action.kind == .SELECT_SECONDARY { container = "SecondaryPicker" }
 	if len(container) == 0 { return }

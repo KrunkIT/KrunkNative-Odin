@@ -86,7 +86,7 @@ when ODIN_TEST {
 			full_players: [32]menuui.Player
 			for &player, i in full_players { player = {name="Competitive player with a long name", class_name="Run N Gun", team=i32(i%2+1), is_you=i==0} }
 			play_y: f32
-			for scenario in 0..<42 {
+			for scenario in 0..<46 {
 				view.online=true; view.team_pending=false; view.class_pending=false; view.spawn_pending=false; view.join_status=""; view.active=false
 				view.presentation=.COMPETITIVE; view.ranked=false; view.team_selection=false; view.local_practice=false; view.ready=true; view.confirmed_team=1; view.play_reason=""
 				view.teams[0].name="Alpha"; view.teams[1].name="Bravo"
@@ -94,6 +94,8 @@ when ODIN_TEST {
 				for &class in classes { class.available = shared.class_is_in_rotation(class.id) }
 				state.page=.HOME
 				state.settings_dropdown=.NONE; state.binding_capture=0
+				state.color_edit=0; state.color_invalid=false
+				state.number_edit=.NONE; state.number_invalid=false
 				view.visuals = menuui.DEFAULT_VISUAL_SETTINGS
 				view.advanced_sensitivity = false
 				view.players=players[:]; view.teams[0].capacity=4; view.teams[1].capacity=4; view.selection_status=""
@@ -143,10 +145,47 @@ when ODIN_TEST {
 				case 39: state.page=.SETTINGS; state.settings_tab=.GAMEPLAY
 				case 40: state.page=.SETTINGS; state.settings_tab=.VIDEO
 				case 41: state.page=.SETTINGS; state.settings_tab=.MAIN; state.settings_active=false; view.advanced_sensitivity=true
+				case 42: state.page=.SETTINGS; state.settings_tab=.GAMEPLAY
+				case 43,44: state.page=.SETTINGS; state.settings_tab=.GAMEPLAY
+				case 45: state.page=.SETTINGS; state.settings_tab=.GAMEPLAY; state.settings_active=false
 				case 23: view.presentation=.STANDARD; state.page=.LOADOUT; classes[2].name="An exceptionally long selected class name"; classes[2].weapon="An exceptionally long primary weapon name"
 				}
 				page := state.page
 				commands := menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+				if scenario == 42 {
+					for control in state.controls[:state.control_count] { if control.id.id == clay.ID("CrosshairDot", u32(menuui.Crosshair_Toggle.DOT)).id { menuui.focus_visible(control, .SETTINGS) } }
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0 / 60.0)
+					box := clay.GetElementData(clay.ID("CrosshairDot", u32(menuui.Crosshair_Toggle.DOT))).boundingBox
+					panel := clay.GetElementData(clay.ID("SettingsPanel")).boundingBox
+						testing.expect(t, box.y >= panel.y-1 && box.y+box.height <= panel.y+panel.height+1, "the final Gameplay control must remain reachable at every viewport size")
+				}
+				if scenario == 43 || scenario == 44 {
+					target := scenario == 43 ? clay.ID("CrosshairType") : clay.ID("CrosshairColor", 1)
+					for control in state.controls[:state.control_count] { if control.id.id == target.id { menuui.focus_visible(control, .SETTINGS) } }
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0/60.0)
+					if scenario == 43 { menuui.activate(&state, {id=target, action={kind=.SETTINGS_DROPDOWN, index=i32(menuui.Settings_Dropdown.CROSSHAIR_TYPE)}}) }
+					if scenario == 44 {
+						menuui.settings_color_begin(&state, 1)
+						state.settings_draft.crosshair.values[.THICKNESS], state.settings_draft.crosshair.values[.SIZE], state.settings_draft.crosshair.values[.GAP] = 100, 100, -100
+					}
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0/60.0)
+				}
+				if state.page == .SETTINGS && state.settings_tab == .GAMEPLAY {
+					box := clay.GetElementData(clay.ID("CrosshairPreview")).boundingBox
+					sidebar := clay.GetElementData(clay.ID("SettingsSidebar")).boundingBox
+					testing.expect(t, box.width>0 && box.height>0 && box.x>=sidebar.x && box.y>=sidebar.y && box.x+box.width<=sidebar.x+sidebar.width+1 && box.y+box.height<=sidebar.y+sidebar.height+1, "the crosshair preview must stay visible in the sidebar while scrolling")
+				}
+				if scenario == 45 {
+					for control in state.controls[:state.control_count] {
+						if control.id.id != clay.ID("CrosshairGapValue").id { continue }
+						menuui.focus_visible(control, .SETTINGS)
+						menuui.activate(&state, control)
+						break
+					}
+					state.previous = {}
+					menuui.interact(&state, {text="-3.125"}, view)
+					commands = menuui.build(&state, view, {}, ui.width, ui.height, 1.0/60.0)
+				}
 				if scenario == 40 {
 					for control in state.controls[:state.control_count] {
 						if control.id.id == clay.ID("Anisotropy").id { menuui.focus_visible(control, .SETTINGS) }
@@ -185,7 +224,7 @@ when ODIN_TEST {
 								"both binding columns must fit horizontally and remain large enough to click")
 							continue // The full action list scrolls vertically.
 						}
-						if state.settings_dropdown == .NONE && (state.settings_tab == .VISUALS || state.settings_tab == .VIDEO || state.settings_tab == .MAIN) && control.action.kind != .SETTINGS_TAB && control.action.kind != .SETTINGS_SAVE && control.action.kind != .SETTINGS_CANCEL {
+						if state.settings_dropdown == .NONE && (state.settings_tab == .VISUALS || state.settings_tab == .VIDEO || state.settings_tab == .MAIN || state.settings_tab == .GAMEPLAY) && control.action.kind != .SETTINGS_TAB && control.action.kind != .SETTINGS_SAVE && control.action.kind != .SETTINGS_CANCEL {
 							testing.expect(t, box.width > 0 && box.height > 0 && box.x >= overlay.x-1 && box.x+box.width <= overlay.x+overlay.width+1, "scrolling settings must fit horizontally")
 							continue
 						}
@@ -233,6 +272,16 @@ when ODIN_TEST {
 				gl.ClearColor(0.17, 0.17, 0.17, 1)
 				gl.Clear(gl.COLOR_BUFFER_BIT)
 				menu_render_commands(ui, commands)
+				if page == .SETTINGS && state.settings_tab == .GAMEPLAY {
+					box := clay.GetElementData(clay.ID("CrosshairPreview")).boundingBox
+					pixel: [3]u8
+					gl.ReadPixels(i32(box.x+box.width*0.5), size[1]-1-i32(box.y+box.height*0.5), 1, 1, gl.RGB, gl.UNSIGNED_BYTE, &pixel[0])
+					testing.expectf(t, pixel[0]>240 && pixel[1]>240 && pixel[2]>240, "the Precision reticle must actually render in the preview at %v (scenario %d)", size, scenario)
+					if scenario == 44 {
+						gl.ReadPixels(i32(box.x-4), size[1]-1-i32(box.y+box.height*0.5), 1, 1, gl.RGB, gl.UNSIGNED_BYTE, &pixel[0])
+						testing.expect(t, pixel[0]<100 && pixel[1]<100 && pixel[2]<100, "extreme crosshair sizes must stay clipped to the preview")
+					}
+				}
 				labels := [?][2]string{
 					{"Quit", "Quit"}, {"Enter Game", "Play"}, {"Respawn", "Play"}, {"Resume", "Play"}, {"Join", "JoinLink"}, {"Paste", "Paste"},
 					{"Change class", "ChangeClass"}, {"Done", "LoadoutDone"},
@@ -241,6 +290,11 @@ when ODIN_TEST {
 				for command in commands.internalArray[:commands.length] {
 					if command.commandType != .Text { continue }
 					text := command.renderData.text.stringContents
+					if scenario == 45 && string(text.chars[:text.length]) == "-3.125|" {
+						box := clay.GetElementData(clay.ID("CrosshairGapValue")).boundingBox
+						bounds := command.boundingBox
+						testing.expect(t, bounds.x>=box.x && bounds.x+bounds.width<=box.x+box.width && bounds.y>=box.y && bounds.y+bounds.height<=box.y+box.height, "the editable number and caret must fit inside the value field at every resolution")
+					}
 					testing.expect(t, string(text.chars[:text.length]) != "Change secondary", "the lobby must not have a separate secondary button")
 					for label in labels {
 						if string(text.chars[:text.length]) != label[0] { continue }

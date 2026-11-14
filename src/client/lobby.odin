@@ -255,6 +255,7 @@ menu_view :: proc(client: ^Client) -> menuui.View {
 		resolution_index = client.resolution_index, resolution_options = resolution_options,
 		monitor_index = client.monitor_index, monitor_names = monitor_names[:], vsync = client.vsync, bindings = client.bindings, hud = client.hud_settings,
 		visuals = client.visual_settings, quality = client_supported_quality(client.quality_settings, client.max_anisotropy), max_anisotropy = client.max_anisotropy,
+		viewmodel = client.viewmodel_settings, trails = client.trail_settings, crosshair = client.crosshair_settings,
 		audio_volumes = {client.audio_settings.master, client.audio_settings.effects, client.audio_settings.footsteps, client.audio_settings.ui},
 		resolution = fmt.tprintf("%d x %d", window_resolution.width, window_resolution.height),
 		match_status = client.game.move_lock ? "Waiting for match to start" : "Match in progress",
@@ -302,7 +303,7 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: pr
 		audio_play_effect(client.audio, "tick_0", .UI, 0.6)
 	}
 	switch action.kind {
-	case .NONE, .EDIT_INVITE, .INSPECT_CLASS, .SETTINGS_TAB, .SETTINGS_CANCEL, .BIND_KEY, .HUD_TOGGLE, .VSYNC, .MONITOR, .SETTINGS_DROPDOWN, .RESOLUTION_SELECT, .VISUAL_VALUE, .VISUAL_RESET, .TEXTURE_FILTER, .ANISOTROPY, .SETTINGS_NUMBER, .FOV, .ADVANCED_SENSITIVITY, .INVERT_MOUSE:
+	case .NONE, .EDIT_INVITE, .INSPECT_CLASS, .SETTINGS_TAB, .SETTINGS_CANCEL, .BIND_KEY, .HUD_TOGGLE, .VSYNC, .MONITOR, .SETTINGS_DROPDOWN, .RESOLUTION_SELECT, .VISUAL_VALUE, .VISUAL_TOGGLE, .VISUAL_RESET, .TEXTURE_FILTER, .ANISOTROPY, .SETTINGS_NUMBER, .FOV, .ADVANCED_SENSITIVITY, .INVERT_MOUSE, .VIEWMODEL_VALUE, .VIEWMODEL_TOGGLE, .TRAILS_TOGGLE, .CROSSHAIR_TYPE, .CROSSHAIR_VALUE, .CROSSHAIR_TOGGLE, .CROSSHAIR_COLOR:
 	case .SETTINGS_SAVE:
 		values := client.menu.settings_draft
 		mode := Display_Mode(clamp(values.display_mode, 0, 2))
@@ -321,6 +322,10 @@ menu_apply_action :: proc(client: ^Client, action: menuui.Action, send_class: pr
 		client.show_fps = values.show_fps
 		client.bindings, client.hud_settings = values.bindings, values.hud
 		client.visual_settings, client.quality_settings = menuui.visual_settings_validate(values.visuals), menuui.quality_settings_validate(values.quality)
+		client.viewmodel_settings = menuui.viewmodel_settings_validate(values.viewmodel)
+		client.trail_settings = values.trails
+		client.crosshair_settings = menuui.crosshair_settings_validate(values.crosshair)
+		client.aim_toggled = false
 		client.last_swap_key = 0
 		if client.vsync != values.vsync {
 			client.vsync = values.vsync

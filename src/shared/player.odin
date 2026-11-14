@@ -121,6 +121,7 @@ player_spawn :: proc(player: ^Player, class_index: i32 = 0, secondary_id: i32 = 
 	player.spread_plus = 0
 	player.projectile_shot_seq = 0
 	player.recoil = {}
+	player.inspecting = false
 	player.recoil_force = 0.0
 	player.recoil_anim = 0.0
 	player.recoil_anim_y = 0.0

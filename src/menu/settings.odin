@@ -32,6 +32,7 @@ settings_window :: proc(state: ^State, view: View) {
 					}
 				}
 				spacer()
+				if state.settings_tab == .GAMEPLAY { settings_crosshair_preview(state) }
 				if clay.UI()({layout = {sizing = {width = clay.SizingGrow()}, padding = clay.PaddingAll(u16(24*s))}}) { text("KRODIN", 16, s, SETTINGS_MUTED) }
 			}
 			if clay.UI(clay.ID("SettingsContent"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
@@ -60,9 +61,9 @@ settings_window :: proc(state: ^State, view: View) {
 					case .VISUALS:
 						settings_visuals(state)
 					case .GAMEPLAY:
-						settings_section("Camera", s)
-						settings_slider(state, "Field of view", "FieldOfView", values.fov, MIN_FOV, MAX_FOV, {kind = .FOV}, step = 1)
-						settings_note("Vertical field of view in degrees. Changing FOV preserves your hipfire cm/360. Weapon field of view is separate.", s)
+						settings_viewmodel(state)
+						settings_trails(state)
+						settings_crosshair(state)
 					case .AUDIO:
 						settings_section("Volume", s)
 						labels := [4]string{"Master volume", "Effects volume", "Footsteps volume", "UI volume"}
@@ -88,7 +89,7 @@ settings_window :: proc(state: ^State, view: View) {
 		}) {
 			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(184*s)}}}) { settings_button(state, "Cancel", "SettingsCancel", {kind = .SETTINGS_CANCEL}) }
 			spacer()
-			text("Save keeps your changes", 16, s, SETTINGS_MUTED)
+			text(settings_number_hint(state), 16, s, state.number_invalid ? clay.Color{255,100,100,255} : SETTINGS_MUTED)
 			spacer()
 			if clay.UI()({layout = {sizing = {width = clay.SizingFixed(184*s)}}}) { settings_button(state, "Save", "SettingsSave", {kind = .SETTINGS_SAVE}, selected = true) }
 		}
@@ -119,12 +120,45 @@ settings_scrollbar :: proc(state: ^State) {
 	thumb_height := max(32*s, height*data.scrollContainerDimensions.height/data.contentDimensions.height)
 	progress := clamp(-data.scrollPosition[1]/(data.contentDimensions.height-data.scrollContainerDimensions.height), 0, 1)
 	if clay.UI(clay.ID("SettingsScrollTrack"))({
-		layout = {sizing = {width = clay.SizingFixed(5*s), height = clay.SizingFixed(height)}, layoutDirection = .TopToBottom}, backgroundColor = SETTINGS_LINE,
+		layout = {sizing = {width = clay.SizingFixed(max(14,16*s)), height = clay.SizingFixed(height)}, layoutDirection = .TopToBottom}, backgroundColor = SETTINGS_LINE, cornerRadius = clay.CornerRadiusAll(4*s),
 		floating = {attachTo = .ElementWithId, parentId = clay.ID("SettingsPanel").id, zIndex = 11, pointerCaptureMode = .Passthrough, attachment = {element = .RightTop, parent = .RightTop}, offset = {-8*s, 12*s}},
 	}) {
 		if clay.UI()({layout = {sizing = {height = clay.SizingFixed(progress*(height-thumb_height))}}}) {}
-		if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(thumb_height)}}, backgroundColor = SETTINGS_MUTED, cornerRadius = clay.CornerRadiusAll(2*s)}) {}
+		thumb_color := state.scrollbar_dragging ? SETTINGS_ORANGE : clay.PointerOver(clay.ID("SettingsScrollThumb")) ? WHITE : SETTINGS_MUTED
+		if clay.UI(clay.ID("SettingsScrollThumb"))({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(thumb_height)}}, backgroundColor = thumb_color, cornerRadius = clay.CornerRadiusAll(4*s)}) {}
 	}
+}
+
+settings_scrollbar_interact :: proc(state: ^State, input: Input) -> bool {
+	if (state.page != .SETTINGS && state.page != .CONTROLS) || state.settings_dropdown != .NONE || input.escape {
+		state.scrollbar_dragging = false
+		return false
+	}
+	data := clay.GetScrollContainerData(clay.ID("SettingsPanel"))
+	track := clay.GetElementData(clay.ID("SettingsScrollTrack"))
+	thumb := clay.GetElementData(clay.ID("SettingsScrollThumb"))
+	if !data.found || !track.found || !thumb.found {
+		state.scrollbar_dragging = false
+		return false
+	}
+	span := data.contentDimensions.height-data.scrollContainerDimensions.height
+	travel := track.boundingBox.height-thumb.boundingBox.height
+	if span <= 0 || travel <= 0 { state.scrollbar_dragging = false; return false }
+	if input.down && !state.previous.down && clay.PointerOver(clay.ID("SettingsScrollTrack")) && contains(track.boundingBox, input.pointer) {
+		state.scrollbar_dragging = true
+		// Grabbing the thumb preserves its position. Clicking the empty track
+		// centers it on the pointer, then lets the same press drag it further.
+		state.scrollbar_grab = contains(thumb.boundingBox, input.pointer) ? input.pointer[1]-thumb.boundingBox.y : thumb.boundingBox.height/2
+		state.pressed = 0
+	}
+	if !state.scrollbar_dragging { return false }
+	if !input.down {
+		state.scrollbar_dragging = false
+		return true // Consume the release, even outside the scrollbar.
+	}
+	progress := clamp((input.pointer[1]-track.boundingBox.y-min(state.scrollbar_grab,thumb.boundingBox.height))/travel, 0, 1)
+	data.scrollPosition[1] = -progress*span
+	return true
 }
 
 settings_section :: proc(label: string, s: f32) {
@@ -216,8 +250,18 @@ settings_slider :: proc(state: ^State, label, name: string, value, minimum, maxi
 			}
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow(), height = clay.SizingFixed(4*s)}}, backgroundColor = {137, 133, 146, 255}}) {}
 		}
-		if clay.UI(clay.ID(fmt.tprintf("%sValue", name)))({layout = {sizing = {width = clay.SizingFixed(88*s), height = clay.SizingFixed(44*s)}, childAlignment = {x = .Center, y = .Center}}, backgroundColor = {231, 229, 235, 255}, cornerRadius = clay.CornerRadiusAll(4*s)}) {
-			text(action.kind == .AUDIO_VOLUME ? fmt.tprintf("%d%%", i32(value*100+0.5)) : action.kind == .FOV ? fmt.tprintf("%.0f", value) : fmt.tprintf("%.2f", value), 20, s, SETTINGS_DARK)
+		value_id := clay.ID(fmt.tprintf("%sValue", name))
+		register(state, {id=value_id, action=action, enabled=true, number=true, slider_min=minimum, slider_max=maximum})
+		editing := state.number_edit == .SLIDER && state.number_control.id.id == value_id.id
+		if clay.UI(value_id)({
+			layout = {sizing = {width = clay.SizingFixed(128*s), height = clay.SizingFixed(44*s)}, padding={left=u16(8*s), right=u16(8*s)}, childAlignment = {x = .Center, y = .Center}},
+			backgroundColor = editing && state.number_replace ? SETTINGS_ORANGE : clay.Color{231, 229, 235, 255}, cornerRadius = clay.CornerRadiusAll(4*s),
+			border={color=editing && state.number_invalid ? clay.Color{255,70,70,255} : state.focus == value_id.id ? WHITE : SETTINGS_LINE, width=clay.BorderOutside(editing || state.focus == value_id.id ? 2 : 0)},
+			clip={horizontal=editing, childOffset=clay.GetScrollOffset()},
+		}) {
+			label := action.kind == .AUDIO_VOLUME ? fmt.tprintf("%g%%", value*100) : fmt.tprintf("%g", value)
+			if editing { label = fmt.tprintf("%s|", string(state.number_buffer[:state.number_length])) }
+			text(label, 20, s, SETTINGS_DARK)
 		}
 	}
 }

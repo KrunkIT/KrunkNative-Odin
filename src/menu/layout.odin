@@ -47,9 +47,11 @@ build :: proc(state: ^State, view: View, input: Input, width, height, delta: f32
 	prepare_settings(state, view)
 	clay.SetLayoutDimensions({width, height})
 	clay.SetPointerState(input.pointer, input.down)
-	clay.UpdateScrollContainers(false, input.scroll, min(delta, 0.1))
-	state.control_count = 0
 	state.scale = max(0.4, min(width / 1600, height / 900))
+	// Clay advances ten pixels per wheel unit. Use 120 logical pixels per
+	// notch so long settings lists move about two rows, independent of UI scale.
+	clay.UpdateScrollContainers(false, input.scroll * (12*state.scale), min(delta, 0.1))
+	state.control_count = 0
 	s := state.scale
 	gap: f32 = view.presentation == .COMPETITIVE ? 16 : 24
 	clay.BeginLayout()

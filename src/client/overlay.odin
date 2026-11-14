@@ -303,13 +303,10 @@ overlay_render :: proc(client: ^Client, delta: f32) {
 		}
 	}
 
-	// The scope image supplies its own centered reticle.
-	if !scoped {
-		color := shared.Vec4{1.0, 1.0, 0.0, 1.0}
-
-		ui_fill_rect(client.ui, color, client.ui.width * 0.5 - 1.0 * client.ui.scale, client.ui.height * 0.5 - 5.0 * client.ui.scale, 2.0 * client.ui.scale, 10.0 * client.ui.scale)
-		ui_fill_rect(client.ui, color, client.ui.width * 0.5 - 5.0 * client.ui.scale, client.ui.height * 0.5 - 1.0 * client.ui.scale, 10.0 * client.ui.scale, 2.0 * client.ui.scale)
-	}
+	// Normally fades out for ADS, leaving the scope's own reticle. Always show
+	// and custom opacity can explicitly keep Precision visible over the scope.
+	crosshair := client_crosshair_values(client)
+	crosshair_render(client.ui, crosshair, client.ui.width*0.5, client.ui.height*0.5, client.ui.scale, client_crosshair_opacity(client, crosshair))
 
 	if color, visible := krunker_client_hit_color(client, glfw.GetTime()); visible {
 		// A compact confirmation ring. Damage is still owned by the server.
